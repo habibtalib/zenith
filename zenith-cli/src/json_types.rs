@@ -27,7 +27,7 @@ impl From<&zenith_core::Diagnostic> for DiagnosticJson {
     }
 }
 
-fn severity_str(s: &zenith_core::Severity) -> &'static str {
+pub(crate) fn severity_str(s: &zenith_core::Severity) -> &'static str {
     match s {
         zenith_core::Severity::Error => "error",
         zenith_core::Severity::Warning => "warning",
@@ -72,4 +72,14 @@ pub struct TokensOutput {
 pub struct RenderOutput {
     pub schema: &'static str,
     pub diagnostics: Vec<DiagnosticJson>,
+}
+
+/// Top-level JSON envelope for `tx`.
+#[derive(Debug, Serialize)]
+pub struct TxOutputJson {
+    pub schema: &'static str,
+    pub status: String,
+    pub affected: Vec<String>,
+    pub diagnostics: Vec<DiagnosticJson>,
+    pub changed: bool,
 }

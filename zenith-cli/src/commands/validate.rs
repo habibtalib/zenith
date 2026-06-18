@@ -6,7 +6,7 @@
 use zenith_core::{KdlAdapter, KdlSource, validate};
 
 use crate::commands::serialize_pretty;
-use crate::json_types::{DiagnosticJson, ValidateOutput};
+use crate::json_types::{self, DiagnosticJson, ValidateOutput};
 
 // ── Result type ───────────────────────────────────────────────────────────────
 
@@ -87,11 +87,7 @@ fn format_human(diagnostics: &[zenith_core::Diagnostic]) -> String {
     }
     let mut out = String::new();
     for d in diagnostics {
-        let sev = match d.severity {
-            zenith_core::Severity::Error => "error",
-            zenith_core::Severity::Warning => "warning",
-            zenith_core::Severity::Advisory => "advisory",
-        };
+        let sev = json_types::severity_str(&d.severity);
         let subject = d
             .subject_id
             .as_deref()

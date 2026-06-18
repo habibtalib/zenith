@@ -8,6 +8,7 @@
 pub mod fmt;
 pub mod render;
 pub mod tokens;
+pub mod tx;
 pub mod validate;
 
 // ── Shared helpers ────────────────────────────────────────────────────────────

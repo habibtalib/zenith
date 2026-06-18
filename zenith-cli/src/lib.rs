@@ -161,6 +161,53 @@ pub fn run() -> ExitCode {
 
             ExitCode::SUCCESS
         }
+
+        Command::Tx(args) => {
+            // Read document source.
+            let doc_src = match read_file(&args.path) {
+                Ok(s) => s,
+                Err(msg) => {
+                    eprintln!("{}", msg);
+                    return ExitCode::from(2);
+                }
+            };
+
+            // Read transaction JSON.
+            let tx_json = match read_file(&args.tx_file) {
+                Ok(s) => s,
+                Err(msg) => {
+                    eprintln!("{}", msg);
+                    return ExitCode::from(2);
+                }
+            };
+
+            // Run the pure transaction logic.
+            let outcome = match commands::tx::run(&doc_src, &tx_json) {
+                Ok(o) => o,
+                Err(e) => {
+                    eprintln!("{}", e.message);
+                    return ExitCode::from(e.exit_code);
+                }
+            };
+
+            // Print output.
+            if args.json {
+                println!("{}", outcome.json_str);
+            } else {
+                println!("{}", outcome.human);
+            }
+
+            // Apply: persist source_after if requested and not rejected.
+            if args.apply
+                && outcome.exit_code != 1
+                && let Err(e) = std::fs::write(&args.path, outcome.result.source_after.as_bytes())
+            {
+                eprintln!("error writing '{}': {}", args.path.display(), e);
+                return ExitCode::from(2);
+            }
+
+            ExitCode::from(outcome.exit_code)
+        }
     }
 }
 

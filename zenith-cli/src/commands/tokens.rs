@@ -6,7 +6,7 @@
 use zenith_core::{KdlAdapter, KdlSource, ResolvedValue, resolve_tokens};
 
 use crate::commands::serialize_pretty;
-use crate::json_types::{DiagnosticJson, TokenEntry, TokensOutput};
+use crate::json_types::{self, DiagnosticJson, TokenEntry, TokensOutput};
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
@@ -108,11 +108,7 @@ fn format_human(
     if !diagnostics.is_empty() {
         out.push_str("\ndiagnostics:\n");
         for d in diagnostics {
-            let sev = match d.severity {
-                zenith_core::Severity::Error => "error",
-                zenith_core::Severity::Warning => "warning",
-                zenith_core::Severity::Advisory => "advisory",
-            };
+            let sev = json_types::severity_str(&d.severity);
             out.push_str(&format!("  {}[{}]: {}\n", sev, d.code, d.message));
         }
     }

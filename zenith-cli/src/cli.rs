@@ -28,6 +28,9 @@ pub enum Command {
 
     /// Compile and render a `.zen` document.
     Render(RenderArgs),
+
+    /// Apply a transaction to a `.zen` document (dry-run by default).
+    Tx(TxArgs),
 }
 
 /// Arguments for `zenith validate`.
@@ -59,6 +62,24 @@ pub struct TokensArgs {
     pub path: PathBuf,
 
     /// Emit machine-readable JSON instead of a human-readable table.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `zenith tx`.
+#[derive(Debug, Args)]
+pub struct TxArgs {
+    /// Path to the `.zen` document.
+    pub path: PathBuf,
+
+    /// Path to the transaction JSON file.
+    pub tx_file: PathBuf,
+
+    /// Apply the result back to disk (dry-run by default).
+    #[arg(long)]
+    pub apply: bool,
+
+    /// Emit machine-readable JSON instead of a human-readable summary.
     #[arg(long)]
     pub json: bool,
 }
