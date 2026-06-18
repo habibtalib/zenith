@@ -1,6 +1,7 @@
 //! Top-level document AST types.
 
 use super::Span;
+use super::asset::AssetBlock;
 use super::node::Node;
 use super::style::StyleBlock;
 use super::token::TokenBlock;
@@ -47,6 +48,8 @@ pub struct Document {
     /// Must be `1` in v0.
     pub version: u32,
     pub project: Option<Project>,
+    /// Asset declarations; empty when the `assets` block is absent.
+    pub assets: AssetBlock,
     pub tokens: TokenBlock,
     pub styles: StyleBlock,
     pub body: DocumentBody,

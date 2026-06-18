@@ -23,6 +23,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use crate::ast::asset::{AssetDecl, AssetKind};
 use crate::ast::document::Document;
 use crate::ast::node::Node;
 use crate::ast::token::TokenType;
@@ -75,6 +76,12 @@ pub fn validate(doc: &Document) -> ValidationReport {
     // ── Style IDs ─────────────────────────────────────────────────────────
     for style in &doc.styles.styles {
         register_id(&style.id, &mut seen_ids, &mut diagnostics);
+    }
+
+    // ── Asset IDs and per-declaration checks ──────────────────────────────
+    for decl in &doc.assets.assets {
+        register_id(&decl.id, &mut seen_ids, &mut diagnostics);
+        validate_asset_decl(decl, &mut diagnostics);
     }
 
     // ── Document body id ──────────────────────────────────────────────────
@@ -602,6 +609,76 @@ fn register_id(id: &str, seen: &mut HashSet<String>, diagnostics: &mut Vec<Diagn
     }
 }
 
+/// Validate a single [`AssetDecl`] beyond ID uniqueness:
+/// - unknown kind → `asset.invalid_kind` (Error)
+/// - unsafe src path → `asset.invalid_src` (Error)
+/// - unknown properties → `asset.unknown_property` (Warning)
+fn validate_asset_decl(decl: &AssetDecl, diagnostics: &mut Vec<Diagnostic>) {
+    // ── Kind check ────────────────────────────────────────────────────────
+    if let AssetKind::Unknown(unknown_kind) = &decl.kind {
+        diagnostics.push(Diagnostic::error(
+            "asset.invalid_kind",
+            format!(
+                "asset '{}': unknown kind '{}'; \
+                 recognized kinds are: image, svg, font",
+                decl.id, unknown_kind
+            ),
+            decl.source_span,
+            Some(decl.id.clone()),
+        ));
+    }
+
+    // ── Src sanity check ──────────────────────────────────────────────────
+    // Reject: absolute paths (starts with `/` or Windows drive `X:\`),
+    // parent-traversal segments (`..`), and URLs (contain `://`).
+    let src = &decl.src;
+    let is_absolute_unix = src.starts_with('/');
+    // Windows drive: one ASCII letter followed by `:\` or `:/`
+    let is_absolute_windows = src.len() >= 3
+        && src.as_bytes()[0].is_ascii_alphabetic()
+        && src.as_bytes()[1] == b':'
+        && (src.as_bytes()[2] == b'\\' || src.as_bytes()[2] == b'/');
+    let is_url = src.contains("://");
+    // Parent traversal: segment `..` in any position.
+    let has_traversal = src == ".."
+        || src.starts_with("../")
+        || src.starts_with("..\\")
+        || src.contains("/../")
+        || src.contains("/..\\")
+        || src.contains("\\..\\")
+        || src.contains("\\../")
+        || src.ends_with("/..")
+        || src.ends_with("\\..");
+
+    if is_absolute_unix || is_absolute_windows || is_url || has_traversal {
+        diagnostics.push(Diagnostic::error(
+            "asset.invalid_src",
+            format!(
+                "asset '{}': src '{}' is not a safe relative path; \
+                 absolute paths, parent-traversal segments ('..'), \
+                 and URLs are not allowed",
+                decl.id, src
+            ),
+            decl.source_span,
+            Some(decl.id.clone()),
+        ));
+    }
+
+    // ── Unknown properties ────────────────────────────────────────────────
+    for prop_name in decl.unknown_props.keys() {
+        diagnostics.push(Diagnostic::warning(
+            "asset.unknown_property",
+            format!(
+                "asset '{}': unknown property '{}' (version-relative; \
+                 may be valid in a later schema version)",
+                decl.id, prop_name
+            ),
+            decl.source_span,
+            Some(decl.id.clone()),
+        ));
+    }
+}
+
 fn visual_expect_name(e: VisualExpect) -> &'static str {
     match e {
         VisualExpect::Color => "color",
@@ -628,6 +705,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+    use crate::ast::asset::{AssetBlock, AssetDecl, AssetKind};
     use crate::ast::document::{Document, DocumentBody, Page};
     use crate::ast::node::{
         EllipseNode, FrameNode, GroupNode, LineNode, Node, RectNode, TextNode, UnknownNode,
@@ -765,6 +843,7 @@ mod tests {
         Document {
             version: 1,
             project: None,
+            assets: AssetBlock::default(),
             tokens: TokenBlock {
                 format: "zenith-token-v1".to_owned(),
                 tokens,
@@ -1788,5 +1867,198 @@ mod tests {
             codes(&report)
         );
         assert!(report.has_errors());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Asset validation tests
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Build a Document that has an AssetBlock but no content nodes.
+    fn doc_with_assets(assets: Vec<AssetDecl>) -> Document {
+        Document {
+            version: 1,
+            project: None,
+            assets: AssetBlock {
+                assets,
+                source_span: None,
+            },
+            tokens: TokenBlock {
+                format: "zenith-token-v1".to_owned(),
+                tokens: vec![],
+            },
+            styles: StyleBlock::default(),
+            body: DocumentBody {
+                id: "doc.asset-test".to_owned(),
+                title: None,
+                pages: vec![],
+            },
+        }
+    }
+
+    fn image_asset(id: &str, src: &str) -> AssetDecl {
+        AssetDecl {
+            id: id.to_owned(),
+            kind: AssetKind::Image,
+            src: src.to_owned(),
+            sha256: None,
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        }
+    }
+
+    // ── asset.clean: a well-formed assets block produces no diagnostics ───
+
+    #[test]
+    fn asset_clean_block_no_diagnostics() {
+        let doc = doc_with_assets(vec![
+            AssetDecl {
+                id: "asset.logo".to_owned(),
+                kind: AssetKind::Svg,
+                src: "assets/logo.svg".to_owned(),
+                sha256: Some("deadbeef".to_owned()),
+                source_span: None,
+                unknown_props: BTreeMap::new(),
+            },
+            image_asset("asset.hero", "assets/hero.png"),
+        ]);
+        let report = validate(&doc);
+        assert!(
+            report.diagnostics.is_empty(),
+            "expected no diagnostics for clean asset block, got: {:?}",
+            codes(&report)
+        );
+        assert!(!report.has_errors());
+    }
+
+    // ── asset.duplicate_id: duplicate asset id → id.duplicate ────────────
+
+    #[test]
+    fn asset_duplicate_id_produces_id_duplicate() {
+        let doc = doc_with_assets(vec![
+            image_asset("asset.dup", "a.png"),
+            image_asset("asset.dup", "b.png"),
+        ]);
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "id.duplicate"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── asset.cross_type_duplicate: asset id clashes with token id ────────
+
+    #[test]
+    fn asset_id_clashes_with_token_id_produces_id_duplicate() {
+        let mut doc = doc_with(vec![color_token("shared.id")], vec![]);
+        doc.assets = AssetBlock {
+            assets: vec![image_asset("shared.id", "img.png")],
+            source_span: None,
+        };
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "id.duplicate"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── asset.invalid_kind: unknown kind → asset.invalid_kind (Error) ─────
+
+    #[test]
+    fn asset_unknown_kind_produces_invalid_kind() {
+        let doc = doc_with_assets(vec![AssetDecl {
+            id: "asset.movie".to_owned(),
+            kind: AssetKind::Unknown("movie".to_owned()),
+            src: "clips/intro.mp4".to_owned(),
+            sha256: None,
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        }]);
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "asset.invalid_kind"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── asset.invalid_src: absolute path → asset.invalid_src (Error) ──────
+
+    #[test]
+    fn asset_absolute_src_unix_produces_invalid_src() {
+        let doc = doc_with_assets(vec![image_asset("asset.abs", "/etc/x.png")]);
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "asset.invalid_src"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── asset.invalid_src: parent traversal → asset.invalid_src (Error) ───
+
+    #[test]
+    fn asset_parent_traversal_src_produces_invalid_src() {
+        let doc = doc_with_assets(vec![image_asset("asset.trav", "../x.png")]);
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "asset.invalid_src"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── asset.invalid_src: URL → asset.invalid_src (Error) ────────────────
+
+    #[test]
+    fn asset_url_src_produces_invalid_src() {
+        let doc = doc_with_assets(vec![image_asset("asset.url", "https://example.com/x.png")]);
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "asset.invalid_src"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── asset.unknown_property: unknown prop → asset.unknown_property ─────
+
+    #[test]
+    fn asset_unknown_property_produces_warning() {
+        let mut unknown_props = BTreeMap::new();
+        unknown_props.insert(
+            "dpi".to_owned(),
+            crate::ast::node::UnknownProperty {
+                value: crate::ast::node::UnknownValue::Integer(96),
+            },
+        );
+        let doc = doc_with_assets(vec![AssetDecl {
+            id: "asset.hi-res".to_owned(),
+            kind: AssetKind::Image,
+            src: "img/hi.png".to_owned(),
+            sha256: None,
+            source_span: None,
+            unknown_props,
+        }]);
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "asset.unknown_property"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        let diag = report
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "asset.unknown_property")
+            .expect("should exist");
+        assert_eq!(diag.severity, Severity::Warning);
+        assert!(!report.has_errors());
     }
 }

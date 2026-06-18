@@ -6,7 +6,7 @@
 //! Rules (from doc 08 and doc 16):
 //! - Two-space indentation per nesting level.
 //! - Root `zenith` node at column 0.
-//! - Child order under `zenith`: project, tokens, styles, document.
+//! - Child order under `zenith`: project, assets, tokens, styles, document.
 //! - Structural containers (`tokens`, `styles`, `document`, `page`) always emit
 //!   a brace block, even when empty.
 //! - Leaf nodes (`project`, a `rect` with no children) emit a single line.
@@ -22,9 +22,9 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    Dimension, Document, DocumentBody, EllipseNode, FrameNode, GroupNode, LineNode, Node, Page,
-    Project, PropertyValue, RectNode, TextNode, TextSpan, Token, TokenBlock, TokenLiteral,
-    TokenType, TokenValue, Unit, UnknownValue,
+    AssetBlock, AssetDecl, Dimension, Document, DocumentBody, EllipseNode, FrameNode, GroupNode,
+    LineNode, Node, Page, Project, PropertyValue, RectNode, TextNode, TextSpan, Token, TokenBlock,
+    TokenLiteral, TokenType, TokenValue, Unit, UnknownValue,
 };
 use crate::error::FormatError;
 
@@ -181,10 +181,11 @@ fn write_document(doc: &Document, out: &mut String) {
     let _ = write!(out, "{}", doc.version);
     out.push_str(" {\n");
 
-    // Child order: project, tokens, styles, document.
+    // Child order: project, assets, tokens, styles, document.
     if let Some(proj) = &doc.project {
         write_project(proj, out, 1);
     }
+    write_asset_block(&doc.assets, out, 1);
     write_token_block(&doc.tokens, out, 1);
     write_style_block(&doc.styles.styles, out, 1);
     write_document_body(&doc.body, out, 1);
@@ -218,6 +219,60 @@ fn write_project(proj: &Project, out: &mut String, depth: usize) {
     } else {
         out.push('\n');
     }
+}
+
+// ---------------------------------------------------------------------------
+// Assets
+// ---------------------------------------------------------------------------
+
+/// Emit the `assets { … }` block.
+///
+/// Mirrors `write_token_block`: always emits the block (even when empty),
+/// consistent with how `tokens` and `styles` always emit their brace blocks.
+fn write_asset_block(block: &AssetBlock, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("assets {\n");
+
+    for decl in &block.assets {
+        write_asset_decl(decl, out, depth + 1);
+    }
+
+    indent(out, depth);
+    out.push_str("}\n");
+}
+
+fn write_asset_decl(decl: &AssetDecl, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("asset");
+
+    // Canonical property order: id, kind, src, sha256, then unknown_props (sorted).
+    out.push_str(" id=\"");
+    out.push_str(&decl.id);
+    out.push('"');
+
+    out.push_str(" kind=\"");
+    out.push_str(decl.kind.kind_str());
+    out.push('"');
+
+    out.push_str(" src=\"");
+    out.push_str(&decl.src);
+    out.push('"');
+
+    if let Some(sha256) = &decl.sha256 {
+        out.push_str(" sha256=\"");
+        out.push_str(sha256);
+        out.push('"');
+    }
+
+    // Unknown properties in sorted key order (BTreeMap iteration is sorted).
+    for (key, prop) in &decl.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_value(&prop.value));
+    }
+
+    out.push('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -700,9 +755,16 @@ mod tests {
 
     /// Strip all source spans from a Document to enable span-agnostic equality.
     fn strip_spans(mut doc: crate::ast::Document) -> crate::ast::Document {
+        // Assets
+        doc.assets.source_span = None;
+        for decl in &mut doc.assets.assets {
+            decl.source_span = None;
+        }
+        // Tokens
         for token in &mut doc.tokens.tokens {
             token.source_span = None;
         }
+        // Pages and nodes
         for page in &mut doc.body.pages {
             page.source_span = None;
             for node in &mut page.children {
@@ -977,5 +1039,126 @@ mod tests {
             text.contains("future-prop="),
             "unknown property `future-prop` must survive format; got:\n{text}"
         );
+    }
+
+    // ── Asset block formatting tests ──────────────────────────────────────
+
+    /// A `.zen` document with an assets block containing two declarations.
+    const WITH_ASSETS: &str = r##"zenith version=1 {
+  project id="proj.assets" name="Assets Test"
+  assets {
+    asset id="asset.logo" kind="svg" src="assets/logo.svg" sha256="deadbeef"
+    asset id="asset.hero" kind="image" src="assets/hero.png"
+  }
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.assets" {
+    page id="page.one" w=(px)640 h=(px)360 {
+    }
+  }
+}
+"##;
+
+    /// Assets block parses correctly: 2 assets, fields correct.
+    #[test]
+    fn test_assets_parse_fields() {
+        let adapter = KdlAdapter;
+        let doc = adapter
+            .parse(WITH_ASSETS.as_bytes())
+            .expect("parse must succeed");
+
+        let assets = &doc.assets.assets;
+        assert_eq!(assets.len(), 2, "expected 2 asset declarations");
+
+        let logo = &assets[0];
+        assert_eq!(logo.id, "asset.logo");
+        assert_eq!(logo.kind, crate::ast::AssetKind::Svg);
+        assert_eq!(logo.src, "assets/logo.svg");
+        assert_eq!(logo.sha256.as_deref(), Some("deadbeef"));
+
+        let hero = &assets[1];
+        assert_eq!(hero.id, "asset.hero");
+        assert_eq!(hero.kind, crate::ast::AssetKind::Image);
+        assert_eq!(hero.src, "assets/hero.png");
+        assert!(hero.sha256.is_none(), "sha256 should be None when absent");
+    }
+
+    /// A document with NO assets block → empty AssetBlock (not an error).
+    #[test]
+    fn test_absent_assets_block_is_empty() {
+        let adapter = KdlAdapter;
+        let doc = adapter
+            .parse(MINIMAL.as_bytes())
+            .expect("parse must succeed");
+        assert!(
+            doc.assets.assets.is_empty(),
+            "absent assets block must yield an empty AssetBlock"
+        );
+    }
+
+    /// Assets block round-trip: parse → format → parse yields same fields.
+    #[test]
+    fn test_assets_round_trip_ast_equality() {
+        let adapter = KdlAdapter;
+        let doc_orig = adapter
+            .parse(WITH_ASSETS.as_bytes())
+            .expect("original parse");
+        let formatted = format_document(&doc_orig).expect("format");
+        let doc2 = adapter.parse(&formatted).expect("re-parse after format");
+
+        // Compare assets (spans may differ; compare fields directly).
+        let a1 = &doc_orig.assets.assets;
+        let a2 = &doc2.assets.assets;
+        assert_eq!(a1.len(), a2.len(), "asset count must survive round-trip");
+        for (orig, reparsed) in a1.iter().zip(a2.iter()) {
+            assert_eq!(orig.id, reparsed.id);
+            assert_eq!(orig.kind, reparsed.kind);
+            assert_eq!(orig.src, reparsed.src);
+            assert_eq!(orig.sha256, reparsed.sha256);
+        }
+    }
+
+    /// Format idempotency: format twice → identical bytes.
+    #[test]
+    fn test_assets_format_idempotency() {
+        let adapter = KdlAdapter;
+        let doc = adapter
+            .parse(WITH_ASSETS.as_bytes())
+            .expect("parse must succeed");
+        let s1 = format_document(&doc).expect("format 1");
+        let doc2 = adapter.parse(&s1).expect("parse after first format");
+        let s2 = format_document(&doc2).expect("format 2");
+        assert_eq!(
+            String::from_utf8(s1).unwrap(),
+            String::from_utf8(s2).unwrap(),
+            "assets format must be idempotent"
+        );
+    }
+
+    /// Canonical property order: id, kind, src, sha256 in that order.
+    #[test]
+    fn test_assets_canonical_property_order() {
+        let adapter = KdlAdapter;
+        let doc = adapter
+            .parse(WITH_ASSETS.as_bytes())
+            .expect("parse must succeed");
+        let out = format_document(&doc).expect("format");
+        let text = String::from_utf8(out).unwrap();
+
+        let logo_line = text
+            .lines()
+            .find(|l| l.trim_start().starts_with("asset") && l.contains("asset.logo"))
+            .expect("must find logo asset line");
+
+        let pos_id = logo_line.find("id=").expect("id= must be present");
+        let pos_kind = logo_line.find("kind=").expect("kind= must be present");
+        let pos_src = logo_line.find("src=").expect("src= must be present");
+        let pos_sha256 = logo_line.find("sha256=").expect("sha256= must be present");
+
+        assert!(pos_id < pos_kind, "id must come before kind");
+        assert!(pos_kind < pos_src, "kind must come before src");
+        assert!(pos_src < pos_sha256, "src must come before sha256");
     }
 }

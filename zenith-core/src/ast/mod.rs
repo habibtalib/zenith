@@ -1,5 +1,6 @@
 //! AST type re-exports for zenith-core.
 
+pub mod asset;
 pub mod document;
 pub mod node;
 pub mod span;
@@ -8,6 +9,7 @@ pub mod token;
 pub mod value;
 
 // Flat re-exports used throughout the crate.
+pub use asset::{AssetBlock, AssetDecl, AssetKind};
 pub use document::{Document, DocumentBody, Page, Project};
 pub use node::{
     EllipseNode, FrameNode, GroupNode, LineNode, Node, RectNode, TextNode, TextSpan, UnknownNode,

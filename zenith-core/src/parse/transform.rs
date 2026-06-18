@@ -9,6 +9,7 @@ use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
 
 use crate::ast::{
     Span,
+    asset::{AssetBlock, AssetDecl, AssetKind},
     document::{Document, DocumentBody, Page, Project},
     node::{
         EllipseNode, FrameNode, GroupNode, LineNode, Node, RectNode, TextNode, TextSpan,
@@ -262,6 +263,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     })?;
 
     let mut project: Option<Project> = None;
+    let mut assets = AssetBlock::default();
     let mut tokens = TokenBlock::default();
     let mut styles = StyleBlock::default();
     let mut body: Option<DocumentBody> = None;
@@ -270,6 +272,9 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
         match child.name().value() {
             "project" => {
                 project = Some(transform_project(child)?);
+            }
+            "assets" => {
+                assets = transform_assets(child)?;
             }
             "tokens" => {
                 tokens = transform_tokens(child)?;
@@ -280,9 +285,8 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
             "document" => {
                 body = Some(transform_document_body(child)?);
             }
-            // `assets` and any other unknown top-level children are currently
-            // accepted without error (forward-compat); they simply are not
-            // represented in the v0 AST.
+            // Any other unknown top-level children are accepted without error
+            // (forward-compat); they simply are not represented in the v0 AST.
             _ => {}
         }
     }
@@ -297,6 +301,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     Ok(Document {
         version,
         project,
+        assets,
         tokens,
         styles,
         body,
@@ -324,6 +329,51 @@ fn transform_project(node: &KdlNode) -> Result<Project, ParseError> {
             })
     });
     Ok(Project { id, name, author })
+}
+
+// ---------------------------------------------------------------------------
+// Assets
+// ---------------------------------------------------------------------------
+
+const ASSET_KNOWN_PROPS: &[&str] = &["id", "kind", "src", "sha256"];
+
+fn transform_assets(node: &KdlNode) -> Result<AssetBlock, ParseError> {
+    let source_span = node_span(node);
+    let mut asset_list: Vec<AssetDecl> = Vec::new();
+
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "asset" {
+                asset_list.push(transform_asset_decl(child)?);
+            }
+            // Non-`asset` child nodes inside assets block are silently ignored
+            // (forward-compat).
+        }
+    }
+
+    Ok(AssetBlock {
+        assets: asset_list,
+        source_span,
+    })
+}
+
+fn transform_asset_decl(node: &KdlNode) -> Result<AssetDecl, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+    let kind_str = required_string_prop(node, "kind")?;
+    let kind = AssetKind::from_kind_str(kind_str);
+    let src = required_string_prop(node, "src")?.to_owned();
+    let sha256 = optional_string_prop(node, "sha256").map(str::to_owned);
+    let unknown_props = collect_unknown_props(node, ASSET_KNOWN_PROPS);
+    let source_span = node_span(node);
+
+    Ok(AssetDecl {
+        id,
+        kind,
+        src,
+        sha256,
+        source_span,
+        unknown_props,
+    })
 }
 
 // ---------------------------------------------------------------------------

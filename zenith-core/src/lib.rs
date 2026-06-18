@@ -5,6 +5,7 @@
 //! AST-based migrations, and deterministic font and asset resolution.
 //! No other Zenith crate is a dependency.
 
+pub mod asset;
 pub mod ast;
 pub mod diagnostics;
 pub mod error;
@@ -15,10 +16,12 @@ pub mod tokens;
 pub mod validate;
 
 // Curated flat re-exports for the most-used public surface.
+pub use asset::{AssetData, AssetProvider, BytesAssetProvider};
 pub use ast::{
-    Dimension, Document, DocumentBody, EllipseNode, FrameNode, GroupNode, LineNode, Node, Page,
-    Project, PropertyValue, RectNode, Span, StyleBlock, TextNode, TextSpan, Token, TokenBlock,
-    TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownProperty, UnknownValue,
+    AssetBlock, AssetDecl, AssetKind, Dimension, Document, DocumentBody, EllipseNode, FrameNode,
+    GroupNode, LineNode, Node, Page, Project, PropertyValue, RectNode, Span, StyleBlock, TextNode,
+    TextSpan, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode,
+    UnknownProperty, UnknownValue,
 };
 pub use diagnostics::{Diagnostic, Severity};
 pub use error::{FormatError, ParseError, ParseErrorCode};
