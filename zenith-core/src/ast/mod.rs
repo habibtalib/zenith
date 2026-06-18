@@ -10,7 +10,7 @@ pub mod value;
 // Flat re-exports used throughout the crate.
 pub use document::{Document, DocumentBody, Page, Project};
 pub use node::{
-    EllipseNode, GroupNode, LineNode, Node, RectNode, TextNode, TextSpan, UnknownNode,
+    EllipseNode, FrameNode, GroupNode, LineNode, Node, RectNode, TextNode, TextSpan, UnknownNode,
     UnknownProperty, UnknownValue,
 };
 pub use span::Span;

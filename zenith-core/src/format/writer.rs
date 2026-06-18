@@ -22,9 +22,9 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    Dimension, Document, DocumentBody, EllipseNode, GroupNode, LineNode, Node, Page, Project,
-    PropertyValue, RectNode, TextNode, TextSpan, Token, TokenBlock, TokenLiteral, TokenType,
-    TokenValue, Unit, UnknownValue,
+    Dimension, Document, DocumentBody, EllipseNode, FrameNode, GroupNode, LineNode, Node, Page,
+    Project, PropertyValue, RectNode, TextNode, TextSpan, Token, TokenBlock, TokenLiteral,
+    TokenType, TokenValue, Unit, UnknownValue,
 };
 use crate::error::FormatError;
 
@@ -351,13 +351,14 @@ fn write_page(page: &Page, out: &mut String, depth: usize) {
 
 /// Emit each child node in source order at `depth + 1` indentation.
 ///
-/// Used by both `write_page` and `write_group` so the child-block logic
-/// lives in exactly one place.
+/// Used by `write_page`, `write_group`, and `write_frame` so the child-block
+/// logic lives in exactly one place.
 ///
 /// # Known limitation
-/// Groups nest recursively via `write_node` → `write_group` →
-/// `write_children_block` with no depth guard.  This is an accepted v0
-/// limitation; stack overflow is only possible with pathologically deep trees.
+/// Frames and groups nest recursively via `write_node` → `write_frame` /
+/// `write_group` → `write_children_block` with no depth guard.  This is an
+/// accepted v0 limitation; stack overflow is only possible with pathologically
+/// deep trees.
 fn write_children_block(children: &[Node], out: &mut String, depth: usize) {
     for child in children {
         write_node(child, out, depth + 1);
@@ -374,6 +375,7 @@ fn write_node(node: &Node, out: &mut String, depth: usize) {
         Node::Ellipse(e) => write_ellipse(e, out, depth),
         Node::Line(l) => write_line(l, out, depth),
         Node::Text(t) => write_text(t, out, depth),
+        Node::Frame(f) => write_frame(f, out, depth),
         Node::Group(g) => write_group(g, out, depth),
         Node::Unknown(u) => write_unknown_node(u, out, depth),
     }
@@ -480,6 +482,42 @@ fn write_line(l: &LineNode, out: &mut String, depth: usize) {
     }
 
     out.push('\n');
+}
+
+fn write_frame(f: &FrameNode, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("frame");
+
+    // Canonical property order: id, name, role, x, y, w, h, layout, opacity,
+    // visible, locked, rotate, style, then unknown props (sorted).
+    out.push_str(" id=\"");
+    out.push_str(&f.id);
+    out.push('"');
+    write_opt_str(out, "name", &f.name);
+    write_opt_str(out, "role", &f.role);
+    write_opt_dimension(out, "x", &f.x);
+    write_opt_dimension(out, "y", &f.y);
+    write_opt_dimension(out, "w", &f.w);
+    write_opt_dimension(out, "h", &f.h);
+    write_opt_str(out, "layout", &f.layout);
+    write_opt_f64(out, "opacity", &f.opacity);
+    write_opt_bool(out, "visible", &f.visible);
+    write_opt_bool(out, "locked", &f.locked);
+    write_opt_dimension(out, "rotate", &f.rotate);
+    write_opt_str(out, "style", &f.style);
+
+    // Unknown properties in sorted key order (BTreeMap iteration is sorted).
+    for (key, prop) in &f.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_value(&prop.value));
+    }
+
+    out.push_str(" {\n");
+    write_children_block(&f.children, out, depth);
+    indent(out, depth);
+    out.push_str("}\n");
 }
 
 fn write_group(g: &GroupNode, out: &mut String, depth: usize) {
@@ -682,6 +720,12 @@ mod tests {
             Node::Ellipse(e) => e.source_span = None,
             Node::Line(l) => l.source_span = None,
             Node::Text(t) => t.source_span = None,
+            Node::Frame(f) => {
+                f.source_span = None;
+                for child in &mut f.children {
+                    strip_node_span(child);
+                }
+            }
             Node::Group(g) => {
                 g.source_span = None;
                 for child in &mut g.children {

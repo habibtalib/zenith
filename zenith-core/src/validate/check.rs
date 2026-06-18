@@ -151,8 +151,9 @@ pub fn validate(doc: &Document) -> ValidationReport {
 /// the unused-token check (done after the walk) can diff against defined ids.
 ///
 /// # Known limitation
-/// Recursion through `Node::Group` children has no depth guard.  Pathologically
-/// deep trees can overflow the stack.  This is an accepted v0 limitation.
+/// Recursion through `Node::Group` and `Node::Frame` children has no depth
+/// guard.  Pathologically deep trees can overflow the stack.  This is an
+/// accepted v0 limitation.
 fn walk_node(
     node: &Node,
     seen_ids: &mut HashSet<String>,
@@ -354,6 +355,42 @@ fn walk_node(
                     t.source_span,
                     Some(t.id.clone()),
                 ));
+            }
+        }
+
+        Node::Frame(f) => {
+            register_id(&f.id, seen_ids, diagnostics);
+
+            // Frames REQUIRE all four geometry dimensions (unlike groups).
+            check_optional_dim(&f.id, "x", f.x.as_ref(), f.source_span, diagnostics);
+            check_optional_dim(&f.id, "y", f.y.as_ref(), f.source_span, diagnostics);
+            check_optional_dim(&f.id, "w", f.w.as_ref(), f.source_span, diagnostics);
+            check_optional_dim(&f.id, "h", f.h.as_ref(), f.source_span, diagnostics);
+
+            // Unknown properties.
+            for prop_name in f.unknown_props.keys() {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!(
+                        "frame '{}': unknown property '{}' (version-relative; \
+                         may be valid in a later schema version)",
+                        f.id, prop_name
+                    ),
+                    f.source_span,
+                    Some(f.id.clone()),
+                ));
+            }
+
+            // Recurse into children, passing the SAME seen_ids so that
+            // nested ids participate in the global uniqueness check.
+            for child in &f.children {
+                walk_node(
+                    child,
+                    seen_ids,
+                    referenced_token_ids,
+                    resolved_tokens,
+                    diagnostics,
+                );
             }
         }
 
@@ -593,7 +630,7 @@ mod tests {
     use super::*;
     use crate::ast::document::{Document, DocumentBody, Page};
     use crate::ast::node::{
-        EllipseNode, GroupNode, LineNode, Node, RectNode, TextNode, UnknownNode,
+        EllipseNode, FrameNode, GroupNode, LineNode, Node, RectNode, TextNode, UnknownNode,
     };
     use crate::ast::style::StyleBlock;
     use crate::ast::token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue};
@@ -1210,6 +1247,260 @@ mod tests {
                     y: None,
                     w: None,
                     h: None,
+                    opacity: None,
+                    visible: None,
+                    locked: None,
+                    rotate: None,
+                    style: None,
+                    children: vec![],
+                    source_span: None,
+                    unknown_props,
+                })],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "node.unknown_property"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        let diag = report
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "node.unknown_property")
+            .expect("should exist");
+        assert_eq!(diag.severity, Severity::Warning);
+        assert!(!report.has_errors());
+    }
+
+    // ── Frame helpers ─────────────────────────────────────────────────────
+
+    fn minimal_frame(id: &str, x: f64, y: f64, w: f64, h: f64, children: Vec<Node>) -> Node {
+        Node::Frame(FrameNode {
+            id: id.to_owned(),
+            name: None,
+            role: None,
+            x: Some(px(x)),
+            y: Some(px(y)),
+            w: Some(px(w)),
+            h: Some(px(h)),
+            layout: None,
+            opacity: None,
+            visible: None,
+            locked: None,
+            rotate: None,
+            style: None,
+            children,
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        })
+    }
+
+    // ── Frame: clean doc with valid frame + child rect → no diagnostics ───
+
+    #[test]
+    fn frame_clean_doc_no_errors() {
+        let doc = doc_with(
+            vec![color_token("color.fill")],
+            vec![minimal_page(
+                "page.one",
+                vec![minimal_frame(
+                    "frame.clip",
+                    40.0,
+                    40.0,
+                    120.0,
+                    100.0,
+                    vec![minimal_rect("rect.inner", Some(token_ref("color.fill")))],
+                )],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            report.diagnostics.is_empty(),
+            "expected no diagnostics for clean frame doc, got: {:?}",
+            codes(&report)
+        );
+        assert!(!report.has_errors());
+    }
+
+    // ── Frame: missing x → node.missing_geometry ──────────────────────────
+
+    #[test]
+    fn frame_missing_x_produces_node_missing_geometry() {
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![Node::Frame(FrameNode {
+                    id: "frame.nox".to_owned(),
+                    name: None,
+                    role: None,
+                    x: None, // missing
+                    y: Some(px(0.0)),
+                    w: Some(px(100.0)),
+                    h: Some(px(100.0)),
+                    layout: None,
+                    opacity: None,
+                    visible: None,
+                    locked: None,
+                    rotate: None,
+                    style: None,
+                    children: vec![],
+                    source_span: None,
+                    unknown_props: BTreeMap::new(),
+                })],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "node.missing_geometry"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── Frame: missing h → node.missing_geometry ──────────────────────────
+
+    #[test]
+    fn frame_missing_h_produces_node_missing_geometry() {
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![Node::Frame(FrameNode {
+                    id: "frame.noh".to_owned(),
+                    name: None,
+                    role: None,
+                    x: Some(px(0.0)),
+                    y: Some(px(0.0)),
+                    w: Some(px(100.0)),
+                    h: None, // missing
+                    layout: None,
+                    opacity: None,
+                    visible: None,
+                    locked: None,
+                    rotate: None,
+                    style: None,
+                    children: vec![],
+                    source_span: None,
+                    unknown_props: BTreeMap::new(),
+                })],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "node.missing_geometry"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── Frame: child rect with no x → node.missing_geometry (recursion) ───
+
+    #[test]
+    fn frame_child_missing_geometry_surfaces() {
+        // A rect nested inside a frame has no `x`; walk_node must recurse
+        // into frame children and report the missing geometry.
+        let child_rect = Node::Rect(RectNode {
+            id: "rect.inner".to_owned(),
+            name: None,
+            role: None,
+            x: None, // missing
+            y: Some(px(0.0)),
+            w: Some(px(50.0)),
+            h: Some(px(50.0)),
+            radius: None,
+            style: None,
+            fill: None,
+            stroke: None,
+            stroke_width: None,
+            stroke_alignment: None,
+            opacity: None,
+            visible: None,
+            locked: None,
+            rotate: None,
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        });
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![minimal_frame(
+                    "frame.clip",
+                    0.0,
+                    0.0,
+                    100.0,
+                    100.0,
+                    vec![child_rect],
+                )],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "node.missing_geometry"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── Frame: nested id duplicate with page sibling → id.duplicate ───────
+
+    #[test]
+    fn frame_nested_id_duplicate_with_page_sibling() {
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![
+                    minimal_rect("shared", None),
+                    minimal_frame(
+                        "frame.clip",
+                        0.0,
+                        0.0,
+                        100.0,
+                        100.0,
+                        vec![minimal_rect("shared", None)],
+                    ),
+                ],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "id.duplicate"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── Frame: unknown property → node.unknown_property (Warning) ─────────
+
+    #[test]
+    fn frame_unknown_property_warns() {
+        let mut unknown_props = BTreeMap::new();
+        unknown_props.insert(
+            "future-scroll".to_owned(),
+            crate::ast::node::UnknownProperty {
+                value: crate::ast::node::UnknownValue::Bool(true),
+            },
+        );
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![Node::Frame(FrameNode {
+                    id: "frame.one".to_owned(),
+                    name: None,
+                    role: None,
+                    x: Some(px(0.0)),
+                    y: Some(px(0.0)),
+                    w: Some(px(100.0)),
+                    h: Some(px(100.0)),
+                    layout: None,
                     opacity: None,
                     visible: None,
                     locked: None,

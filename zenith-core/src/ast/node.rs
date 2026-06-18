@@ -165,6 +165,50 @@ pub struct UnknownNode {
     pub source_span: Option<Span>,
 }
 
+/// A `frame` node — a container that CLIPS its children to its rectangular
+/// bounds and renders them in source order (first child = bottom of z-order).
+///
+/// Unlike `group`, a frame has **required** geometry (x, y, w, h): these four
+/// dimensions define the clip rectangle. Children are rendered at their
+/// **absolute** page coordinates — frame does NOT translate children (dx/dy
+/// are unchanged). The frame only clips; it has no fill of its own in v0.
+///
+/// Opacity cascades (multiplies) into all descendant node alphas, exactly as
+/// in `GroupNode`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrameNode {
+    pub id: String,
+    pub name: Option<String>,
+    pub role: Option<String>,
+    /// Required: clip-rectangle left edge in page coordinates.
+    pub x: Option<Dimension>,
+    /// Required: clip-rectangle top edge in page coordinates.
+    pub y: Option<Dimension>,
+    /// Required: clip-rectangle width.
+    pub w: Option<Dimension>,
+    /// Required: clip-rectangle height.
+    pub h: Option<Dimension>,
+    /// Layout algorithm hint ("absolute"/"flow") — parsed and preserved but
+    /// NOT acted on in v0; flow layout is not implemented.
+    pub layout: Option<String>,
+    /// Opacity that cascades (multiplies) into all descendant node alphas.
+    pub opacity: Option<f64>,
+    /// When `Some(false)` the entire subtree (including the clip) is excluded
+    /// from the render.
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    /// Rotation — parsed and preserved but DEFERRED (not applied at render,
+    /// consistent with the universal rotate deferral on all node types).
+    pub rotate: Option<Dimension>,
+    pub style: Option<String>,
+    /// Child nodes in source order.
+    pub children: Vec<Node>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+}
+
 /// A `group` node — a container that holds child nodes and renders them in
 /// source order (first child = bottom of z-order).
 ///
@@ -209,6 +253,7 @@ pub enum Node {
     Ellipse(EllipseNode),
     Line(LineNode),
     Text(TextNode),
+    Frame(FrameNode),
     Group(GroupNode),
     Unknown(UnknownNode),
 }

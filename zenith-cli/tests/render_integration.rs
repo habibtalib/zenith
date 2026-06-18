@@ -62,3 +62,8 @@ fn group_zen_renders_to_valid_png() {
 fn ellipse_zen_renders_to_valid_png() {
     assert_example_renders("ellipse");
 }
+
+#[test]
+fn frame_zen_renders_to_valid_png() {
+    assert_example_renders("frame");
+}

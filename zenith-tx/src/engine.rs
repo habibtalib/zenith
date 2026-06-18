@@ -201,10 +201,11 @@ fn subtree_contains(node: &Node, id: &str) -> bool {
     if node_id_of(node) == Some(id) {
         return true;
     }
-    if let Node::Group(g) = node {
-        return g.children.iter().any(|c| subtree_contains(c, id));
+    match node {
+        Node::Frame(f) => f.children.iter().any(|c| subtree_contains(c, id)),
+        Node::Group(g) => g.children.iter().any(|c| subtree_contains(c, id)),
+        _ => false,
     }
-    false
 }
 
 /// Walk the document tree and return a mutable reference to a `TextNode` with
@@ -261,6 +262,10 @@ fn find_in_children_mut<'a>(children: &'a mut [Node], id: &str) -> Option<FindRe
             Node::Rect(r) if r.id == id => Some(Hit::WrongType("rect")),
             Node::Ellipse(e) if e.id == id => Some(Hit::WrongType("ellipse")),
             Node::Line(l) if l.id == id => Some(Hit::WrongType("line")),
+            Node::Frame(f) if f.id == id => Some(Hit::WrongType("frame")),
+            Node::Frame(f) if f.children.iter().any(|c| subtree_contains(c, id)) => {
+                Some(Hit::Descend(i))
+            }
             Node::Group(g) if g.id == id => Some(Hit::WrongType("group")),
             Node::Group(g) if g.children.iter().any(|c| subtree_contains(c, id)) => {
                 Some(Hit::Descend(i))
@@ -283,8 +288,9 @@ fn find_in_children_mut<'a>(children: &'a mut [Node], id: &str) -> Option<FindRe
             }
         }
         Some(Hit::Descend(i)) => match children.get_mut(i) {
+            Some(Node::Frame(f)) => find_in_children_mut(&mut f.children, id),
             Some(Node::Group(g)) => find_in_children_mut(&mut g.children, id),
-            _ => None, // unreachable: phase-1 confirmed a group at i
+            _ => None, // unreachable: phase-1 confirmed a container at i
         },
     }
 }
@@ -308,11 +314,16 @@ fn move_forward_in(children: &mut [Node], id: &str) -> MoveOutcome {
         return MoveOutcome::Moved;
     }
     for child in children.iter_mut() {
-        if let Node::Group(g) = child {
-            match move_forward_in(&mut g.children, id) {
+        match child {
+            Node::Frame(f) => match move_forward_in(&mut f.children, id) {
                 MoveOutcome::NotFound => {}
                 other => return other,
-            }
+            },
+            Node::Group(g) => match move_forward_in(&mut g.children, id) {
+                MoveOutcome::NotFound => {}
+                other => return other,
+            },
+            _ => {}
         }
     }
     MoveOutcome::NotFound
@@ -325,6 +336,7 @@ fn node_id_of(node: &Node) -> Option<&str> {
         Node::Ellipse(e) => Some(&e.id),
         Node::Line(l) => Some(&l.id),
         Node::Text(t) => Some(&t.id),
+        Node::Frame(f) => Some(&f.id),
         Node::Group(g) => Some(&g.id),
         Node::Unknown(_) => None,
     }
