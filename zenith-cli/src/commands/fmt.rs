@@ -4,9 +4,7 @@
 //! the caller is responsible for reading the original file and writing the
 //! formatted result back to disk.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
+use sha2::{Digest, Sha256};
 use zenith_core::{KdlAdapter, KdlSource};
 
 use crate::commands::serialize_pretty;
@@ -83,14 +81,19 @@ pub fn render_stdout(result: &FmtResult, json: bool) -> String {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Compute a hex-encoded 64-bit hash of `bytes`.
+/// Compute the lowercase hex-encoded SHA-256 of `bytes`.
 ///
-/// Uses `DefaultHasher` for speed.  This is a content-change indicator, not a
-/// cryptographic checksum.
+/// SHA-256 is stable across toolchain versions and platforms, so the reported
+/// content hash is reproducible (unlike `DefaultHasher`) and consistent with the
+/// content-addressing model used elsewhere in the project.
 fn hex_hash(bytes: &[u8]) -> String {
-    let mut h = DefaultHasher::new();
-    bytes.hash(&mut h);
-    format!("{:016x}", h.finish())
+    let digest = Sha256::digest(bytes);
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
