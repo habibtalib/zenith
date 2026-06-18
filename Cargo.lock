@@ -625,6 +625,8 @@ dependencies = [
 name = "zenith-tx"
 version = "0.0.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "zenith-core",
  "zenith-scene",
 ]

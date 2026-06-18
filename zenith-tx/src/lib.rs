@@ -5,3 +5,12 @@
 //! (status, diagnostics, source diff, scene diff, affected node IDs, audit
 //! preview and audit record), and audit record production. Both the CLI and
 //! the future MCP surface sit on top of this crate; neither reimplements it.
+
+pub mod engine;
+pub mod op;
+pub mod result;
+
+// Curated flat re-exports.
+pub use engine::run_transaction;
+pub use op::{Op, Transaction};
+pub use result::{TxError, TxResult, TxStatus};
