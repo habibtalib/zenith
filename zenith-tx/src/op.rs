@@ -25,6 +25,26 @@ pub struct OpPoint {
     pub y: f64,
 }
 
+/// Insertion position for [`Op::AddNode`] within a container's children.
+///
+/// JSON shapes: `{"at":"last"}`, `{"at":"first"}`, `{"at":"index","index":2}`,
+/// `{"at":"before","id":"sibling"}`, `{"at":"after","id":"sibling"}`.
+#[derive(serde::Deserialize, Debug, Clone, PartialEq, Default)]
+#[serde(tag = "at", rename_all = "snake_case")]
+pub enum Position {
+    /// Insert as the last child (topmost in z-order). Default.
+    #[default]
+    Last,
+    /// Insert as the first child (bottommost in z-order).
+    First,
+    /// Insert at an explicit index (clamped to the children length).
+    Index { index: usize },
+    /// Insert immediately before the sibling with this id.
+    Before { id: String },
+    /// Insert immediately after the sibling with this id.
+    After { id: String },
+}
+
 /// A batch of operations to apply to a document in order.
 #[derive(serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Transaction {
@@ -166,5 +186,32 @@ pub enum Op {
         node: String,
         /// Replacement vertex list. Each vertex is in document pixels.
         points: Vec<OpPoint>,
+    },
+    /// Construct a new node from a `.zen` source fragment and insert it into a
+    /// container (a page, group, or frame) at a chosen position.
+    ///
+    /// `source` is a single `.zen` node fragment, e.g.
+    /// `rect id="box" x=(px)10 y=(px)10 w=(px)100 h=(px)80 fill=(token)"color.accent"`.
+    /// It is parsed through the canonical KDL parser, so every node kind, nested
+    /// children (for group/frame), tokens, and properties are supported with no
+    /// per-field mapping. Exactly one top-level node must be present.
+    ///
+    /// Post-validation rejects an incomplete/invalid node automatically (missing
+    /// required geometry, duplicate id, unknown token/asset ref, too few points, …).
+    AddNode {
+        /// Stable id of the container to insert into: a page id, or a group/frame id.
+        parent: String,
+        /// Where among the container's children to insert. Defaults to `last`.
+        #[serde(default)]
+        position: Position,
+        /// A single `.zen` node fragment to construct and insert.
+        source: String,
+    },
+    /// Remove a node (and its subtree) by id from whatever container holds it.
+    ///
+    /// Rejects with `tx.unknown_node` if no node with that id exists.
+    RemoveNode {
+        /// The stable node `id` to remove.
+        node: String,
     },
 }

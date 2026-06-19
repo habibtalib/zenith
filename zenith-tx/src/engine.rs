@@ -8,7 +8,7 @@ use zenith_core::{
     Unit, validate,
 };
 
-use crate::op::{Op, OpPoint, Transaction};
+use crate::op::{Op, OpPoint, Position, Transaction};
 use crate::result::{TxError, TxResult, TxStatus};
 
 // ── Valid align values ────────────────────────────────────────────────────────
@@ -138,6 +138,16 @@ fn apply_op(
             points,
         } => {
             apply_set_points(node_id, points, doc, diagnostics, affected);
+        }
+        Op::AddNode {
+            parent,
+            position,
+            source,
+        } => {
+            apply_add_node(parent, position, source, doc, diagnostics, affected);
+        }
+        Op::RemoveNode { node: node_id } => {
+            apply_remove_node(node_id, doc, diagnostics, affected);
         }
     }
 }
@@ -672,6 +682,279 @@ fn apply_set_points(
             }
         }
     }
+}
+
+// ── AddNode / RemoveNode ──────────────────────────────────────────────────────
+
+/// Construct a single [`Node`] from a `.zen` node fragment by wrapping it in a
+/// minimal synthetic document and parsing it through the canonical KDL parser.
+///
+/// Reusing the parser means every node kind, nested children (for group/frame),
+/// tokens, and properties are supported with no per-field mapping. The wrapper's
+/// `tokens`/`styles` blocks are left to their AST defaults (empty) — the real
+/// candidate document, which carries the real tokens/assets, is what
+/// post-validation actually checks.
+///
+/// Returns `Err` with a human-readable message if the fragment does not parse or
+/// does not contain exactly one top-level node.
+fn build_node_from_fragment(fragment: &str) -> Result<Node, String> {
+    let synthetic = format!(
+        "zenith version=1 {{\n  document id=\"__tx_doc\" {{\n    page id=\"__tx_page\" w=(px)1 h=(px)1 {{\n{fragment}\n    }}\n  }}\n}}\n"
+    );
+    let doc = KdlAdapter
+        .parse(synthetic.as_bytes())
+        .map_err(|e| format!("failed to parse node fragment: {e}"))?;
+    let mut page = doc
+        .body
+        .pages
+        .into_iter()
+        .next()
+        .ok_or_else(|| "synthetic document produced no page".to_owned())?;
+    if page.children.len() != 1 {
+        return Err(format!(
+            "expected exactly one node in fragment, found {}",
+            page.children.len()
+        ));
+    }
+    Ok(page.children.remove(0))
+}
+
+/// Return a mutable reference to the children vec of the container identified by
+/// `parent_id` — either a page (matched by page `id`) or a nested `group`/`frame`
+/// (matched by node `id`). Returns `None` if no such container exists (including
+/// when the id names a leaf node).
+///
+/// Two-phase borrow, mirroring [`find_node_any_mut`]: a shared scan locates the
+/// target page index first, then a single exclusive borrow descends.
+fn find_container_children_mut<'doc>(
+    doc: &'doc mut Document,
+    parent_id: &str,
+) -> Option<&'doc mut Vec<Node>> {
+    // Phase 1: find which page is, or contains, the target container.
+    let page_index = doc.body.pages.iter().enumerate().find_map(|(pi, page)| {
+        if page.id == parent_id {
+            return Some(pi);
+        }
+        let found = page
+            .children
+            .iter()
+            .any(|n| subtree_contains_container(n, parent_id));
+        if found { Some(pi) } else { None }
+    });
+
+    // Phase 2: take the exclusive borrow we deferred.
+    match page_index {
+        None => None,
+        Some(pi) => match doc.body.pages.get_mut(pi) {
+            None => None,
+            Some(page) => {
+                if page.id == parent_id {
+                    Some(&mut page.children)
+                } else {
+                    find_container_in_children_mut(&mut page.children, parent_id)
+                }
+            }
+        },
+    }
+}
+
+/// Returns true if `node` is, or transitively contains, a `group`/`frame`
+/// container whose `id == parent_id`. Leaves are never containers.
+fn subtree_contains_container(node: &Node, parent_id: &str) -> bool {
+    match node {
+        Node::Frame(f) => {
+            f.id == parent_id
+                || f.children
+                    .iter()
+                    .any(|c| subtree_contains_container(c, parent_id))
+        }
+        Node::Group(g) => {
+            g.id == parent_id
+                || g.children
+                    .iter()
+                    .any(|c| subtree_contains_container(c, parent_id))
+        }
+        _ => false,
+    }
+}
+
+/// Descend into a children slice and return a mutable reference to the children
+/// vec of the `group`/`frame` whose `id == parent_id`. Two-phase borrow.
+fn find_container_in_children_mut<'a>(
+    children: &'a mut [Node],
+    parent_id: &str,
+) -> Option<&'a mut Vec<Node>> {
+    // `Direct(i)` — children[i] is the container itself.
+    // `Descend(i)` — the container lives somewhere inside children[i].
+    enum Hit {
+        Direct(usize),
+        Descend(usize),
+    }
+
+    let hit = children
+        .iter()
+        .enumerate()
+        .find_map(|(i, node)| match node {
+            Node::Frame(f) if f.id == parent_id => Some(Hit::Direct(i)),
+            Node::Group(g) if g.id == parent_id => Some(Hit::Direct(i)),
+            Node::Frame(f)
+                if f.children
+                    .iter()
+                    .any(|c| subtree_contains_container(c, parent_id)) =>
+            {
+                Some(Hit::Descend(i))
+            }
+            Node::Group(g)
+                if g.children
+                    .iter()
+                    .any(|c| subtree_contains_container(c, parent_id)) =>
+            {
+                Some(Hit::Descend(i))
+            }
+            _ => None,
+        });
+
+    match hit {
+        None => None,
+        Some(Hit::Direct(i)) => match children.get_mut(i) {
+            Some(Node::Frame(f)) => Some(&mut f.children),
+            Some(Node::Group(g)) => Some(&mut g.children),
+            _ => None, // unreachable: phase-1 confirmed a container at i
+        },
+        Some(Hit::Descend(i)) => match children.get_mut(i) {
+            Some(Node::Frame(f)) => find_container_in_children_mut(&mut f.children, parent_id),
+            Some(Node::Group(g)) => find_container_in_children_mut(&mut g.children, parent_id),
+            _ => None, // unreachable
+        },
+    }
+}
+
+/// Remove the node with `id` from `children` or any nested `group`/`frame`
+/// container within it, returning the removed node, or `None` if absent.
+fn remove_node_by_id(children: &mut Vec<Node>, id: &str) -> Option<Node> {
+    if let Some(i) = children.iter().position(|n| node_id_of(n) == Some(id)) {
+        return Some(children.remove(i));
+    }
+    for child in children.iter_mut() {
+        let nested = match child {
+            Node::Frame(f) => remove_node_by_id(&mut f.children, id),
+            Node::Group(g) => remove_node_by_id(&mut g.children, id),
+            _ => None,
+        };
+        if nested.is_some() {
+            return nested;
+        }
+    }
+    None
+}
+
+fn apply_add_node(
+    parent: &str,
+    position: &Position,
+    source: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    // 1. Build the node from the `.zen` fragment.
+    let node = match build_node_from_fragment(source) {
+        Ok(n) => n,
+        Err(e) => {
+            diagnostics.push(Diagnostic::error(
+                "tx.invalid_node_spec",
+                format!("could not construct node from source fragment: {e}"),
+                None,
+                None,
+            ));
+            return;
+        }
+    };
+
+    // 2. Locate the parent container.
+    let children = match find_container_children_mut(doc, parent) {
+        Some(c) => c,
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.invalid_parent",
+                format!(
+                    "no container node with id {:?} (parent must be a page, group, or frame)",
+                    parent
+                ),
+                None,
+                Some(parent.to_owned()),
+            ));
+            return;
+        }
+    };
+
+    // 3. Resolve the insertion index against the current children.
+    let idx = match position {
+        Position::Last => children.len(),
+        Position::First => 0,
+        Position::Index { index } => (*index).min(children.len()),
+        Position::Before { id } => {
+            match children
+                .iter()
+                .position(|n| node_id_of(n) == Some(id.as_str()))
+            {
+                Some(i) => i,
+                None => {
+                    diagnostics.push(Diagnostic::error(
+                        "tx.unknown_node",
+                        format!("sibling {:?} not found in parent {:?}", id, parent),
+                        None,
+                        Some(id.to_owned()),
+                    ));
+                    return;
+                }
+            }
+        }
+        Position::After { id } => {
+            match children
+                .iter()
+                .position(|n| node_id_of(n) == Some(id.as_str()))
+            {
+                Some(i) => i + 1,
+                None => {
+                    diagnostics.push(Diagnostic::error(
+                        "tx.unknown_node",
+                        format!("sibling {:?} not found in parent {:?}", id, parent),
+                        None,
+                        Some(id.to_owned()),
+                    ));
+                    return;
+                }
+            }
+        }
+    };
+
+    // 4. Capture the new node's id (if any) before moving it in, then insert.
+    let new_id = node_id_of(&node).map(|s| s.to_owned());
+    children.insert(idx, node);
+    if let Some(id) = new_id {
+        record_affected(&id, affected);
+    }
+    // 5. Post-validation handles duplicate-id / missing-geometry / unknown-token / etc.
+}
+
+fn apply_remove_node(
+    node_id: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    for page in doc.body.pages.iter_mut() {
+        if remove_node_by_id(&mut page.children, node_id).is_some() {
+            record_affected(node_id, affected);
+            return;
+        }
+    }
+    diagnostics.push(Diagnostic::error(
+        "tx.unknown_node",
+        format!("no node with id {:?}", node_id),
+        None,
+        Some(node_id.to_owned()),
+    ));
 }
 
 // ── Reorder internals ────────────────────────────────────────────────────────
@@ -1926,6 +2209,401 @@ mod tests {
                     },
                     Op::MoveToBack {
                         node: "x".to_owned()
+                    },
+                ],
+            }
+        );
+    }
+
+    // ── AddNode / RemoveNode test documents ───────────────────────────────────
+
+    /// Page with one rect; an accent color token declared so added rects that
+    /// reference it pass post-validation.
+    const ADD_BASE_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" {
+    token id="color.accent" type="color" value="#3b82f6"
+  }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)320 h=(px)200 {
+      rect id="base" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+    }
+  }
+}"##;
+
+    /// Page with a group that contains two rects.
+    const ADD_GROUP_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)320 h=(px)200 {
+      group id="grp1" {
+        rect id="g.a" x=(px)0 y=(px)0 w=(px)50 h=(px)50
+        rect id="g.b" x=(px)0 y=(px)0 w=(px)50 h=(px)50
+      }
+    }
+  }
+}"##;
+
+    // ── AddNode tests ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn add_node_into_page_last() {
+        let doc = parse(ADD_BASE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::AddNode {
+                parent: "pg1".to_owned(),
+                position: Position::Last,
+                source: r#"rect id="box" x=(px)10 y=(px)10 w=(px)100 h=(px)80 fill=(token)"color.accent""#
+                    .to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "{:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.affected_node_ids, vec!["box".to_owned()]);
+        assert!(
+            result.source_after.contains("id=\"box\""),
+            "source_after must contain the new rect; got:\n{}",
+            result.source_after
+        );
+        // "box" inserted last → appears after "base".
+        let pos_base = result.source_after.find("id=\"base\"").expect("base");
+        let pos_box = result.source_after.find("id=\"box\"").expect("box");
+        assert!(pos_base < pos_box, "box should come after base");
+    }
+
+    #[test]
+    fn add_node_into_group_first() {
+        let doc = parse(ADD_GROUP_DOC);
+        let tx = Transaction {
+            ops: vec![Op::AddNode {
+                parent: "grp1".to_owned(),
+                position: Position::First,
+                source: r#"rect id="g.new" x=(px)0 y=(px)0 w=(px)10 h=(px)10"#.to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "{:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.affected_node_ids, vec!["g.new".to_owned()]);
+        // First child of the group → appears before g.a.
+        let pos_new = result.source_after.find("id=\"g.new\"").expect("g.new");
+        let pos_a = result.source_after.find("id=\"g.a\"").expect("g.a");
+        assert!(pos_new < pos_a, "g.new should be first in the group");
+    }
+
+    #[test]
+    fn add_node_before_and_after_sibling() {
+        // Insert before g.b.
+        let doc = parse(ADD_GROUP_DOC);
+        let tx = Transaction {
+            ops: vec![Op::AddNode {
+                parent: "grp1".to_owned(),
+                position: Position::Before {
+                    id: "g.b".to_owned(),
+                },
+                source: r#"rect id="g.mid" x=(px)0 y=(px)0 w=(px)10 h=(px)10"#.to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "{:?}",
+            result.diagnostics
+        );
+        let pos_a = result.source_after.find("id=\"g.a\"").expect("g.a");
+        let pos_mid = result.source_after.find("id=\"g.mid\"").expect("g.mid");
+        let pos_b = result.source_after.find("id=\"g.b\"").expect("g.b");
+        assert!(
+            pos_a < pos_mid && pos_mid < pos_b,
+            "order should be a, mid, b"
+        );
+
+        // Insert after g.a.
+        let doc = parse(ADD_GROUP_DOC);
+        let tx = Transaction {
+            ops: vec![Op::AddNode {
+                parent: "grp1".to_owned(),
+                position: Position::After {
+                    id: "g.a".to_owned(),
+                },
+                source: r#"rect id="g.mid" x=(px)0 y=(px)0 w=(px)10 h=(px)10"#.to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "{:?}",
+            result.diagnostics
+        );
+        let pos_a = result.source_after.find("id=\"g.a\"").expect("g.a");
+        let pos_mid = result.source_after.find("id=\"g.mid\"").expect("g.mid");
+        let pos_b = result.source_after.find("id=\"g.b\"").expect("g.b");
+        assert!(
+            pos_a < pos_mid && pos_mid < pos_b,
+            "order should be a, mid, b"
+        );
+    }
+
+    #[test]
+    fn add_node_index_clamped() {
+        // index well beyond len → clamped to last.
+        let doc = parse(ADD_GROUP_DOC);
+        let tx = Transaction {
+            ops: vec![Op::AddNode {
+                parent: "grp1".to_owned(),
+                position: Position::Index { index: 99 },
+                source: r#"rect id="g.tail" x=(px)0 y=(px)0 w=(px)10 h=(px)10"#.to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "{:?}",
+            result.diagnostics
+        );
+        let pos_b = result.source_after.find("id=\"g.b\"").expect("g.b");
+        let pos_tail = result.source_after.find("id=\"g.tail\"").expect("g.tail");
+        assert!(pos_b < pos_tail, "clamped insert should be last");
+    }
+
+    #[test]
+    fn add_node_duplicate_id_rejected() {
+        let doc = parse(ADD_BASE_DOC);
+        let before = run_transaction(
+            &doc,
+            &Transaction {
+                ops: vec![Op::AddNode {
+                    parent: "pg1".to_owned(),
+                    position: Position::Last,
+                    source: r#"rect id="base" x=(px)0 y=(px)0 w=(px)20 h=(px)20"#.to_owned(),
+                }],
+            },
+        )
+        .expect("run_transaction should not error");
+
+        assert_eq!(before.status, TxStatus::Rejected);
+        assert_eq!(before.source_after, before.source_before);
+    }
+
+    #[test]
+    fn add_node_malformed_fragment_rejected() {
+        let doc = parse(ADD_BASE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::AddNode {
+                parent: "pg1".to_owned(),
+                position: Position::Last,
+                source: "not valid kdl {{{".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.invalid_node_spec"),
+            "expected tx.invalid_node_spec; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    #[test]
+    fn add_node_unknown_parent_rejected() {
+        let doc = parse(ADD_BASE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::AddNode {
+                parent: "nope".to_owned(),
+                position: Position::Last,
+                source: r#"rect id="box" x=(px)0 y=(px)0 w=(px)10 h=(px)10"#.to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.invalid_parent"),
+            "expected tx.invalid_parent; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    #[test]
+    fn add_node_parent_is_leaf_rejected() {
+        // "base" is a rect (a leaf) — not a valid container.
+        let doc = parse(ADD_BASE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::AddNode {
+                parent: "base".to_owned(),
+                position: Position::Last,
+                source: r#"rect id="box" x=(px)0 y=(px)0 w=(px)10 h=(px)10"#.to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.invalid_parent"),
+            "expected tx.invalid_parent; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    #[test]
+    fn add_node_before_missing_sibling_rejected() {
+        let doc = parse(ADD_GROUP_DOC);
+        let tx = Transaction {
+            ops: vec![Op::AddNode {
+                parent: "grp1".to_owned(),
+                position: Position::Before {
+                    id: "nope".to_owned(),
+                },
+                source: r#"rect id="g.new" x=(px)0 y=(px)0 w=(px)10 h=(px)10"#.to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.unknown_node"),
+            "expected tx.unknown_node; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── RemoveNode tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn remove_node_top_level() {
+        let doc = parse(TWO_RECT_DOC);
+        let tx = Transaction {
+            ops: vec![Op::RemoveNode {
+                node: "a".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "{:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.affected_node_ids, vec!["a".to_owned()]);
+        assert!(
+            !result.source_after.contains("id=\"a\""),
+            "node a must be gone from source_after; got:\n{}",
+            result.source_after
+        );
+        assert!(result.source_after.contains("id=\"b\""), "b must remain");
+    }
+
+    #[test]
+    fn remove_node_nested_in_group() {
+        let doc = parse(ADD_GROUP_DOC);
+        let tx = Transaction {
+            ops: vec![Op::RemoveNode {
+                node: "g.a".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "{:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.affected_node_ids, vec!["g.a".to_owned()]);
+        assert!(
+            !result.source_after.contains("id=\"g.a\""),
+            "nested node g.a must be gone; got:\n{}",
+            result.source_after
+        );
+        assert!(
+            result.source_after.contains("id=\"g.b\""),
+            "g.b must remain"
+        );
+    }
+
+    #[test]
+    fn remove_node_unknown_rejected() {
+        let doc = parse(TWO_RECT_DOC);
+        let tx = Transaction {
+            ops: vec![Op::RemoveNode {
+                node: "nope".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.unknown_node"),
+            "expected tx.unknown_node; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── from_json round-trip: crud ops ────────────────────────────────────────
+
+    #[test]
+    fn from_json_crud_ops_round_trip() {
+        let json = r#"{"ops":[
+            {"op":"add_node","parent":"pg1","source":"rect id=\"r\""},
+            {"op":"add_node","parent":"pg1","position":{"at":"index","index":2},"source":"rect id=\"r2\""},
+            {"op":"remove_node","node":"r"}
+        ]}"#;
+        let tx = Transaction::from_json(json).expect("parse JSON");
+        assert_eq!(
+            tx,
+            Transaction {
+                ops: vec![
+                    Op::AddNode {
+                        parent: "pg1".to_owned(),
+                        position: Position::Last,
+                        source: r#"rect id="r""#.to_owned(),
+                    },
+                    Op::AddNode {
+                        parent: "pg1".to_owned(),
+                        position: Position::Index { index: 2 },
+                        source: r#"rect id="r2""#.to_owned(),
+                    },
+                    Op::RemoveNode {
+                        node: "r".to_owned(),
                     },
                 ],
             }
