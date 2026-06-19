@@ -596,11 +596,18 @@ fn compile_node(
                 let weight_prop = span.font_weight.as_ref().or(node_weight_prop);
                 let weight = resolve_font_weight(weight_prop, resolved, 400);
 
+                // Per-span italic selects the italic face; otherwise upright.
+                let style = if span.italic == Some(true) {
+                    FontStyle::Italic
+                } else {
+                    FontStyle::Normal
+                };
+
                 let req = ShapeRequest {
                     text: &span.text,
                     families: &families,
                     weight,
-                    style: FontStyle::Normal,
+                    style,
                     font_size,
                 };
 
@@ -4108,6 +4115,37 @@ mod tests {
         assert!(
             runs[1].2.contains("noto-sans-700"),
             "second span must use the bold (700) face; got {}",
+            runs[1].2
+        );
+    }
+
+    /// An italic span selects the italic face; a plain span stays upright.
+    #[test]
+    fn text_italic_span_selects_italic_face() {
+        let src = r##"zenith version=1 {
+  project id="proj.it" name="IT"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.it" title="IT" {
+    page id="page.it" w=(px)400 h=(px)200 {
+      text id="text.it" x=(px)10 y=(px)20 w=(px)380 h=(px)40 {
+        span "Up"
+        span "Italic" italic=#true
+      }
+    }
+  }
+}
+"##;
+        let runs = glyph_runs(src);
+        assert_eq!(runs.len(), 2, "expected two runs; got {}", runs.len());
+        assert!(
+            !runs[0].2.contains("italic"),
+            "first span must be upright; got {}",
+            runs[0].2
+        );
+        assert!(
+            runs[1].2.contains("italic"),
+            "second span must use the italic face; got {}",
             runs[1].2
         );
     }

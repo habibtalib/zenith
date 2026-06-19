@@ -9,3 +9,7 @@ sha256(NotoSansMono-Regular.ttf) = 65b5e2b2c4a1fba9ae8be1f026cb35b03dcb8886d9b2a
 Noto Sans Bold — bundled bold (weight 700) face for deterministic text rendering.
 Upstream: Google Noto Fonts. License: Apache-2.0 (see LICENSE.txt).
 sha256(NotoSans-Bold.ttf) = 1df075a380fc7cb898acf64c1f7b3b4dd780de3caa860178bf929de35817a913
+
+Noto Sans Italic — bundled italic (weight 400) face for deterministic text rendering.
+Upstream: Google Noto Fonts. License: Apache-2.0 (see LICENSE.txt).
+sha256(NotoSans-Italic.ttf) = 467e3f89eeca4108bb8710a2b9e0cf2281ac56d5b0609211a83776d0505eecb5
