@@ -8,11 +8,12 @@ use resvg::usvg;
 use resvg::usvg::TreeParsing;
 use resvg::usvg::TreeTextToPath;
 use tiny_skia::{
-    FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke,
+    Color as TsColor, FillRule, FilterQuality, GradientStop as TsGradientStop, LinearGradient,
+    Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Point, Rect, Shader, SpreadMode, Stroke,
     Transform,
 };
 use zenith_core::{AssetKind, AssetProvider, FontProvider};
-use zenith_scene::{FitMode, Scene, SceneCommand};
+use zenith_scene::{FitMode, GradientPaint, Scene, SceneCommand, ShadowSpec};
 
 use crate::backend::{RasterBackend, RasterImage};
 use crate::error::RenderError;
@@ -151,6 +152,94 @@ fn build_rounded_rect_path(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Pat
     pb.finish()
 }
 
+/// Build a tiny-skia linear-gradient [`Shader`] for a fill box.
+///
+/// The gradient line runs through the box center at `gradient.angle_deg`
+/// (clockwise from +x in screen coordinates, so `90°` = top-to-bottom). The
+/// line length is the CSS gradient-line length `|w·cosθ| + |h·sinθ|`. Returns
+/// `None` when tiny-skia rejects the stops (e.g. fewer than two).
+fn gradient_shader(
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    gradient: &GradientPaint,
+) -> Option<Shader<'static>> {
+    let theta = gradient.angle_deg.to_radians();
+    let (dir_x, dir_y) = (theta.cos(), theta.sin());
+    let center = (x + w / 2.0, y + h / 2.0);
+    // CSS gradient-line length, then half-extent on each side of center.
+    let line_len = (w * dir_x).abs() + (h * dir_y).abs();
+    let half = line_len / 2.0;
+    let start = Point::from_xy(
+        (center.0 - dir_x * half) as f32,
+        (center.1 - dir_y * half) as f32,
+    );
+    let end = Point::from_xy(
+        (center.0 + dir_x * half) as f32,
+        (center.1 + dir_y * half) as f32,
+    );
+    let stops: Vec<TsGradientStop> = gradient
+        .stops
+        .iter()
+        .map(|s| {
+            TsGradientStop::new(
+                s.offset as f32,
+                TsColor::from_rgba8(s.color.r, s.color.g, s.color.b, s.color.a),
+            )
+        })
+        .collect();
+    LinearGradient::new(start, end, stops, SpreadMode::Pad, Transform::identity())
+}
+
+/// Decode a raster image asset into a premultiplied `Pixmap`.
+///
+/// Supports PNG (via tiny-skia's built-in decoder) and baseline/progressive
+/// JPEG (via `jpeg-decoder`). Returns `None` for unsupported formats or
+/// malformed data, in which case the caller skips drawing the asset.
+/// Deterministic: pixel output depends only on the input bytes.
+fn decode_raster_image(bytes: &[u8]) -> Option<Pixmap> {
+    // PNG signature.
+    if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+        return Pixmap::decode_png(bytes).ok();
+    }
+    // JPEG SOI marker.
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return decode_jpeg(bytes);
+    }
+    None
+}
+
+/// Decode a JPEG into an opaque premultiplied `Pixmap`. Handles RGB24 and L8
+/// (grayscale) pixel formats; other formats (L16, CMYK32) return `None`.
+fn decode_jpeg(bytes: &[u8]) -> Option<Pixmap> {
+    use jpeg_decoder::{Decoder, PixelFormat};
+    use tiny_skia::PremultipliedColorU8;
+
+    let mut decoder = Decoder::new(std::io::Cursor::new(bytes));
+    let pixels = decoder.decode().ok()?;
+    let info = decoder.info()?;
+    let mut pixmap = Pixmap::new(u32::from(info.width), u32::from(info.height))?;
+    let dst = pixmap.pixels_mut();
+
+    match info.pixel_format {
+        PixelFormat::RGB24 => {
+            for (chunk, px) in pixels.chunks_exact(3).zip(dst.iter_mut()) {
+                let [r, g, b] = chunk else { continue };
+                // Opaque source: premultiplied == straight at alpha 255.
+                *px = PremultipliedColorU8::from_rgba(*r, *g, *b, 255)?;
+            }
+        }
+        PixelFormat::L8 => {
+            for (v, px) in pixels.iter().zip(dst.iter_mut()) {
+                *px = PremultipliedColorU8::from_rgba(*v, *v, *v, 255)?;
+            }
+        }
+        _ => return None,
+    }
+    Some(pixmap)
+}
+
 /// Convert premultiplied RGBA8 (tiny-skia's internal storage) to straight-alpha RGBA8.
 fn premultiplied_to_straight(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8, u8) {
     if a == 0 {
@@ -165,6 +254,237 @@ fn premultiplied_to_straight(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8, u8) {
         result.min(255) as u8
     };
     (un(r), un(g), un(b), a)
+}
+
+// ── Shadow (SHAD-2) ─────────────────────────────────────────────────────────────
+//
+// Drop-shadow / outer-glow compositing for shadowed leaf nodes. The node's ink
+// is captured into an offscreen `Pixmap` (premultiplied RGBA8). At EndShadow,
+// each shadow layer is derived from the ink's coverage (alpha), tinted with the
+// layer color, blurred, and composited behind the crisp ink.
+//
+// Blur uses a deterministic three-box approximation of a Gaussian
+// (Ivan Kuchin / "Fastest Gaussian Blur" 3-box method,
+// <http://blog.ivank.net/fastest-gaussian-blur.html>). All arithmetic uses
+// fixed integer/float evaluation order with consistent rounding, so output is
+// byte-identical across runs (no time, randomness, or hashing).
+
+/// Paint all shadow layers of one capture onto `canvas`, then the crisp ink.
+///
+/// Layers are painted in REVERSE declared order so the first-declared layer ends
+/// up on top of later layers (all behind the ink). `width`/`height` match both
+/// `canvas` and `ink`.
+fn composite_shadows(
+    canvas: &mut Pixmap,
+    ink: &Pixmap,
+    shadows: &[ShadowSpec],
+    width: u32,
+    height: u32,
+) {
+    let paint = PixmapPaint::default(); // source-over, opacity 1.0
+    for spec in shadows.iter().rev() {
+        // Build the tinted shadow coverage from the ink's straight alpha.
+        let Some(mut shadow) = Pixmap::new(width, height) else {
+            continue;
+        };
+        tint_coverage(&mut shadow, ink, spec.color);
+
+        // Blur in premultiplied space (correct for source-over compositing).
+        gaussian_blur_premul(&mut shadow, spec.blur);
+
+        // Composite at the rounded integer offset. Rounding is deterministic.
+        let dx = round_offset(spec.dx);
+        let dy = round_offset(spec.dy);
+        canvas.draw_pixmap(dx, dy, shadow.as_ref(), &paint, Transform::identity(), None);
+    }
+
+    // Crisp ink on top of every shadow.
+    canvas.draw_pixmap(0, 0, ink.as_ref(), &paint, Transform::identity(), None);
+}
+
+/// Round a shadow offset to the nearest integer pixel, deterministically and
+/// without panicking. `f64::round` ties away from zero; non-finite collapses to 0.
+fn round_offset(v: f64) -> i32 {
+    if !v.is_finite() {
+        return 0;
+    }
+    let r = v.round();
+    if r >= i32::MAX as f64 {
+        i32::MAX
+    } else if r <= i32::MIN as f64 {
+        i32::MIN
+    } else {
+        r as i32
+    }
+}
+
+/// Fill `shadow` (premultiplied RGBA8) with the shadow color, modulated by the
+/// `ink`'s per-pixel alpha.
+///
+/// For each pixel: straight alpha = `ink_alpha * (color.a / 255)`, color =
+/// `color.rgb`; written PREMULTIPLIED. Iterates in lockstep via `chunks_exact(4)`,
+/// which guarantees exactly 4 bytes per chunk; direct indexing is panic-free.
+/// `shadow` and `ink` share dimensions.
+fn tint_coverage(shadow: &mut Pixmap, ink: &Pixmap, color: SceneColor) {
+    let ca = u32::from(color.a);
+    let cr = u32::from(color.r);
+    let cg = u32::from(color.g);
+    let cb = u32::from(color.b);
+    let dst = shadow.data_mut();
+    let src = ink.data();
+    for (out, inp) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+        // tiny-skia premultiplied RGBA: byte 3 is alpha (coverage). The ink's
+        // premultiplied alpha equals its straight alpha (alpha is never scaled).
+        // chunks_exact(4) guarantees exactly 4 bytes; direct indexing is safe.
+        let ink_a = u32::from(inp[3]);
+        // straight shadow alpha = ink_a * ca / 255, rounded.
+        let a = ((ink_a * ca) + 127) / 255;
+        // Premultiply the (constant) color by this alpha.
+        let pr = ((cr * a) + 127) / 255;
+        let pg = ((cg * a) + 127) / 255;
+        let pb = ((cb * a) + 127) / 255;
+        out[0] = pr.min(255) as u8;
+        out[1] = pg.min(255) as u8;
+        out[2] = pb.min(255) as u8;
+        out[3] = a.min(255) as u8;
+    }
+}
+
+/// Local alias for the scene `Color` carried inside a `ShadowSpec`, so this
+/// helper does not need to import the scene `Color` name (which would collide
+/// with tiny-skia's `Color`). Resolved at call sites via `spec.color`.
+type SceneColor = zenith_scene::Color;
+
+/// Compute the three box-blur sizes that approximate a Gaussian of the given
+/// `sigma` with `n == 3` passes (Kuchin's method).
+///
+/// Returns three odd box widths; the box radius for a width `w` is `(w - 1) / 2`.
+fn boxes_for_gauss(sigma: f64) -> [u32; 3] {
+    const N: f64 = 3.0;
+    if sigma <= 0.0 {
+        return [1, 1, 1];
+    }
+    let w_ideal = ((12.0 * sigma * sigma / N) + 1.0).sqrt();
+    let mut wl = w_ideal.floor() as i64;
+    if wl % 2 == 0 {
+        wl -= 1;
+    }
+    if wl < 1 {
+        wl = 1;
+    }
+    let wu = wl + 2;
+    let wl_f = wl as f64;
+    let m_ideal =
+        (12.0 * sigma * sigma - N * wl_f * wl_f - 4.0 * N * wl_f - 3.0 * N) / (-4.0 * wl_f - 4.0);
+    let m = m_ideal.round() as i64;
+    let mut out = [0u32; 3];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let w = if (i as i64) < m { wl } else { wu };
+        *slot = w.max(1) as u32;
+    }
+    out
+}
+
+/// Apply a deterministic separable Gaussian-approximation blur (three box
+/// passes) to a premultiplied RGBA8 `Pixmap`, in place.
+///
+/// Each pass is a horizontal box blur followed by a vertical box blur, computed
+/// with running sums over each of the four premultiplied channels independently
+/// (premultiplied blur is correct for source-over compositing). All indexing is
+/// bounds-guarded; arithmetic uses `u32` running sums with fixed rounding, so
+/// the result is byte-identical across runs.
+fn gaussian_blur_premul(pm: &mut Pixmap, sigma: f64) {
+    // Non-positive or non-finite sigma → no blur (NaN-safe: the `> 0.0` test is
+    // false for NaN, so we return early).
+    if !(sigma.is_finite() && sigma > 0.0) {
+        return;
+    }
+    let width = pm.width() as usize;
+    let height = pm.height() as usize;
+    if width == 0 || height == 0 {
+        return;
+    }
+    let boxes = boxes_for_gauss(sigma);
+    let data = pm.data_mut();
+    let expected = width * height * 4;
+    if data.len() != expected {
+        return; // defensive: unexpected layout → leave untouched
+    }
+    let mut scratch = vec![0u8; expected];
+    for w in boxes {
+        let radius = ((w.max(1) - 1) / 2) as usize;
+        if radius == 0 {
+            continue; // a 1-wide box is identity
+        }
+        // Horizontal: data → scratch.
+        box_blur_h(data, &mut scratch, width, height, radius);
+        // Vertical: scratch → data.
+        box_blur_v(&scratch, data, width, height, radius);
+    }
+}
+
+/// Horizontal box blur of radius `radius` over premultiplied RGBA8, writing the
+/// result into `dst`. Uses a running sum per channel; no panic indexing.
+fn box_blur_h(src: &[u8], dst: &mut [u8], width: usize, height: usize, radius: usize) {
+    let window = (2 * radius + 1) as u32;
+    let last = width.saturating_sub(1);
+    for y in 0..height {
+        let row = y * width * 4;
+        for c in 0..4 {
+            // Initialize the running sum for the window CENTERED at x=0, i.e.
+            // positions [-radius, radius] each clamped to [0, width-1] (edge
+            // extension). Positions < 0 collapse onto column 0.
+            let mut sum: u32 = 0;
+            for i in 0..=(2 * radius) {
+                // Map loop index i∈[0,2r] to signed offset (i - radius), clamped.
+                let xx = (i.saturating_sub(radius)).min(last);
+                let v = src.get(row + xx * 4 + c).copied().unwrap_or(0);
+                sum += u32::from(v);
+            }
+            for x in 0..width {
+                if let Some(o) = dst.get_mut(row + x * 4 + c) {
+                    *o = ((sum + window / 2) / window).min(255) as u8;
+                }
+                // Slide one column right: add pixel at x+radius+1 (clamped),
+                // drop the leftmost at x-radius (clamped to 0 via saturating_sub).
+                let add_x = (x + radius + 1).min(last);
+                let sub_x = x.saturating_sub(radius);
+                let add = src.get(row + add_x * 4 + c).copied().unwrap_or(0);
+                let sub = src.get(row + sub_x * 4 + c).copied().unwrap_or(0);
+                sum = sum + u32::from(add) - u32::from(sub);
+            }
+        }
+    }
+}
+
+/// Vertical box blur of radius `radius` over premultiplied RGBA8, writing the
+/// result into `dst`. Uses a running sum per channel; no panic indexing.
+fn box_blur_v(src: &[u8], dst: &mut [u8], width: usize, height: usize, radius: usize) {
+    let window = (2 * radius + 1) as u32;
+    let stride = width * 4;
+    let last = height.saturating_sub(1);
+    for x in 0..width {
+        let col = x * 4;
+        for c in 0..4 {
+            // Window centered at y=0 with edge extension (see box_blur_h).
+            let mut sum: u32 = 0;
+            for i in 0..=(2 * radius) {
+                let yy = (i.saturating_sub(radius)).min(last);
+                let v = src.get(col + yy * stride + c).copied().unwrap_or(0);
+                sum += u32::from(v);
+            }
+            for y in 0..height {
+                if let Some(o) = dst.get_mut(col + y * stride + c) {
+                    *o = ((sum + window / 2) / window).min(255) as u8;
+                }
+                let add_y = (y + radius + 1).min(last);
+                let sub_y = y.saturating_sub(radius);
+                let add = src.get(col + add_y * stride + c).copied().unwrap_or(0);
+                let sub = src.get(col + sub_y * stride + c).copied().unwrap_or(0);
+                sum = sum + u32::from(add) - u32::from(sub);
+            }
+        }
+    }
 }
 
 // ── Glyph outline pen ─────────────────────────────────────────────────────────
@@ -277,11 +597,22 @@ impl RasterBackend for TinySkiaBackend {
         // system fonts — only the registered faces from `fonts`.
         let mut svg_fontdb: Option<resvg::usvg::fontdb::Database> = None;
 
+        // Active offscreen shadow capture: the target pixmap that buffers the
+        // ink of a shadowed leaf node, plus the pending shadow specs to paint at
+        // the matching EndShadow. `None` means draws target the real canvas.
+        // v0 shadows are leaf-only and never nest (at most one active capture).
+        let mut capture: Option<(Pixmap, Vec<ShadowSpec>)> = None;
+
         for cmd in &scene.commands {
             // Hoist once per iteration. Push/pop arms mutate the stack and
             // never consume current_ts; draw arms read it and never mutate the
             // stack — so hoisting is behavior-identical to reading in each arm.
             let current_ts = *transform_stack.last().unwrap_or(&Transform::identity());
+
+            // ── Structural / capture commands first ───────────────────────────
+            // These never draw into a target pixmap; they mutate the clip /
+            // transform stacks or open/close the shadow capture, then `continue`
+            // so the drawing match below is reached only by drawing commands.
             match cmd {
                 SceneCommand::PushClip { x, y, w, h } => {
                     let new_rect = (*x, *y, x + w, y + h);
@@ -291,22 +622,65 @@ impl RasterBackend for TinySkiaBackend {
                     let intersected =
                         intersect_rects(current, new_rect).unwrap_or((0.0, 0.0, 0.0, 0.0)); // empty → degenerate
                     clip_stack.push(intersected);
+                    continue;
                 }
 
                 // Never pop below the page clip (index 0).
-                SceneCommand::PopClip if clip_stack.len() > 1 => {
-                    clip_stack.pop();
+                SceneCommand::PopClip => {
+                    if clip_stack.len() > 1 {
+                        clip_stack.pop();
+                    }
+                    continue;
                 }
 
                 SceneCommand::PushTransform { angle_deg, cx, cy } => {
                     let rot = Transform::from_rotate_at(*angle_deg as f32, *cx as f32, *cy as f32);
                     transform_stack.push(current_ts.pre_concat(rot));
+                    continue;
                 }
 
-                SceneCommand::PopTransform if transform_stack.len() > 1 => {
-                    transform_stack.pop();
+                SceneCommand::PopTransform => {
+                    if transform_stack.len() > 1 {
+                        transform_stack.pop();
+                    }
+                    continue;
                 }
 
+                // Open an offscreen capture for shadowed ink. v0 shadows are
+                // leaf-only and DO NOT nest; if a capture is already active we
+                // keep the current one (inner draws fold into it) rather than
+                // crash. On allocation failure we fall back to a no-capture
+                // state (nothing is captured; the ink draws crisp, no shadow).
+                SceneCommand::BeginShadow { shadows } => {
+                    if capture.is_none()
+                        && let Some(offscreen) = Pixmap::new(width, height)
+                    {
+                        capture = Some((offscreen, shadows.clone()));
+                    }
+                    continue;
+                }
+
+                // Close the active capture: paint the blurred shadow layers onto
+                // the real canvas, then composite the crisp ink on top.
+                SceneCommand::EndShadow => {
+                    if let Some((ink, shadows)) = capture.take() {
+                        composite_shadows(&mut pixmap, &ink, &shadows, width, height);
+                    }
+                    continue;
+                }
+
+                _ => {}
+            }
+
+            // The active drawing target: the offscreen capture when one is open,
+            // otherwise the real canvas. Computed once per drawing command, after
+            // the structural match above has run (so no borrow overlaps).
+            let target: &mut Pixmap = match capture.as_mut() {
+                Some((pm, _)) => pm,
+                None => &mut pixmap,
+            };
+
+            match cmd {
                 SceneCommand::FillRect { x, y, w, h, color } => {
                     if current_ts.is_identity() {
                         // ── Unrotated (identity) path — byte-identical to before ──
@@ -344,7 +718,7 @@ impl RasterBackend for TinySkiaBackend {
                         paint.anti_alias = false; // deterministic: no edge AA variance
 
                         // Drawing outside the pixmap simply touches no pixels; not an error.
-                        pixmap.fill_rect(rect, &paint, Transform::identity(), None);
+                        target.fill_rect(rect, &paint, Transform::identity(), None);
                     } else {
                         // ── Rotated path: fill the rect as a path under the current
                         // transform, AA-on, masked by the (axis-aligned) clip. ──
@@ -362,7 +736,7 @@ impl RasterBackend for TinySkiaBackend {
                         let mut paint = Paint::default();
                         paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                         paint.anti_alias = true;
-                        pixmap.fill_path(
+                        target.fill_path(
                             &path,
                             &paint,
                             FillRule::Winding,
@@ -414,7 +788,7 @@ impl RasterBackend for TinySkiaBackend {
                     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                     paint.anti_alias = true;
 
-                    pixmap.fill_path(&path, &paint, FillRule::Winding, current_ts, mask.as_ref());
+                    target.fill_path(&path, &paint, FillRule::Winding, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::StrokeEllipse {
@@ -476,7 +850,7 @@ impl RasterBackend for TinySkiaBackend {
                     // AA-on: curved stroke edge, deterministic same-machine.
                     paint.anti_alias = true;
 
-                    pixmap.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
+                    target.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::StrokeLine {
@@ -545,7 +919,7 @@ impl RasterBackend for TinySkiaBackend {
                     // same-machine like ellipse/glyph fills.
                     paint.anti_alias = true;
 
-                    pixmap.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
+                    target.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::DrawGlyphRun {
@@ -620,7 +994,7 @@ impl RasterBackend for TinySkiaBackend {
                             None => continue,
                         };
 
-                        pixmap.fill_path(
+                        target.fill_path(
                             &path,
                             &paint,
                             FillRule::Winding,
@@ -648,8 +1022,8 @@ impl RasterBackend for TinySkiaBackend {
                     // ── b. Produce a raster Pixmap from Image (PNG) or Svg ────
                     let src: Pixmap = match asset.kind {
                         AssetKind::Image => {
-                            let Ok(p) = Pixmap::decode_png(&asset.bytes) else {
-                                continue; // malformed PNG: skip
+                            let Some(p) = decode_raster_image(&asset.bytes) else {
+                                continue; // unsupported/malformed raster image: skip
                             };
                             p
                         }
@@ -771,7 +1145,7 @@ impl RasterBackend for TinySkiaBackend {
 
                     // ── g. Composite. Box-clip (G-22) is enforced by the Mask;
                     // deterministic same-machine (pure-software bilinear). ─────
-                    pixmap.draw_pixmap(0, 0, src.as_ref(), &paint, transform, mask.as_ref());
+                    target.draw_pixmap(0, 0, src.as_ref(), &paint, transform, mask.as_ref());
                 }
 
                 SceneCommand::FillPolygon {
@@ -809,7 +1183,7 @@ impl RasterBackend for TinySkiaBackend {
                     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                     paint.anti_alias = true;
 
-                    pixmap.fill_path(&path, &paint, fill_rule, current_ts, mask.as_ref());
+                    target.fill_path(&path, &paint, fill_rule, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::StrokePolyline {
@@ -851,7 +1225,7 @@ impl RasterBackend for TinySkiaBackend {
                     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                     paint.anti_alias = true;
 
-                    pixmap.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
+                    target.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::StrokeRect {
@@ -908,7 +1282,7 @@ impl RasterBackend for TinySkiaBackend {
                     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                     paint.anti_alias = true;
 
-                    pixmap.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
+                    target.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::FillRoundedRect {
@@ -954,7 +1328,7 @@ impl RasterBackend for TinySkiaBackend {
                     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                     paint.anti_alias = true;
 
-                    pixmap.fill_path(&path, &paint, FillRule::Winding, current_ts, mask.as_ref());
+                    target.fill_path(&path, &paint, FillRule::Winding, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::StrokeRoundedRect {
@@ -1015,7 +1389,152 @@ impl RasterBackend for TinySkiaBackend {
                     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                     paint.anti_alias = true;
 
-                    pixmap.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
+                    target.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
+                }
+
+                SceneCommand::FillRectGradient {
+                    x,
+                    y,
+                    w,
+                    h,
+                    gradient,
+                } => {
+                    if !x.is_finite()
+                        || !y.is_finite()
+                        || !w.is_finite()
+                        || !h.is_finite()
+                        || *w <= 0.0
+                        || *h <= 0.0
+                    {
+                        continue;
+                    }
+
+                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+                    if intersect_rects((*x, *y, x + w, y + h), effective_clip).is_none() {
+                        continue;
+                    }
+
+                    let Some(rect) = Rect::from_xywh(*x as f32, *y as f32, *w as f32, *h as f32)
+                    else {
+                        continue;
+                    };
+                    let path = PathBuilder::from_rect(rect);
+
+                    let mask = match clip_mask(effective_clip, width, height) {
+                        None => continue,
+                        Some(m) => m,
+                    };
+
+                    let Some(shader) = gradient_shader(*x, *y, *w, *h, gradient) else {
+                        continue;
+                    };
+                    let paint = Paint {
+                        shader,
+                        anti_alias: true,
+                        ..Default::default()
+                    };
+
+                    target.fill_path(&path, &paint, FillRule::Winding, current_ts, mask.as_ref());
+                }
+
+                SceneCommand::FillRoundedRectGradient {
+                    x,
+                    y,
+                    w,
+                    h,
+                    radius,
+                    gradient,
+                } => {
+                    if !x.is_finite()
+                        || !y.is_finite()
+                        || !w.is_finite()
+                        || !h.is_finite()
+                        || !radius.is_finite()
+                        || *w <= 0.0
+                        || *h <= 0.0
+                    {
+                        continue;
+                    }
+
+                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+                    if intersect_rects((*x, *y, x + w, y + h), effective_clip).is_none() {
+                        continue;
+                    }
+
+                    let Some(path) = build_rounded_rect_path(
+                        *x as f32,
+                        *y as f32,
+                        *w as f32,
+                        *h as f32,
+                        *radius as f32,
+                    ) else {
+                        continue;
+                    };
+
+                    let mask = match clip_mask(effective_clip, width, height) {
+                        None => continue,
+                        Some(m) => m,
+                    };
+
+                    let Some(shader) = gradient_shader(*x, *y, *w, *h, gradient) else {
+                        continue;
+                    };
+                    let paint = Paint {
+                        shader,
+                        anti_alias: true,
+                        ..Default::default()
+                    };
+
+                    target.fill_path(&path, &paint, FillRule::Winding, current_ts, mask.as_ref());
+                }
+
+                SceneCommand::FillEllipseGradient {
+                    x,
+                    y,
+                    w,
+                    h,
+                    gradient,
+                } => {
+                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+
+                    // Early-out: skip if the ellipse bbox is entirely outside the clip.
+                    if intersect_rects((*x, *y, x + w, y + h), effective_clip).is_none() {
+                        continue;
+                    }
+
+                    if !x.is_finite()
+                        || !y.is_finite()
+                        || !w.is_finite()
+                        || !h.is_finite()
+                        || *w <= 0.0
+                        || *h <= 0.0
+                    {
+                        continue;
+                    }
+
+                    let Some(rect) = Rect::from_xywh(*x as f32, *y as f32, *w as f32, *h as f32)
+                    else {
+                        continue;
+                    };
+                    let Some(path) = PathBuilder::from_oval(rect) else {
+                        continue;
+                    };
+
+                    let mask = match clip_mask(effective_clip, width, height) {
+                        None => continue,
+                        Some(m) => m,
+                    };
+
+                    let Some(shader) = gradient_shader(*x, *y, *w, *h, gradient) else {
+                        continue;
+                    };
+                    let paint = Paint {
+                        shader,
+                        anti_alias: true,
+                        ..Default::default()
+                    };
+
+                    target.fill_path(&path, &paint, FillRule::Winding, current_ts, mask.as_ref());
                 }
 
                 // PopClip when the stack is already at the page clip (depth 0),
@@ -1092,7 +1611,9 @@ mod tests {
 
     use zenith_core::{AssetKind, BytesAssetProvider, FontStyle, default_provider};
     use zenith_layout::{RustybuzzEngine, ShapeRequest, TextLayoutEngine};
-    use zenith_scene::{Color, FitMode, Scene, SceneCommand, SceneGlyph};
+    use zenith_scene::{
+        Color, FitMode, GradientPaint, GradientStop, Scene, SceneCommand, SceneGlyph, ShadowSpec,
+    };
 
     use crate::backend::RasterBackend;
     use crate::render::{render_image, render_png};
@@ -2295,5 +2816,148 @@ mod tests {
             a_base, 0,
             "pixel (20,50) must be transparent in the unrotated baseline"
         );
+    }
+
+    // ── Gradient fill (GRAD-2) ────────────────────────────────────────────
+
+    /// A `FillRectGradient` (vertical, 90°) renders without error, produces a
+    /// non-uniform fill (top row differs from bottom row), and is byte-identical
+    /// across two renders.
+    #[test]
+    fn fill_rect_gradient_renders_non_uniform_and_deterministic() {
+        let mut scene = Scene::new(40.0, 40.0);
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 40.0,
+            h: 40.0,
+        });
+        scene.commands.push(SceneCommand::FillRectGradient {
+            x: 0.0,
+            y: 0.0,
+            w: 40.0,
+            h: 40.0,
+            gradient: GradientPaint {
+                angle_deg: 90.0, // top-to-bottom
+                stops: vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: Color {
+                            r: 0,
+                            g: 0,
+                            b: 0,
+                            a: 255,
+                        },
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: Color {
+                            r: 255,
+                            g: 255,
+                            b: 255,
+                            a: 255,
+                        },
+                    },
+                ],
+            },
+        });
+        scene.commands.push(SceneCommand::PopClip);
+
+        let backend = TinySkiaBackend;
+        let provider = default_provider();
+        let img = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("rasterize must succeed");
+
+        // Vertical gradient: the top row must be darker than the bottom row.
+        let (top_r, _, _, _) = pixel(&img.rgba, img.width, 20, 1);
+        let (bot_r, _, _, _) = pixel(&img.rgba, img.width, 20, 38);
+        assert!(
+            bot_r > top_r,
+            "vertical gradient must brighten downward: top={top_r}, bottom={bot_r}"
+        );
+
+        // Byte-identical across two renders.
+        let img2 = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("rasterize must succeed");
+        assert_eq!(img.rgba, img2.rgba, "gradient render must be deterministic");
+    }
+
+    // ── Shadow (SHAD-2) ───────────────────────────────────────────────────
+
+    /// A `BeginShadow` (one black, blurred, slightly-offset layer) wrapping a
+    /// `FillRect`, closed by `EndShadow`, must:
+    /// (i) render deterministically (two runs byte-identical), and
+    /// (ii) bleed shadow ink OUTSIDE the original rect but within blur range.
+    #[test]
+    fn shadow_blurs_and_bleeds_outward_deterministically() {
+        // 40×40 canvas; an opaque red rect at [15,25]×[15,25].
+        let build = || {
+            let mut scene = Scene::new(40.0, 40.0);
+            scene.commands.push(SceneCommand::BeginShadow {
+                shadows: vec![ShadowSpec {
+                    dx: 1.0,
+                    dy: 1.0,
+                    blur: 3.0,
+                    color: Color {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 255,
+                    },
+                }],
+            });
+            scene.commands.push(SceneCommand::FillRect {
+                x: 15.0,
+                y: 15.0,
+                w: 10.0,
+                h: 10.0,
+                color: Color {
+                    r: 255,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+            });
+            scene.commands.push(SceneCommand::EndShadow);
+            scene
+        };
+
+        let backend = TinySkiaBackend;
+        let provider = default_provider();
+        let img1 = backend
+            .rasterize(&build(), &provider, &no_assets())
+            .expect("rasterize must succeed");
+        let img2 = backend
+            .rasterize(&build(), &provider, &no_assets())
+            .expect("rasterize must succeed");
+
+        // (i) Determinism.
+        assert_eq!(
+            img1.rgba, img2.rgba,
+            "shadow render must be byte-identical across runs"
+        );
+
+        // (ii) The crisp red ink is intact inside the rect.
+        let (cr, _, _, ca) = pixel(&img1.rgba, img1.width, 20, 20);
+        assert!(ca == 255 && cr > 200, "rect center must stay opaque red");
+
+        // (iii) Shadow bleeds OUTSIDE the original rect: a pixel just left of the
+        // rect's left edge (x=12, well outside [15,25)) but within blur range
+        // must be non-transparent and dark (the black shadow).
+        let (sr, sg, sb, sa) = pixel(&img1.rgba, img1.width, 12, 20);
+        assert!(
+            sa > 0,
+            "shadow must bleed outside the rect (x=12): got alpha {sa}"
+        );
+        assert!(
+            sr < 128 && sg < 128 && sb < 128,
+            "the bled shadow pixel must be dark: ({sr},{sg},{sb})"
+        );
+
+        // (iv) Far outside the blur range stays transparent.
+        let (_, _, _, far_a) = pixel(&img1.rgba, img1.width, 0, 0);
+        assert_eq!(far_a, 0, "corner far from the shadow must stay transparent");
     }
 }

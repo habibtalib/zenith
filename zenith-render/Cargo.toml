@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 zenith-core = { path = "../zenith-core" }
 zenith-scene = { path = "../zenith-scene" }
+jpeg-decoder = "0.3"
 tiny-skia = "0.11"
 ttf-parser = "0.25"
 resvg = "0.36"
