@@ -233,6 +233,41 @@ mod tests {
         }
     }
 
+    /// A `code` node carries its verbatim source as a `content` child whose
+    /// escapes (`\n`, `\t`, `\"`, `\\`) decode into the stored content blob.
+    #[test]
+    fn test_code_node_content_decoded() {
+        let src = r#"zenith version=1 {
+  project id="proj.code" name="C"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.code" title="C" {
+    page id="page.code" w=(px)100 h=(px)100 {
+      code id="snippet" x=(px)8 y=(px)8 w=(px)80 h=(px)40 overflow="clip" language="rust" line-numbers=#false tab-width=4 {
+        content "fn main() {\n\tlet s = \"a\\\\b\";\n}"
+      }
+    }
+  }
+}
+"#;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("code node must parse");
+        match &doc.body.pages[0].children[0] {
+            Node::Code(c) => {
+                assert_eq!(c.id, "snippet");
+                assert_eq!(c.overflow.as_deref(), Some("clip"));
+                assert_eq!(c.language.as_deref(), Some("rust"));
+                assert_eq!(c.line_numbers, Some(false));
+                assert_eq!(c.tab_width, Some(4));
+                // Decoded content: literal newline, tab, quote, and backslash.
+                assert_eq!(c.content, "fn main() {\n\tlet s = \"a\\\\b\";\n}");
+            }
+            other => panic!("expected Code node, got {other:?}"),
+        }
+    }
+
     /// Invalid UTF-8 bytes must yield `ParseErrorCode::NotUtf8`.
     #[test]
     fn test_invalid_utf8_error() {

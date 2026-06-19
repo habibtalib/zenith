@@ -18,10 +18,10 @@ pub mod validate;
 // Curated flat re-exports for the most-used public surface.
 pub use asset::{AssetData, AssetProvider, BytesAssetProvider};
 pub use ast::{
-    AssetBlock, AssetDecl, AssetKind, Dimension, Document, DocumentBody, EllipseNode, FrameNode,
-    GroupNode, ImageNode, LineNode, Node, ObjectPosition, Page, Point, PolygonNode, PolylineNode,
-    Project, PropertyValue, RectNode, Span, Style, StyleBlock, TextNode, TextSpan, Token,
-    TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownProperty,
+    AssetBlock, AssetDecl, AssetKind, CodeNode, Dimension, Document, DocumentBody, EllipseNode,
+    FrameNode, GroupNode, ImageNode, LineNode, Node, ObjectPosition, Page, Point, PolygonNode,
+    PolylineNode, Project, PropertyValue, RectNode, Span, Style, StyleBlock, TextNode, TextSpan,
+    Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownProperty,
     UnknownStyleProp, UnknownValue,
 };
 pub use diagnostics::{Diagnostic, Severity};

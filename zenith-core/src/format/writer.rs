@@ -22,10 +22,10 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    AssetBlock, AssetDecl, Dimension, Document, DocumentBody, EllipseNode, FrameNode, GroupNode,
-    ImageNode, LineNode, Node, ObjectPosition, Page, Point, PolygonNode, PolylineNode, Project,
-    PropertyValue, RectNode, StyleBlock, TextNode, TextSpan, Token, TokenBlock, TokenLiteral,
-    TokenType, TokenValue, Unit, UnknownValue,
+    AssetBlock, AssetDecl, CodeNode, Dimension, Document, DocumentBody, EllipseNode, FrameNode,
+    GroupNode, ImageNode, LineNode, Node, ObjectPosition, Page, Point, PolygonNode, PolylineNode,
+    Project, PropertyValue, RectNode, StyleBlock, TextNode, TextSpan, Token, TokenBlock,
+    TokenLiteral, TokenType, TokenValue, Unit, UnknownValue,
 };
 use crate::error::FormatError;
 
@@ -47,13 +47,7 @@ fn fmt_unknown_value(v: &UnknownValue) -> String {
         UnknownValue::String(s) => {
             let mut out = String::with_capacity(s.len() + 2);
             out.push('"');
-            for ch in s.chars() {
-                match ch {
-                    '\\' => out.push_str("\\\\"),
-                    '"' => out.push_str("\\\""),
-                    other => out.push(other),
-                }
-            }
+            out.push_str(&escape_kdl_string(s));
             out.push('"');
             out
         }
@@ -391,16 +385,8 @@ fn write_style_block(block: &StyleBlock, out: &mut String, depth: usize) {
             for (key, prop) in &style.unknown_props {
                 indent(out, depth + 2);
                 out.push_str(key);
-                out.push(' ');
-                // Emit the raw value as a properly escaped KDL string literal.
-                out.push('"');
-                for ch in prop.raw.chars() {
-                    match ch {
-                        '\\' => out.push_str("\\\\"),
-                        '"' => out.push_str("\\\""),
-                        other => out.push(other),
-                    }
-                }
+                out.push_str(" \"");
+                out.push_str(&escape_kdl_string(&prop.raw));
                 out.push_str("\"\n");
             }
 
@@ -486,6 +472,7 @@ fn write_node(node: &Node, out: &mut String, depth: usize) {
         Node::Ellipse(e) => write_ellipse(e, out, depth),
         Node::Line(l) => write_line(l, out, depth),
         Node::Text(t) => write_text(t, out, depth),
+        Node::Code(c) => write_code(c, out, depth),
         Node::Frame(f) => write_frame(f, out, depth),
         Node::Group(g) => write_group(g, out, depth),
         Node::Image(i) => write_image(i, out, depth),
@@ -754,14 +741,7 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
 fn write_span(span: &TextSpan, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("span \"");
-    // Escape backslashes and double-quotes inside span text.
-    for ch in span.text.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            other => out.push(other),
-        }
-    }
+    out.push_str(&escape_kdl_string(&span.text));
     out.push('"');
 
     // Inline props: fill, font-weight, italic, underline, strikethrough.
@@ -772,6 +752,79 @@ fn write_span(span: &TextSpan, out: &mut String, depth: usize) {
     write_opt_bool(out, "strikethrough", &span.strikethrough);
 
     out.push('\n');
+}
+
+/// Escape a string for emission as a single-line KDL v2 quoted string.
+///
+/// Unlike the inline span/unknown-prop escapers (which only handle `\` and `"`),
+/// this also encodes the whitespace control characters `\n`, `\r`, and `\t` as
+/// backslash escapes so that a multi-line `code` blob survives as ONE physical
+/// line. All other characters pass through verbatim. This is the inverse of the
+/// `kdl` crate's decode on parse, guaranteeing a byte-exact content round-trip.
+fn escape_kdl_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn write_code(c: &CodeNode, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("code");
+
+    // Canonical property order: id, name, role, x, y, w, h, overflow, language,
+    // line-numbers, tab-width, style, fill, font-family, font-size, opacity,
+    // visible, locked, rotate, then unknown props.
+    out.push_str(" id=\"");
+    out.push_str(&c.id);
+    out.push('"');
+    write_opt_str(out, "name", &c.name);
+    write_opt_str(out, "role", &c.role);
+    write_opt_dimension(out, "x", &c.x);
+    write_opt_dimension(out, "y", &c.y);
+    write_opt_dimension(out, "w", &c.w);
+    write_opt_dimension(out, "h", &c.h);
+    write_opt_str(out, "overflow", &c.overflow);
+    write_opt_str(out, "language", &c.language);
+    write_opt_bool(out, "line-numbers", &c.line_numbers);
+    if let Some(tw) = c.tab_width {
+        let _ = write!(out, " tab-width={tw}");
+    }
+    write_opt_str(out, "style", &c.style);
+    write_opt_property_value(out, "fill", &c.fill);
+    write_opt_property_value(out, "font-family", &c.font_family);
+    write_opt_property_value(out, "font-size", &c.font_size);
+    write_opt_f64(out, "opacity", &c.opacity);
+    write_opt_bool(out, "visible", &c.visible);
+    write_opt_bool(out, "locked", &c.locked);
+    write_opt_dimension(out, "rotate", &c.rotate);
+
+    // Unknown properties in sorted key order.
+    for (key, prop) in &c.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_value(&prop.value));
+    }
+
+    // The verbatim source is emitted as a single escaped `content` child line.
+    // It is NEVER re-indented/trimmed: the content is one escaped single-line
+    // KDL string (KDL v2 multi-line dedent rules would otherwise mutate it).
+    out.push_str(" {\n");
+    indent(out, depth + 1);
+    out.push_str("content \"");
+    out.push_str(&escape_kdl_string(&c.content));
+    out.push_str("\"\n");
+    indent(out, depth);
+    out.push_str("}\n");
 }
 
 /// Emit a `point x=(unit)N y=(unit)N` line for each vertex in the list.
@@ -942,6 +995,61 @@ mod tests {
         );
     }
 
+    /// A `.zen` document with a `code` node whose content stresses every escape
+    /// path: leading spaces, a blank line, a tab, an embedded quote, and a
+    /// literal backslash.
+    const CODE_DOC: &str = r##"zenith version=1 {
+  project id="proj.code" name="Code Project"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.code" title="Code Doc" {
+    page id="page.one" w=(px)640 h=(px)360 {
+      code id="snippet" x=(px)96 y=(px)320 w=(px)560 h=(px)180 overflow="clip" language="rust" line-numbers=#false tab-width=4 {
+        content "fn main() {\n    let path = \"c:\\\\tmp\";\n\n\tprintln!(\"hi\");\n}"
+      }
+    }
+  }
+}
+"##;
+
+    /// **Code content verbatim round-trip**: parse → format → parse must yield a
+    /// BYTE-IDENTICAL content blob, and the formatter must be idempotent.
+    #[test]
+    fn test_code_content_verbatim_round_trip() {
+        let adapter = KdlAdapter;
+        let doc1 = adapter.parse(CODE_DOC.as_bytes()).expect("parse 1");
+
+        // Decoded content captured from the first parse.
+        let original = match &doc1.body.pages[0].children[0] {
+            Node::Code(c) => c.content.clone(),
+            other => panic!("expected Code node, got {other:?}"),
+        };
+        // Sanity: the fixture really exercises every escape class.
+        assert!(original.contains('\n') && original.contains('\t'));
+        assert!(original.contains('"') && original.contains('\\'));
+
+        let s1 = format_document(&doc1).expect("format 1");
+        let doc2 = adapter.parse(&s1).expect("parse 2");
+        let reparsed = match &doc2.body.pages[0].children[0] {
+            Node::Code(c) => c.content.clone(),
+            other => panic!("expected Code node, got {other:?}"),
+        };
+        assert_eq!(
+            original, reparsed,
+            "code content must round-trip byte-identically"
+        );
+
+        // Idempotency: format(format(doc)) == format(doc).
+        let s2 = format_document(&doc2).expect("format 2");
+        assert_eq!(
+            String::from_utf8(s1).unwrap(),
+            String::from_utf8(s2).unwrap(),
+            "code formatting must be idempotent"
+        );
+    }
+
     /// Strip all source spans from a Document to enable span-agnostic equality.
     fn strip_spans(mut doc: crate::ast::Document) -> crate::ast::Document {
         // Assets
@@ -976,6 +1084,7 @@ mod tests {
             Node::Ellipse(e) => e.source_span = None,
             Node::Line(l) => l.source_span = None,
             Node::Text(t) => t.source_span = None,
+            Node::Code(c) => c.source_span = None,
             Node::Frame(f) => {
                 f.source_span = None;
                 for child in &mut f.children {

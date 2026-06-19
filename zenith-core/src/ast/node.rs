@@ -200,6 +200,50 @@ pub struct TextNode {
     pub unknown_props: BTreeMap<String, UnknownProperty>,
 }
 
+/// A `code` node — a multi-line MONOSPACE text block.
+///
+/// Structurally this mirrors [`TextNode`] but carries a single verbatim source
+/// blob instead of styled `spans`. The blob is stored DECODED (newlines and
+/// tabs are literal characters); the formatter re-encodes it with escapes.
+///
+/// The verbatim source is carried in the KDL as a `content` child node with one
+/// escaped string argument (NOT a bare `r#"..."#` raw string): KDL v2 multi-line
+/// string dedent semantics make the raw form lossy, whereas a single-line
+/// escaped string round-trips `\n \t \" \\` exactly through the `kdl` crate.
+/// See `transform_code` / `write_code` for the parse/format sides.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodeNode {
+    pub id: String,
+    pub name: Option<String>,
+    pub role: Option<String>,
+    pub x: Option<Dimension>,
+    pub y: Option<Dimension>,
+    pub w: Option<Dimension>,
+    pub h: Option<Dimension>,
+    /// "clip" (default) or "visible"; v0 does not word-wrap.
+    pub overflow: Option<String>,
+    /// Open string naming the source language; v0 renders plaintext regardless.
+    pub language: Option<String>,
+    /// Render line numbers (default false); parsed + preserved, NOT acted on in v0.
+    pub line_numbers: Option<bool>,
+    /// Rendered column width of a tab (default 4).
+    pub tab_width: Option<u32>,
+    pub style: Option<String>,
+    pub fill: Option<PropertyValue>,
+    pub font_family: Option<PropertyValue>,
+    pub font_size: Option<PropertyValue>,
+    pub opacity: Option<f64>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    pub rotate: Option<Dimension>,
+    /// Verbatim source text (decoded; newlines/tabs are literal characters).
+    pub content: String,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+}
+
 /// An unrecognized node kind, preserved for forward-compat.
 ///
 /// When a `.zen` document contains a node kind that this binary does not
@@ -371,6 +415,7 @@ pub enum Node {
     Ellipse(EllipseNode),
     Line(LineNode),
     Text(TextNode),
+    Code(CodeNode),
     Frame(FrameNode),
     Group(GroupNode),
     Image(ImageNode),

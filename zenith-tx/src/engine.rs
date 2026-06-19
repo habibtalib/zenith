@@ -354,6 +354,7 @@ fn node_kind_str(node: &Node) -> &'static str {
         Node::Ellipse(_) => "ellipse",
         Node::Line(_) => "line",
         Node::Text(_) => "text",
+        Node::Code(_) => "code",
         Node::Frame(_) => "frame",
         Node::Group(_) => "group",
         Node::Image(_) => "image",
@@ -373,6 +374,7 @@ fn node_visible_mut(node: &mut Node) -> Option<&mut Option<bool>> {
         Node::Ellipse(n) => Some(&mut n.visible),
         Node::Line(n) => Some(&mut n.visible),
         Node::Text(n) => Some(&mut n.visible),
+        Node::Code(n) => Some(&mut n.visible),
         Node::Frame(n) => Some(&mut n.visible),
         Node::Group(n) => Some(&mut n.visible),
         Node::Image(n) => Some(&mut n.visible),
@@ -390,6 +392,7 @@ fn node_locked_mut(node: &mut Node) -> Option<&mut Option<bool>> {
         Node::Ellipse(n) => Some(&mut n.locked),
         Node::Line(n) => Some(&mut n.locked),
         Node::Text(n) => Some(&mut n.locked),
+        Node::Code(n) => Some(&mut n.locked),
         Node::Frame(n) => Some(&mut n.locked),
         Node::Group(n) => Some(&mut n.locked),
         Node::Image(n) => Some(&mut n.locked),
@@ -407,6 +410,7 @@ fn node_fill_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
         Node::Rect(n) => Some(&mut n.fill),
         Node::Ellipse(n) => Some(&mut n.fill),
         Node::Text(n) => Some(&mut n.fill),
+        Node::Code(n) => Some(&mut n.fill),
         Node::Polygon(n) => Some(&mut n.fill),
         Node::Polyline(n) => Some(&mut n.fill),
         Node::Line(_) | Node::Frame(_) | Node::Group(_) | Node::Image(_) | Node::Unknown(_) => None,
@@ -424,6 +428,7 @@ fn node_stroke_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
         Node::Polyline(n) => Some(&mut n.stroke),
         Node::Ellipse(_)
         | Node::Text(_)
+        | Node::Code(_)
         | Node::Frame(_)
         | Node::Group(_)
         | Node::Image(_)
@@ -442,6 +447,7 @@ fn node_stroke_width_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> 
         Node::Polyline(n) => Some(&mut n.stroke_width),
         Node::Ellipse(_)
         | Node::Text(_)
+        | Node::Code(_)
         | Node::Frame(_)
         | Node::Group(_)
         | Node::Image(_)
@@ -473,6 +479,7 @@ fn node_geometry_mut(node: &mut Node) -> Option<GeometryMut<'_>> {
         Node::Image(i) => Some((&mut i.x, &mut i.y, &mut i.w, &mut i.h)),
         Node::Line(_)
         | Node::Text(_)
+        | Node::Code(_)
         | Node::Group(_)
         | Node::Polygon(_)
         | Node::Polyline(_)
@@ -1145,6 +1152,7 @@ fn node_id_of(node: &Node) -> Option<&str> {
         Node::Ellipse(e) => Some(&e.id),
         Node::Line(l) => Some(&l.id),
         Node::Text(t) => Some(&t.id),
+        Node::Code(c) => Some(&c.id),
         Node::Frame(f) => Some(&f.id),
         Node::Group(g) => Some(&g.id),
         Node::Image(i) => Some(&i.id),
@@ -1581,6 +1589,23 @@ mod tests {
   document id="doc1" title="T" {
     page id="pg1" w=(px)400 h=(px)300 {
       line id="ln1" x1=(px)0 y1=(px)0 x2=(px)100 y2=(px)100 stroke=(token)"color.a"
+    }
+  }
+}"##;
+
+    /// Page with one code node (fill via a declared token).
+    const CODE_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" {
+    token id="color.a" type="color" value="#ff0000"
+    token id="color.b" type="color" value="#0000ff"
+  }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      code id="snip" x=(px)0 y=(px)0 w=(px)200 h=(px)100 fill=(token)"color.a" {
+        content "fn main() {}"
+      }
     }
   }
 }"##;
@@ -2136,6 +2161,105 @@ mod tests {
             result.diagnostics
         );
         assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── Code node tx tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn set_visible_on_code_accepted() {
+        let doc = parse(CODE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetVisible {
+                node: "snip".to_owned(),
+                visible: false,
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["snip".to_owned()]);
+        assert!(
+            result.source_after.contains("visible=#false"),
+            "source_after must contain visible=#false; got:\n{}",
+            result.source_after
+        );
+        // Content blob must survive the edit untouched.
+        assert!(result.source_after.contains("content \"fn main() {}\""));
+    }
+
+    #[test]
+    fn set_fill_on_code_accepted() {
+        let doc = parse(CODE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetFill {
+                node: "snip".to_owned(),
+                fill: "color.b".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["snip".to_owned()]);
+        assert!(
+            result.source_after.contains("(token)\"color.b\""),
+            "source_after must reference color.b; got:\n{}",
+            result.source_after
+        );
+    }
+
+    #[test]
+    fn set_geometry_unsupported_on_code() {
+        let doc = parse(CODE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetGeometry {
+                node: "snip".to_owned(),
+                x: Some(10.0),
+                y: None,
+                w: None,
+                h: None,
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.unsupported_property" && d.message.contains("code")),
+            "expected tx.unsupported_property mentioning \"code\"; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    #[test]
+    fn add_code_node_into_page_accepted() {
+        let doc = parse(CODE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::AddNode {
+                parent: "pg1".to_owned(),
+                position: Position::Last,
+                source:
+                    r#"code id="snip2" x=(px)0 y=(px)0 w=(px)100 h=(px)40 { content "let x = 1;" }"#
+                        .to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "{:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.affected_node_ids, vec!["snip2".to_owned()]);
+        assert!(
+            result.source_after.contains("id=\"snip2\""),
+            "source_after must contain the new code node; got:\n{}",
+            result.source_after
+        );
+        assert!(result.source_after.contains("content \"let x = 1;\""));
     }
 
     // ── SetPoints tests ───────────────────────────────────────────────────────

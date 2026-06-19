@@ -720,6 +720,20 @@ fn compile_node(
             compile_polyline(poly, resolved, style_map, commands, diagnostics, ctx);
         }
 
+        Node::Code(code) => {
+            // Code compilation lands in the next unit; surface (never silently
+            // drop) the node as a tracked advisory so the gap is visible.
+            diagnostics.push(Diagnostic::advisory(
+                "scene.unsupported_node",
+                format!(
+                    "code node '{}' is not yet rendered (compilation lands in the next unit)",
+                    code.id
+                ),
+                code.source_span,
+                Some(code.id.clone()),
+            ));
+        }
+
         Node::Unknown(unknown) => {
             diagnostics.push(Diagnostic::advisory(
                 "scene.unsupported_node",

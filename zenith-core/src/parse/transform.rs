@@ -12,9 +12,9 @@ use crate::ast::{
     asset::{AssetBlock, AssetDecl, AssetKind},
     document::{Document, DocumentBody, Page, Project},
     node::{
-        EllipseNode, FrameNode, GroupNode, ImageNode, LineNode, Node, ObjectPosition, Point,
-        PolygonNode, PolylineNode, RectNode, TextNode, TextSpan, UnknownNode, UnknownProperty,
-        UnknownValue,
+        CodeNode, EllipseNode, FrameNode, GroupNode, ImageNode, LineNode, Node, ObjectPosition,
+        Point, PolygonNode, PolylineNode, RectNode, TextNode, TextSpan, UnknownNode,
+        UnknownProperty, UnknownValue,
     },
     style::{Style, StyleBlock, UnknownStyleProp},
     token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue},
@@ -140,6 +140,20 @@ fn required_u32_prop(node: &KdlNode, key: &str) -> Result<u32, ParseError> {
                 ),
             )
         })
+}
+
+/// Extract an optional non-negative integer property and convert to u32.
+///
+/// Absent properties, non-integer values, and out-of-range/negative integers
+/// (which fail `u32::try_from`) all yield `None`.
+fn optional_u32_prop(node: &KdlNode, key: &str) -> Option<u32> {
+    node.get(key).and_then(|v| {
+        if let KdlValue::Integer(n) = v {
+            u32::try_from(*n).ok()
+        } else {
+            None
+        }
+    })
 }
 
 /// Extract an optional boolean property value from a node.
@@ -685,6 +699,7 @@ fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
         "ellipse" => transform_ellipse(node).map(Node::Ellipse),
         "line" => transform_line(node).map(Node::Line),
         "text" => transform_text(node).map(Node::Text),
+        "code" => transform_code(node).map(Node::Code),
         "frame" => transform_frame(node).map(Node::Frame),
         "group" => transform_group(node).map(Node::Group),
         "image" => transform_image(node).map(Node::Image),
@@ -944,6 +959,87 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
         spans,
+        source_span: node_span(node),
+        unknown_props,
+    })
+}
+
+const CODE_KNOWN_PROPS: &[&str] = &[
+    "id",
+    "name",
+    "role",
+    "x",
+    "y",
+    "w",
+    "h",
+    "overflow",
+    "language",
+    "line-numbers",
+    "line_numbers",
+    "tab-width",
+    "tab_width",
+    "style",
+    "fill",
+    "font-family",
+    "font_family",
+    "font-size",
+    "font_size",
+    "opacity",
+    "visible",
+    "locked",
+    "rotate",
+];
+
+fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+
+    let font_family = optional_property_value_aliased(node, "font-family", "font_family");
+    let font_size = optional_property_value_aliased(node, "font-size", "font_size");
+    let line_numbers = optional_bool_prop(node, "line-numbers")
+        .or_else(|| optional_bool_prop(node, "line_numbers"));
+    let tab_width =
+        optional_u32_prop(node, "tab-width").or_else(|| optional_u32_prop(node, "tab_width"));
+
+    // The verbatim source is carried by a `content` child node whose first
+    // positional argument is the DECODED string. KDL v2 multi-line string
+    // dedent rules make a bare `r#"..."#` form lossy, so the carrier uses a
+    // single-line escaped string which round-trips `\n \t \" \\` exactly.
+    // Stored decoded here; `write_code` re-encodes the escapes.
+    let mut content = String::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "content" {
+                if let Some(KdlValue::String(s)) = child.get(0) {
+                    content = s.clone();
+                }
+                break;
+            }
+        }
+    }
+
+    let unknown_props = collect_unknown_props(node, CODE_KNOWN_PROPS);
+
+    Ok(CodeNode {
+        id,
+        name: optional_string_prop(node, "name").map(str::to_owned),
+        role: optional_string_prop(node, "role").map(str::to_owned),
+        x: optional_dimension_prop(node, "x"),
+        y: optional_dimension_prop(node, "y"),
+        w: optional_dimension_prop(node, "w"),
+        h: optional_dimension_prop(node, "h"),
+        overflow: optional_string_prop(node, "overflow").map(str::to_owned),
+        language: optional_string_prop(node, "language").map(str::to_owned),
+        line_numbers,
+        tab_width,
+        style: optional_string_prop(node, "style").map(str::to_owned),
+        fill: optional_property_value(node, "fill"),
+        font_family,
+        font_size,
+        opacity: optional_f64_prop(node, "opacity"),
+        visible: optional_bool_prop(node, "visible"),
+        locked: optional_bool_prop(node, "locked"),
+        rotate: optional_dimension_prop(node, "rotate"),
+        content,
         source_span: node_span(node),
         unknown_props,
     })

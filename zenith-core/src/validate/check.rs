@@ -417,6 +417,67 @@ fn walk_node(
             }
         }
 
+        Node::Code(c) => {
+            register_id(&c.id, seen_ids, diagnostics);
+            check_style_ref(
+                &c.id,
+                c.style.as_deref(),
+                declared_style_ids,
+                c.source_span,
+                diagnostics,
+            );
+
+            // Geometry (advisory box for v0; only unit-checked if present).
+            check_optional_dim(&c.id, "x", c.x.as_ref(), c.source_span, diagnostics);
+            check_optional_dim(&c.id, "y", c.y.as_ref(), c.source_span, diagnostics);
+            check_optional_dim(&c.id, "w", c.w.as_ref(), c.source_span, diagnostics);
+            check_optional_dim(&c.id, "h", c.h.as_ref(), c.source_span, diagnostics);
+
+            // Visual properties (mirror text; overflow is not enum-validated,
+            // matching how text.overflow is currently handled).
+            check_visual_prop(
+                &c.id,
+                "fill",
+                c.fill.as_ref(),
+                VisualExpect::Color,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &c.id,
+                "font-family",
+                c.font_family.as_ref(),
+                VisualExpect::FontFamily,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &c.id,
+                "font-size",
+                c.font_size.as_ref(),
+                VisualExpect::Dimension,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+
+            // Unknown properties.
+            for prop_name in c.unknown_props.keys() {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!(
+                        "code '{}': unknown property '{}' (version-relative; \
+                         may be valid in a later schema version)",
+                        c.id, prop_name
+                    ),
+                    c.source_span,
+                    Some(c.id.clone()),
+                ));
+            }
+        }
+
         Node::Frame(f) => {
             register_id(&f.id, seen_ids, diagnostics);
             check_style_ref(
@@ -1180,7 +1241,8 @@ mod tests {
     use crate::ast::asset::{AssetBlock, AssetDecl, AssetKind};
     use crate::ast::document::{Document, DocumentBody, Page};
     use crate::ast::node::{
-        EllipseNode, FrameNode, GroupNode, LineNode, Node, RectNode, TextNode, UnknownNode,
+        CodeNode, EllipseNode, FrameNode, GroupNode, LineNode, Node, RectNode, TextNode,
+        UnknownNode,
     };
     use crate::ast::style::StyleBlock;
     use crate::ast::token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue};
@@ -1294,6 +1356,33 @@ mod tests {
             locked: None,
             rotate: None,
             spans: vec![],
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        })
+    }
+
+    fn minimal_code(id: &str, fill: Option<PropertyValue>) -> Node {
+        Node::Code(CodeNode {
+            id: id.to_owned(),
+            name: None,
+            role: None,
+            x: Some(px(0.0)),
+            y: Some(px(0.0)),
+            w: Some(px(200.0)),
+            h: Some(px(80.0)),
+            overflow: None,
+            language: None,
+            line_numbers: None,
+            tab_width: None,
+            style: None,
+            fill,
+            font_family: None,
+            font_size: None,
+            opacity: None,
+            visible: None,
+            locked: None,
+            rotate: None,
+            content: String::new(),
             source_span: None,
             unknown_props: BTreeMap::new(),
         })
@@ -3004,6 +3093,74 @@ mod tests {
             codes(&report)
         );
         assert!(report.has_errors());
+    }
+
+    /// A clean `code` node referencing a declared color token passes validation.
+    #[test]
+    fn clean_code_node_no_errors() {
+        let doc = doc_with(
+            vec![color_token("color.fg")],
+            vec![minimal_page(
+                "page.one",
+                vec![minimal_code("code.one", Some(token_ref("color.fg")))],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            report.diagnostics.is_empty(),
+            "expected no diagnostics, got: {:?}",
+            codes(&report)
+        );
+        assert!(!report.has_errors());
+    }
+
+    /// A `code` node referencing a non-declared style id → `style.unknown_reference`.
+    #[test]
+    fn code_node_unknown_style_reference() {
+        let code = match minimal_code("code.one", None) {
+            Node::Code(mut c) => {
+                c.style = Some("style.missing".to_owned());
+                Node::Code(c)
+            }
+            other => other,
+        };
+        let doc = doc_with_styles(
+            vec![],
+            vec![], // no styles declared
+            vec![minimal_page("page.one", vec![code])],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "style.unknown_reference"),
+            "expected style.unknown_reference; codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    /// An unknown property on a `code` node → `node.unknown_property` warning.
+    #[test]
+    fn code_node_unknown_property_warns() {
+        let code = match minimal_code("code.one", None) {
+            Node::Code(mut c) => {
+                c.unknown_props.insert(
+                    "future-prop".to_owned(),
+                    crate::ast::UnknownProperty {
+                        value: crate::ast::UnknownValue::String("x".to_owned()),
+                    },
+                );
+                Node::Code(c)
+            }
+            other => other,
+        };
+        let doc = doc_with(vec![], vec![minimal_page("page.one", vec![code])]);
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "node.unknown_property"),
+            "expected node.unknown_property; codes: {:?}",
+            codes(&report)
+        );
+        assert!(!report.has_errors());
     }
 
     /// A style property that references a missing token → `token.unknown_reference` error.
