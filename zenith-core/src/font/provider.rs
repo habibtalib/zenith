@@ -208,16 +208,24 @@ impl FontProvider for BytesFontProvider {
     }
 }
 
-/// Build a `BytesFontProvider` preloaded with the bundled default font.
+/// Build a `BytesFontProvider` preloaded with the bundled default fonts.
 ///
-/// The bundled font is Noto Sans Regular (Apache-2.0), embedded at compile time.
-/// It is registered as family `"Noto Sans"`, weight `400`, style `Normal`.
+/// Two faces are embedded at compile time, both Apache-2.0:
+/// - Noto Sans Regular, registered as family `"Noto Sans"` — the proportional
+///   default for text nodes.
+/// - Noto Sans Mono Regular, registered as family `"Noto Sans Mono"` — the
+///   monospace default for code nodes.
+///
+/// Both are weight `400`, style `Normal`.
 #[must_use]
 pub fn default_provider() -> BytesFontProvider {
-    let bytes: Arc<[u8]> =
+    let sans: Arc<[u8]> =
         Arc::from(&include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf")[..]);
+    let mono: Arc<[u8]> =
+        Arc::from(&include_bytes!("../../../assets/fonts/NotoSansMono-Regular.ttf")[..]);
     let mut provider = BytesFontProvider::new();
-    provider.register("Noto Sans", 400, FontStyle::Normal, bytes, 0);
+    provider.register("Noto Sans", 400, FontStyle::Normal, sans, 0);
+    provider.register("Noto Sans Mono", 400, FontStyle::Normal, mono, 0);
     provider
 }
 
@@ -240,6 +248,46 @@ mod tests {
             is_valid_tt_header(&data.bytes),
             "expected TrueType header and len > 1000, got len={}",
             data.bytes.len()
+        );
+    }
+
+    #[test]
+    fn default_provider_resolves_noto_sans_mono() {
+        let p = default_provider();
+        let result = p.resolve(&["Noto Sans Mono".to_string()], 400, FontStyle::Normal);
+        assert!(
+            result.is_some(),
+            "expected Some for Noto Sans Mono 400 Normal"
+        );
+        let data = result.unwrap();
+        assert!(
+            is_valid_tt_header(&data.bytes),
+            "expected TrueType header and len > 1000, got len={}",
+            data.bytes.len()
+        );
+        assert!(
+            data.id.contains("noto-sans-mono"),
+            "id should contain noto-sans-mono, got {}",
+            data.id
+        );
+    }
+
+    #[test]
+    fn default_provider_distinguishes_sans_and_mono() {
+        // The two bundled faces must be independently resolvable with distinct
+        // bytes — a mono code node must not accidentally get the proportional face.
+        let p = default_provider();
+        let sans = p
+            .resolve(&["Noto Sans".to_string()], 400, FontStyle::Normal)
+            .expect("sans resolves");
+        let mono = p
+            .resolve(&["Noto Sans Mono".to_string()], 400, FontStyle::Normal)
+            .expect("mono resolves");
+        assert_ne!(sans.id, mono.id, "sans and mono must have distinct ids");
+        assert_ne!(
+            sans.bytes.len(),
+            mono.bytes.len(),
+            "sans and mono must be different font files"
         );
     }
 

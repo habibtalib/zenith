@@ -1,3 +1,7 @@
 Noto Sans Regular — bundled font for deterministic text rendering.
 Upstream: Google Noto Fonts. License: Apache-2.0 (see LICENSE.txt).
 sha256(NotoSans-Regular.ttf) = 478c558ea716033cd60c03438f628dfa75694dcf6b5f6d505a2f05fd2b4f3823
+
+Noto Sans Mono Regular — bundled monospace font for deterministic code rendering.
+Upstream: Google Noto Fonts. License: Apache-2.0 (see LICENSE.txt).
+sha256(NotoSansMono-Regular.ttf) = 65b5e2b2c4a1fba9ae8be1f026cb35b03dcb8886d9b2a4147054fde12f7e767d
