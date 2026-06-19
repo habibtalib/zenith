@@ -28,61 +28,56 @@ impl Default for RustybuzzEngine {
     }
 }
 
-impl TextLayoutEngine for RustybuzzEngine {
-    fn shape(
-        &self,
-        req: &ShapeRequest<'_>,
-        provider: &dyn FontProvider,
+impl RustybuzzEngine {
+    /// Shape `text` with an already-parsed `face` and produce a single
+    /// [`ZenithGlyphRun`] tagged with `font_id`.
+    ///
+    /// This is the one place shaping, scaling, and metric derivation live, so
+    /// `shape` (single-face) and `shape_with_fallback` (per-glyph fallback)
+    /// cannot diverge: both route every run through here. Glyphs are positioned
+    /// from `x = 0` within the run.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LayoutError` if the face reports `units_per_em <= 0`.
+    fn shape_run_with_face(
+        face: &rustybuzz::Face<'_>,
+        text: &str,
+        font_id: String,
+        font_size: f32,
     ) -> Result<ZenithGlyphRun, LayoutError> {
-        // ── 1. Resolve font bytes ─────────────────────────────────────────────
-        let font_data = provider
-            .resolve(req.families, req.weight, req.style)
-            .ok_or_else(|| {
-                LayoutError::new(format!("no font resolved for families {:?}", req.families))
-            })?;
-
-        // ── 2. Parse the font face ────────────────────────────────────────────
-        let face =
-            rustybuzz::Face::from_slice(&font_data.bytes, font_data.index).ok_or_else(|| {
-                LayoutError::new(format!(
-                    "failed to parse font face for '{}' (index {})",
-                    font_data.id, font_data.index
-                ))
-            })?;
-
-        // ── 3. Compute pixel scale ────────────────────────────────────────────
+        // ── Compute pixel scale ───────────────────────────────────────────────
         // `units_per_em` comes from the `ttf_parser::Face` trait exposed by
         // `rustybuzz::Face` via Deref.
         let units_per_em = face.units_per_em();
         if units_per_em <= 0 {
             return Err(LayoutError::new(format!(
-                "font '{}' reports units_per_em = {}",
-                font_data.id, units_per_em
+                "font '{font_id}' reports units_per_em = {units_per_em}"
             )));
         }
         // `units_per_em` is a positive `i32` (guarded above); the OTF spec
         // range (16–16384) is exactly representable as `f32`.
-        let scale = req.font_size / units_per_em as f32;
+        let scale = font_size / units_per_em as f32;
 
-        // ── 4. Derive line metrics ────────────────────────────────────────────
+        // ── Derive line metrics ───────────────────────────────────────────────
         // `ascender` and `descender` are in font units; descender is negative.
         let ascent = f32::from(face.ascender()) * scale;
         let descent = -(f32::from(face.descender()) * scale); // store positive magnitude
         let line_gap = f32::from(face.line_gap()) * scale;
         let line_height = ascent + descent + line_gap;
 
-        // ── 5. Shape the text ─────────────────────────────────────────────────
+        // ── Shape the text ────────────────────────────────────────────────────
         let mut buffer = rustybuzz::UnicodeBuffer::new();
-        buffer.push_str(req.text);
+        buffer.push_str(text);
         buffer.set_direction(rustybuzz::Direction::LeftToRight);
 
         // Shape with no extra features; deterministic across machines.
-        let glyph_buffer = rustybuzz::shape(&face, &[], buffer);
+        let glyph_buffer = rustybuzz::shape(face, &[], buffer);
 
         let infos = glyph_buffer.glyph_infos();
         let positions = glyph_buffer.glyph_positions();
 
-        // ── 6. Build glyph list ───────────────────────────────────────────────
+        // ── Build glyph list ──────────────────────────────────────────────────
         let mut glyphs: Vec<PositionedGlyph> = Vec::with_capacity(infos.len());
         let mut pen_x: f32 = 0.0;
         let mut pen_y: f32 = 0.0;
@@ -106,14 +101,160 @@ impl TextLayoutEngine for RustybuzzEngine {
         let advance_width = pen_x;
 
         Ok(ZenithGlyphRun {
-            font_id: font_data.id,
-            font_size: req.font_size,
+            font_id,
+            font_size,
             ascent,
             descent,
             line_height,
             advance_width,
             glyphs,
         })
+    }
+}
+
+impl TextLayoutEngine for RustybuzzEngine {
+    fn shape(
+        &self,
+        req: &ShapeRequest<'_>,
+        provider: &dyn FontProvider,
+    ) -> Result<ZenithGlyphRun, LayoutError> {
+        // ── 1. Resolve font bytes ─────────────────────────────────────────────
+        let font_data = provider
+            .resolve(req.families, req.weight, req.style)
+            .ok_or_else(|| {
+                LayoutError::new(format!("no font resolved for families {:?}", req.families))
+            })?;
+
+        // ── 2. Parse the font face ────────────────────────────────────────────
+        let face =
+            rustybuzz::Face::from_slice(&font_data.bytes, font_data.index).ok_or_else(|| {
+                LayoutError::new(format!(
+                    "failed to parse font face for '{}' (index {})",
+                    font_data.id, font_data.index
+                ))
+            })?;
+
+        // ── 3. Shape via the shared single-face helper ────────────────────────
+        Self::shape_run_with_face(&face, req.text, font_data.id, req.font_size)
+    }
+
+    fn shape_with_fallback(
+        &self,
+        req: &ShapeRequest<'_>,
+        provider: &dyn FontProvider,
+    ) -> Result<Vec<ZenithGlyphRun>, LayoutError> {
+        // ── 1. Resolve + parse the PRIMARY face ───────────────────────────────
+        let primary_data = provider
+            .resolve(req.families, req.weight, req.style)
+            .ok_or_else(|| {
+                LayoutError::new(format!("no font resolved for families {:?}", req.families))
+            })?;
+        let primary_face = rustybuzz::Face::from_slice(&primary_data.bytes, primary_data.index)
+            .ok_or_else(|| {
+                LayoutError::new(format!(
+                    "failed to parse font face for '{}' (index {})",
+                    primary_data.id, primary_data.index
+                ))
+            })?;
+
+        // ── 2. Build an ordered, deduplicated face cache for coverage probing ─
+        // The primary occupies index 0; remaining faces follow in the
+        // deterministic order `provider.all_faces()` returns them, skipping any
+        // face that shares the primary's id (so the primary is never duplicated).
+        // Each entry parses once and is reused for every coverage check + shape.
+        // Bind the owned face data for the whole function so the parsed
+        // `Face`s below can borrow from it (they outlive a per-iteration temp).
+        let all_faces_data = provider.all_faces();
+        let mut faces: Vec<(String, rustybuzz::Face<'_>)> =
+            vec![(primary_data.id.clone(), primary_face)];
+        for fd in &all_faces_data {
+            if fd.id == primary_data.id {
+                continue;
+            }
+            // A face whose bytes fail to parse simply cannot cover any glyph;
+            // skip it rather than failing the whole shape.
+            if let Some(f) = rustybuzz::Face::from_slice(&fd.bytes, fd.index) {
+                faces.push((fd.id.clone(), f));
+            }
+        }
+
+        // Coverage test: does the face at `faces[idx]` have a glyph for `ch`?
+        // Uses ttf-parser's `Face::glyph_index`, exposed on `rustybuzz::Face`
+        // via Deref.
+        let covers = |idx: usize, ch: char| -> bool {
+            faces
+                .get(idx)
+                .is_some_and(|(_, f)| f.glyph_index(ch).is_some())
+        };
+
+        // ── 3. Itemize text into contiguous sub-runs by chosen face index ─────
+        // For each char: prefer the primary (index 0) when it covers the char;
+        // otherwise the FIRST non-primary face (lowest index ≥ 1) that covers
+        // it; otherwise the primary (so it shapes as .notdef / tofu, matching
+        // current behavior). Consecutive chars with the same chosen face merge.
+        // Sub-run boundaries are recorded as byte ranges into `req.text` so the
+        // exact substring is shaped (and reported as the run's source text).
+        let choose = |ch: char| -> usize {
+            if covers(0, ch) {
+                return 0;
+            }
+            for idx in 1..faces.len() {
+                if covers(idx, ch) {
+                    return idx;
+                }
+            }
+            0
+        };
+
+        // (face_idx, byte_start, byte_end) per sub-run, in text order.
+        let mut segments: Vec<(usize, usize, usize)> = Vec::new();
+        for (byte_off, ch) in req.text.char_indices() {
+            let idx = choose(ch);
+            let ch_end = byte_off + ch.len_utf8();
+            match segments.last_mut() {
+                Some((last_idx, _, last_end)) if *last_idx == idx => {
+                    *last_end = ch_end;
+                }
+                _ => segments.push((idx, byte_off, ch_end)),
+            }
+        }
+
+        // Empty text → no segments; shape the empty string with the primary so
+        // a (degenerate but valid) run with primary metrics is still returned,
+        // matching `shape("")`.
+        if segments.is_empty() {
+            let (font_id, face) = faces.first().ok_or_else(|| {
+                LayoutError::new("internal: primary face missing from cache".to_owned())
+            })?;
+            return Ok(vec![Self::shape_run_with_face(
+                face,
+                req.text,
+                font_id.clone(),
+                req.font_size,
+            )?]);
+        }
+
+        // ── 4. Shape each sub-run with its chosen face ────────────────────────
+        // The all-primary case is exactly one segment at index 0 spanning the
+        // whole text → a single run byte-identical to `shape`, because both
+        // call `shape_run_with_face` with the same face, text, id, and size.
+        let mut runs: Vec<ZenithGlyphRun> = Vec::with_capacity(segments.len());
+        for (idx, start, end) in segments {
+            let (font_id, face) = faces.get(idx).ok_or_else(|| {
+                LayoutError::new("internal: chosen face index out of range".to_owned())
+            })?;
+            let sub_text = req.text.get(start..end).ok_or_else(|| {
+                LayoutError::new("internal: sub-run byte range out of bounds".to_owned())
+            })?;
+            runs.push(Self::shape_run_with_face(
+                face,
+                sub_text,
+                font_id.clone(),
+                req.font_size,
+            )?);
+        }
+
+        Ok(runs)
     }
 }
 
@@ -204,6 +345,97 @@ mod tests {
             msg.contains("no font resolved"),
             "error message should mention unresolved font, got: {msg}"
         );
+    }
+
+    #[test]
+    fn fallback_all_primary_matches_single_shape() {
+        // CRITICAL byte-identity guarantee: text fully covered by the primary
+        // face must yield exactly ONE run identical to `shape()`.
+        let families = vec!["Noto Sans".to_string()];
+        let req = ShapeRequest {
+            text: "Hello Zenith 123!",
+            families: &families,
+            weight: 400,
+            style: FontStyle::Normal,
+            font_size: 24.0,
+        };
+        let provider = default_provider();
+        let engine = RustybuzzEngine::new();
+
+        let single = engine.shape(&req, &provider).expect("single-run shape");
+        let runs = engine
+            .shape_with_fallback(&req, &provider)
+            .expect("fallback shape");
+
+        assert_eq!(
+            runs.len(),
+            1,
+            "all-primary text must produce exactly one run"
+        );
+        assert_eq!(
+            runs.first().expect("one run"),
+            &single,
+            "all-primary fallback run must be byte-identical to shape()"
+        );
+    }
+
+    #[test]
+    fn fallback_empty_text_matches_single_shape() {
+        // Degenerate empty input must still match `shape("")` (one run).
+        let families = vec!["Noto Sans".to_string()];
+        let req = ShapeRequest {
+            text: "",
+            families: &families,
+            weight: 400,
+            style: FontStyle::Normal,
+            font_size: 16.0,
+        };
+        let provider = default_provider();
+        let engine = RustybuzzEngine::new();
+
+        let single = engine.shape(&req, &provider).expect("single empty shape");
+        let runs = engine
+            .shape_with_fallback(&req, &provider)
+            .expect("fallback empty shape");
+        assert_eq!(
+            runs.len(),
+            1,
+            "empty text still yields one (degenerate) run"
+        );
+        assert_eq!(runs.first().expect("one run"), &single);
+    }
+
+    #[test]
+    fn fallback_unknown_primary_returns_error() {
+        // No resolvable primary → Err, exactly like `shape`.
+        let families = vec!["Nonexistent".to_string()];
+        let req = ShapeRequest {
+            text: "test",
+            families: &families,
+            weight: 400,
+            style: FontStyle::Normal,
+            font_size: 16.0,
+        };
+        let provider = default_provider();
+        let result = RustybuzzEngine::new().shape_with_fallback(&req, &provider);
+        assert!(result.is_err(), "unknown primary family must return Err");
+    }
+
+    #[test]
+    fn fallback_is_deterministic() {
+        let families = vec!["Noto Sans".to_string()];
+        let req = ShapeRequest {
+            text: "Hi there",
+            families: &families,
+            weight: 400,
+            style: FontStyle::Normal,
+            font_size: 18.0,
+        };
+        let provider = default_provider();
+        let engine = RustybuzzEngine::new();
+        let a = engine.shape_with_fallback(&req, &provider).expect("a");
+        let b = engine.shape_with_fallback(&req, &provider).expect("b");
+        assert_eq!(a, b, "fallback shaping must be deterministic");
     }
 
     #[test]

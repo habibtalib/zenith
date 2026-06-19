@@ -226,12 +226,12 @@ pub(super) fn compile_text(
     // Per-shaped-span record: (run, color, underline, strikethrough).
     // `text`/`weight`/`style` are retained so the wrap path can re-shape
     // individual words without re-running color/weight/style resolution.
-    struct ShapedSpan<'a> {
+    struct ShapedSpan {
         run: ZenithGlyphRun,
         color: Color,
         underline: bool,
         strikethrough: bool,
-        text: &'a str,
+        text: String,
         weight: u16,
         style: FontStyle,
     }
@@ -276,7 +276,13 @@ pub(super) fn compile_text(
             font_size,
         };
 
-        match engine.shape(&req, fonts) {
+        // Shape with per-glyph font fallback: a span whose characters are all
+        // covered by the primary face yields exactly one run (byte-identical to
+        // the old single-run path); a mixed-script span (e.g. Latin + emoji +
+        // CJK) yields one run per contiguous same-face sub-run, each emitted as
+        // its own DrawGlyphRun by the downstream machinery. All sub-runs inherit
+        // the span's color/decoration/weight/style.
+        match engine.shape_with_fallback(&req, fonts) {
             Err(e) => {
                 diagnostics.push(Diagnostic::advisory(
                     "scene.text_unshaped",
@@ -286,17 +292,30 @@ pub(super) fn compile_text(
                 ));
                 // Skip this span; cursor does not advance.
             }
-            Ok(run) => {
-                total_advance += run.advance_width as f64;
-                shaped_spans.push(ShapedSpan {
-                    run,
-                    color,
-                    underline: span.underline == Some(true),
-                    strikethrough: span.strikethrough == Some(true),
-                    text: &span.text,
-                    weight,
-                    style,
-                });
+            Ok(runs) => {
+                for (i, run) in runs.into_iter().enumerate() {
+                    total_advance += run.advance_width as f64;
+                    // The WRAP path re-tokenizes whole words and re-shapes them
+                    // (with per-glyph fallback) from `text`. A word can straddle
+                    // a sub-run boundary, so to keep word boundaries intact the
+                    // FULL span text is carried on the FIRST sub-run and the rest
+                    // carry an empty marker (no extra words). The fast path
+                    // ignores `text` and positions runs by `advance_width`.
+                    let run_text = if i == 0 {
+                        span.text.clone()
+                    } else {
+                        String::new()
+                    };
+                    shaped_spans.push(ShapedSpan {
+                        run,
+                        color,
+                        underline: span.underline == Some(true),
+                        strikethrough: span.strikethrough == Some(true),
+                        text: run_text,
+                        weight,
+                        style,
+                    });
+                }
             }
         }
     }
@@ -427,10 +446,12 @@ pub(super) fn compile_text(
         }
     } else if let Some(box_w) = box_w_opt {
         // ── WRAP PATH (overflow): greedy cross-span word packing ──────
-        // Per-word token carrying its re-shaped run plus the visual
-        // attributes inherited from its source span.
+        // Per-word token carrying its re-shaped runs plus the visual
+        // attributes inherited from its source span. A word may shape to
+        // multiple font-runs (per-glyph fallback), so `runs` is a Vec laid
+        // out left-to-right; `advance` is their summed width.
         struct WordToken {
-            run: ZenithGlyphRun,
+            runs: Vec<ZenithGlyphRun>,
             advance: f64,
             color: Color,
             underline: bool,
@@ -442,8 +463,8 @@ pub(super) fn compile_text(
         }
 
         // 1+2. Tokenize each (already-resolved) span into words and shape
-        // each word once. Capture shared ascent/line_height from the first
-        // successful word run (all words share font + size).
+        // each word with per-glyph fallback. Capture shared ascent/line_height
+        // from the first successful word run (all words share font + size).
         let mut tokens: Vec<WordToken> = Vec::new();
         let mut ascent: f64 = 0.0;
         let mut line_height: f64 = 0.0;
@@ -458,7 +479,7 @@ pub(super) fn compile_text(
                     style: shaped.style,
                     font_size,
                 };
-                match engine.shape(&req, fonts) {
+                match engine.shape_with_fallback(&req, fonts) {
                     Err(e) => {
                         diagnostics.push(Diagnostic::advisory(
                             "scene.text_unshaped",
@@ -468,18 +489,19 @@ pub(super) fn compile_text(
                         ));
                         // Skip this word; it contributes no token.
                     }
-                    Ok(run) => {
-                        if !have_metrics {
-                            ascent = run.ascent as f64;
-                            line_height = run.line_height as f64;
+                    Ok(runs) => {
+                        if !have_metrics && let Some(first) = runs.first() {
+                            ascent = first.ascent as f64;
+                            line_height = first.line_height as f64;
                             have_metrics = true;
                         }
+                        let advance: f64 = runs.iter().map(|r| r.advance_width as f64).sum();
                         tokens.push(WordToken {
-                            advance: run.advance_width as f64,
+                            advance,
                             color: shaped.color,
                             underline: shaped.underline,
                             strikethrough: shaped.strikethrough,
-                            run,
+                            runs,
                         });
                     }
                 }
@@ -613,17 +635,22 @@ pub(super) fn compile_text(
                 }
             }
 
-            // Glyphs.
+            // Glyphs. A word may carry multiple font-runs (fallback); emit
+            // each at its accumulated offset within the word so sub-runs sit
+            // contiguously (matching the fast path's left-to-right layout).
             for (wi, word) in line.words.iter().enumerate() {
-                let x = word_x.get(wi).copied().unwrap_or(base_x);
-                commands.push(SceneCommand::DrawGlyphRun {
-                    x,
-                    y: baseline_y,
-                    font_id: word.run.font_id.clone(),
-                    font_size: word.run.font_size,
-                    color: word.color,
-                    glyphs: run_to_scene_glyphs(&word.run),
-                });
+                let mut run_x = word_x.get(wi).copied().unwrap_or(base_x);
+                for run in &word.runs {
+                    commands.push(SceneCommand::DrawGlyphRun {
+                        x: run_x,
+                        y: baseline_y,
+                        font_id: run.font_id.clone(),
+                        font_size: run.font_size,
+                        color: word.color,
+                        glyphs: run_to_scene_glyphs(run),
+                    });
+                    run_x += run.advance_width as f64;
+                }
             }
         }
     }

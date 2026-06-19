@@ -76,4 +76,28 @@ pub trait TextLayoutEngine {
         req: &ShapeRequest<'_>,
         provider: &dyn FontProvider,
     ) -> Result<ZenithGlyphRun, LayoutError>;
+
+    /// Shape `req.text` with per-glyph font fallback, returning one
+    /// [`ZenithGlyphRun`] per contiguous sub-run that resolved to a single face.
+    ///
+    /// The primary face (resolved from `req.families`/`weight`/`style`) shapes
+    /// every character it covers; characters the primary lacks are itemized to
+    /// the first face in `provider.all_faces()` (deterministic order) that
+    /// covers them, falling back to the primary (rendering `.notdef`) when no
+    /// registered face covers a character. Whitespace and punctuation the
+    /// primary covers stay with the primary, so mixed-script runs do not
+    /// fragment on shared characters.
+    ///
+    /// When every character is covered by the primary face this returns exactly
+    /// one run, identical to [`Self::shape`].
+    ///
+    /// # Errors
+    ///
+    /// Returns `LayoutError` under the same conditions as [`Self::shape`]
+    /// (no resolvable primary font, malformed bytes, zero `units_per_em`).
+    fn shape_with_fallback(
+        &self,
+        req: &ShapeRequest<'_>,
+        provider: &dyn FontProvider,
+    ) -> Result<Vec<ZenithGlyphRun>, LayoutError>;
 }

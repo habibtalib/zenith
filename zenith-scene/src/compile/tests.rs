@@ -372,6 +372,49 @@ page id="page.tx1" w=(px)400 h=(px)200 {
     }
 }
 
+// ── All-primary span stays a single DrawGlyphRun (fallback byte-identity) ──
+
+#[test]
+fn all_primary_text_emits_single_draw_glyph_run() {
+    // With per-glyph font fallback wired into compilation, a span whose every
+    // character is covered by the primary face MUST still compile to exactly
+    // one DrawGlyphRun — and the command stream must be stable across two
+    // compiles (deterministic, byte-identical to the pre-fallback output).
+    let src = r##"zenith version=1 {
+  project id="proj.bi" name="BI"
+  styles {}
+  document id="doc.bi" title="BI" {
+page id="page.bi" w=(px)400 h=(px)200 {
+  text id="label.bi" x=(px)10 y=(px)20 w=(px)380 h=(px)40 {
+    span "Hello Zenith 123!"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let a = compile(&doc, &default_provider());
+    let b = compile(&doc, &default_provider());
+
+    // Deterministic: identical command streams across two compiles.
+    assert_eq!(
+        a.scene.commands, b.scene.commands,
+        "all-primary compilation must be deterministic / byte-identical"
+    );
+
+    // Exactly one DrawGlyphRun for the all-primary span (no fragmentation).
+    let glyph_runs = a
+        .scene
+        .commands
+        .iter()
+        .filter(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }))
+        .count();
+    assert_eq!(
+        glyph_runs, 1,
+        "an all-primary span must emit exactly one DrawGlyphRun; got {glyph_runs}"
+    );
+}
+
 // ── Rect then text → FillRect before DrawGlyphRun (z-order) ──────────
 
 #[test]
