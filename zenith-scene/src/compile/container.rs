@@ -12,6 +12,7 @@ use zenith_layout::RustybuzzEngine;
 
 use crate::ir::SceneCommand;
 
+use super::chain::ChainAssignments;
 use super::util::{resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag};
 use super::{RenderCtx, compile_node, node_role, style_prop};
 
@@ -26,6 +27,7 @@ pub(super) fn compile_frame(
     engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    chains: &ChainAssignments,
     ctx: RenderCtx,
 ) {
     // Entire subtree excluded when visible=false (no PushClip emitted).
@@ -130,6 +132,7 @@ pub(super) fn compile_frame(
             engine,
             commands,
             diagnostics,
+            chains,
             child_ctx,
         );
     } else {
@@ -143,6 +146,7 @@ pub(super) fn compile_frame(
                 engine,
                 commands,
                 diagnostics,
+                chains,
                 child_ctx,
             );
         }
@@ -177,6 +181,7 @@ fn compile_frame_flow(
     engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    chains: &ChainAssignments,
     child_ctx: RenderCtx,
 ) {
     // Resolve padding / gap from the frame's style (token → px); 0.0 default.
@@ -227,6 +232,7 @@ fn compile_frame_flow(
             engine,
             commands,
             diagnostics,
+            chains,
             child_ctx,
         );
 
@@ -376,6 +382,7 @@ pub(super) fn compile_group(
     engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    chains: &ChainAssignments,
     ctx: RenderCtx,
 ) {
     // Entire subtree excluded when visible=false.
@@ -458,6 +465,7 @@ pub(super) fn compile_group(
             engine,
             commands,
             diagnostics,
+            chains,
             child_ctx,
         );
     }

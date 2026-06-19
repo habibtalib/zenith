@@ -1217,6 +1217,7 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "visible",
     "locked",
     "rotate",
+    "chain",
 ];
 
 fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
@@ -1258,6 +1259,7 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
+        chain: optional_string_prop(node, "chain").map(str::to_owned),
         spans,
         source_span: node_span(node),
         unknown_props,

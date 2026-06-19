@@ -503,6 +503,53 @@ fn test_text_font_weight_round_trip_and_order() {
     }
 }
 
+/// **chain round-trip**: a text node carrying `chain="article"` must survive
+/// parse→format→parse, with `chain` emitted on the text line (after `style`)
+/// and re-parsed back into the `chain` field.
+#[test]
+fn test_text_chain_round_trip() {
+    use crate::ast::Node;
+    let src = r##"zenith version=1 {
+  project id="proj.ch" name="CH"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.ch" title="CH" {
+    page id="p" w=(px)100 h=(px)100 {
+      text id="t1" x=(px)0 y=(px)0 w=(px)80 h=(px)40 chain="article" {
+        span "Hello world"
+      }
+      text id="t2" x=(px)0 y=(px)50 w=(px)80 h=(px)40 chain="article" {
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+    let out = format_document(&doc).expect("format");
+    let text = String::from_utf8(out).unwrap();
+
+    assert!(
+        text.contains(" chain=\"article\""),
+        "chain attr must be emitted; got:\n{text}"
+    );
+
+    let doc2 = adapter.parse(text.as_bytes()).expect("re-parse");
+    let page = &doc2.body.pages[0];
+    for child in &page.children {
+        match child {
+            Node::Text(t) => assert_eq!(
+                t.chain.as_deref(),
+                Some("article"),
+                "chain must survive the format round-trip"
+            ),
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+}
+
 /// **Gradient round-trip**: a gradient token (angle + 2 stops) must
 /// parse→format→parse byte-stably, emit the `stop` brace block, and a page
 /// background referencing it must NOT flag the stop colors as `token.unused`.

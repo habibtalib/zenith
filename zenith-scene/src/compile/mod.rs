@@ -15,6 +15,7 @@
 //! entry points, the per-subtree [`RenderCtx`], and the [`compile_node`]
 //! dispatcher that routes each node kind to its submodule.
 
+mod chain;
 mod container;
 mod image;
 mod leaf;
@@ -35,6 +36,7 @@ use zenith_layout::RustybuzzEngine;
 
 use crate::ir::{Scene, SceneCommand};
 
+use chain::{ChainAssignments, resolve_chains};
 use container::{compile_frame, compile_group};
 use image::compile_image;
 use leaf::{compile_ellipse, compile_line, compile_polygon, compile_polyline, compile_rect};
@@ -246,8 +248,21 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
         }
     }
 
-    // ── Step 6: children in source order (z-order: first = bottom) ───────
+    // ── Step 6: threaded-text chain pre-pass ─────────────────────────────
+    // Resolve every text chain ONCE (deterministic source-order walk into
+    // frames + groups), distributing the source article across each member's
+    // box. Non-chain pages yield an empty map → compile_text is unaffected.
     let engine = RustybuzzEngine::new();
+    let chains = resolve_chains(
+        &page.children,
+        resolved,
+        &style_map,
+        fonts,
+        &engine,
+        &mut diagnostics,
+    );
+
+    // ── Step 7: children in source order (z-order: first = bottom) ───────
     for node in &page.children {
         compile_node(
             node,
@@ -257,11 +272,12 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
             &engine,
             &mut scene.commands,
             &mut diagnostics,
+            &chains,
             RenderCtx::root(),
         );
     }
 
-    // ── Step 7: close the outermost clip ─────────────────────────────────
+    // ── Step 8: close the outermost clip ─────────────────────────────────
     scene.commands.push(SceneCommand::PopClip);
 
     CompileResult { scene, diagnostics }
@@ -306,6 +322,7 @@ pub(super) fn compile_node(
     engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    chains: &ChainAssignments,
     ctx: RenderCtx,
 ) -> f64 {
     // Non-printing guide nodes (`role="guide"`) are excluded from render output
@@ -331,6 +348,7 @@ pub(super) fn compile_node(
             engine,
             commands,
             diagnostics,
+            chains,
             ctx,
         ),
         Node::Line(line) => {
@@ -346,6 +364,7 @@ pub(super) fn compile_node(
                 engine,
                 commands,
                 diagnostics,
+                chains,
                 ctx,
             );
             0.0
@@ -359,6 +378,7 @@ pub(super) fn compile_node(
                 engine,
                 commands,
                 diagnostics,
+                chains,
                 ctx,
             );
             0.0

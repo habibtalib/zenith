@@ -13,9 +13,390 @@ use crate::color::parse_srgb_hex;
 use crate::ir::{Color, SceneCommand, SceneGlyph};
 
 use super::RenderCtx;
+use super::chain::ChainAssignments;
 use super::paint::{resolve_property_color, resolve_property_shadow};
 use super::style_prop;
 use super::util::{resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag};
+
+// ── Shared word-wrap structures + helpers ─────────────────────────────────────
+//
+// These are factored out of `compile_text`'s WRAP path so the threaded-text
+// chain pre-pass ([`super::chain`]) can reuse the EXACT same shaping, greedy
+// line-packing, and glyph/decoration emission. A single-box text node and a
+// chain member therefore share one code path for byte-stability.
+
+/// A re-shaped word plus the visual attributes inherited from its source span.
+///
+/// A word may shape to multiple font-runs (per-glyph fallback), so `runs` is a
+/// Vec laid out left-to-right; `advance` is their summed width.
+pub(super) struct WordToken {
+    pub(super) runs: Vec<ZenithGlyphRun>,
+    pub(super) advance: f64,
+    pub(super) color: Color,
+    pub(super) underline: bool,
+    pub(super) strikethrough: bool,
+}
+
+/// One packed line: its words plus the summed content width (no trailing space).
+pub(super) struct Line {
+    pub(super) words: Vec<WordToken>,
+    pub(super) content_w: f64,
+}
+
+/// Shared font metrics captured from the first successfully shaped word.
+#[derive(Clone, Copy, Default)]
+pub(super) struct WordMetrics {
+    pub(super) ascent: f64,
+    pub(super) line_height: f64,
+    pub(super) space_advance: f64,
+}
+
+/// A span already resolved to color/decoration/weight/style, ready for the
+/// per-word re-shaping the wrap + chain paths perform. Mirrors the private
+/// `ShapedSpan` fields the wrap path consumes.
+pub(super) struct ResolvedSpan {
+    pub(super) text: String,
+    pub(super) color: Color,
+    pub(super) underline: bool,
+    pub(super) strikethrough: bool,
+    pub(super) weight: u16,
+    pub(super) style: FontStyle,
+}
+
+/// Tokenise resolved spans into per-word [`WordToken`]s (one re-shape per word,
+/// with per-glyph fallback) and capture the shared font metrics.
+///
+/// This is the SINGLE shaping routine used by both the single-box wrap path and
+/// the chain distributor, so a chain member and a standalone wrapped node shape
+/// identical word geometry. `node_id` is used only for diagnostics wording.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn shape_words(
+    spans: &[ResolvedSpan],
+    families: &[String],
+    font_size: f32,
+    node_base_weight: u16,
+    engine: &RustybuzzEngine,
+    fonts: &dyn FontProvider,
+    diagnostics: &mut Vec<Diagnostic>,
+    node_id: &str,
+    span: Option<zenith_core::Span>,
+) -> (Vec<WordToken>, WordMetrics) {
+    let mut tokens: Vec<WordToken> = Vec::new();
+    let mut metrics = WordMetrics::default();
+    let mut have_metrics = false;
+
+    for shaped in spans {
+        for word in shaped.text.split_whitespace() {
+            let req = ShapeRequest {
+                text: word,
+                families,
+                weight: shaped.weight,
+                style: shaped.style,
+                font_size,
+            };
+            match engine.shape_with_fallback(&req, fonts) {
+                Err(e) => {
+                    diagnostics.push(Diagnostic::advisory(
+                        "scene.text_unshaped",
+                        format!("text node '{}' could not be shaped: {}", node_id, e.message),
+                        span,
+                        Some(node_id.to_owned()),
+                    ));
+                }
+                Ok(runs) => {
+                    if !have_metrics && let Some(first) = runs.first() {
+                        metrics.ascent = first.ascent as f64;
+                        metrics.line_height = first.line_height as f64;
+                        have_metrics = true;
+                    }
+                    let advance: f64 = runs.iter().map(|r| r.advance_width as f64).sum();
+                    tokens.push(WordToken {
+                        advance,
+                        color: shaped.color,
+                        underline: shaped.underline,
+                        strikethrough: shaped.strikethrough,
+                        runs,
+                    });
+                }
+            }
+        }
+    }
+
+    // Shape a single space once (node base weight/style) for inter-word gaps
+    // and packing measurement.
+    metrics.space_advance = {
+        let req = ShapeRequest {
+            text: " ",
+            families,
+            weight: node_base_weight,
+            style: FontStyle::Normal,
+            font_size,
+        };
+        match engine.shape(&req, fonts) {
+            Ok(run) => run.advance_width as f64,
+            Err(_) => 0.0,
+        }
+    };
+
+    (tokens, metrics)
+}
+
+/// Greedy-pack word tokens into lines for a given box width, left-to-right and
+/// deterministic. Identical algorithm to the original inline wrap packer.
+pub(super) fn pack_lines(tokens: Vec<WordToken>, box_w: f64, space_advance: f64) -> Vec<Line> {
+    let mut lines: Vec<Line> = Vec::new();
+    let mut cur: Vec<WordToken> = Vec::new();
+    let mut line_w: f64 = 0.0;
+    for tok in tokens {
+        if !cur.is_empty() && line_w + space_advance + tok.advance > box_w {
+            let content_w = line_w;
+            lines.push(Line {
+                words: std::mem::take(&mut cur),
+                content_w,
+            });
+            line_w = 0.0;
+        }
+        let gap = if cur.is_empty() { 0.0 } else { space_advance };
+        line_w += gap + tok.advance;
+        cur.push(tok);
+    }
+    if !cur.is_empty() {
+        lines.push(Line {
+            words: cur,
+            content_w: line_w,
+        });
+    }
+    lines
+}
+
+/// Emit decoration FillRects + DrawGlyphRun commands for a sequence of packed
+/// lines, stacked by `line_height`, with per-line horizontal `align`.
+///
+/// This is the EXACT emit body lifted out of `compile_text`'s wrap path so the
+/// single-box and chain renderers produce byte-identical command streams.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn emit_lines(
+    lines: &[Line],
+    text_x: f64,
+    text_y: f64,
+    box_w: f64,
+    align: &str,
+    metrics: WordMetrics,
+    font_size: f32,
+    deco_thickness: f64,
+    commands: &mut Vec<SceneCommand>,
+) {
+    let ascent = metrics.ascent;
+    let line_height = metrics.line_height;
+    let space_advance = metrics.space_advance;
+    let last_idx = lines.len().saturating_sub(1);
+    for (i, line) in lines.iter().enumerate() {
+        let baseline_y = text_y + ascent + (i as f64) * line_height;
+        let word_count = line.words.len();
+
+        let (base_x, gap) = match align {
+            "center" => (text_x + (box_w - line.content_w) / 2.0, space_advance),
+            "end" => (text_x + (box_w - line.content_w), space_advance),
+            "justify" => {
+                if i != last_idx && word_count > 1 {
+                    let extra = (box_w - line.content_w) / (word_count as f64 - 1.0);
+                    (text_x, space_advance + extra)
+                } else {
+                    (text_x, space_advance)
+                }
+            }
+            _ => (text_x, space_advance),
+        };
+
+        // Precompute each word's left x along the line.
+        let mut word_x: Vec<f64> = Vec::with_capacity(word_count);
+        {
+            let mut x = base_x;
+            for (wi, word) in line.words.iter().enumerate() {
+                word_x.push(x);
+                x += word.advance;
+                if wi + 1 < word_count {
+                    x += gap;
+                }
+            }
+        }
+
+        // Decorations FIRST (so glyphs paint on top), one FillRect per maximal
+        // contiguous same-flag run of words.
+        let underline_y = baseline_y + font_size as f64 * 0.12;
+        let strike_y = baseline_y - font_size as f64 * 0.30;
+        for (is_underline, deco_y) in [(true, underline_y), (false, strike_y)] {
+            let mut run_start: Option<(f64, Color)> = None;
+            let mut run_right: f64 = base_x;
+            for (wi, word) in line.words.iter().enumerate() {
+                let on = if is_underline {
+                    word.underline
+                } else {
+                    word.strikethrough
+                };
+                let wx = word_x.get(wi).copied().unwrap_or(base_x);
+                if on {
+                    if run_start.is_none() {
+                        run_start = Some((wx, word.color));
+                    }
+                    run_right = wx + word.advance;
+                } else if let Some((sx, color)) = run_start.take() {
+                    commands.push(SceneCommand::FillRect {
+                        x: sx,
+                        y: deco_y,
+                        w: run_right - sx,
+                        h: deco_thickness,
+                        color,
+                    });
+                }
+            }
+            if let Some((sx, color)) = run_start.take() {
+                commands.push(SceneCommand::FillRect {
+                    x: sx,
+                    y: deco_y,
+                    w: run_right - sx,
+                    h: deco_thickness,
+                    color,
+                });
+            }
+        }
+
+        // Glyphs.
+        for (wi, word) in line.words.iter().enumerate() {
+            let mut run_x = word_x.get(wi).copied().unwrap_or(base_x);
+            for run in &word.runs {
+                commands.push(SceneCommand::DrawGlyphRun {
+                    x: run_x,
+                    y: baseline_y,
+                    font_id: run.font_id.clone(),
+                    font_size: run.font_size,
+                    color: word.color,
+                    glyphs: run_to_scene_glyphs(run),
+                });
+                run_x += run.advance_width as f64;
+            }
+        }
+    }
+}
+
+/// Resolve a text node's font size in pixels with style cascade (default 16.0).
+/// Shared by the chain-member render path and mirrors `compile_text`'s inline
+/// resolution.
+fn font_size_px(
+    text: &TextNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
+) -> f32 {
+    let font_size_prop = text
+        .font_size
+        .clone()
+        .or_else(|| style_prop(&text.style, style_map, "font-size").cloned());
+    resolve_property_dimension_px(&font_size_prop, resolved, 16.0) as f32
+}
+
+/// Render a chain member's PRE-ASSIGNED lines into its own box.
+///
+/// The lines were shaped + packed by the chain pre-pass using the chain
+/// source's shared style; this function only positions them in THIS box using
+/// the box's own geometry/align, with the same rotation + shadow brackets and
+/// the SHARED [`emit_lines`] code the single-box wrap path uses. Returns the
+/// laid-out content height (line count × line height) for flow-advance parity.
+#[allow(clippy::too_many_arguments)]
+fn render_chain_member(
+    text: &TextNode,
+    assignment: &super::chain::ChainAssignment,
+    font_size: f32,
+    text_x: f64,
+    text_y: f64,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> f64 {
+    // Box width is required to position lines; height/align are optional.
+    let box_w = match text.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)) {
+        Some(w) => w,
+        None => return 0.0,
+    };
+    let box_h_opt: Option<f64> = text.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+    let align = text.align.as_deref().unwrap_or("start");
+    let deco_thickness = (font_size as f64 / 14.0).max(1.0);
+
+    // overflow="fit": this member's assigned content must fit its own box. For
+    // a continuation/last member this catches an article that overruns even the
+    // final panel. Mirrors the single-box height-overflow check.
+    if text.overflow.as_deref() == Some("fit")
+        && let Some(box_h) = box_h_opt
+    {
+        const EPSILON: f64 = 0.5;
+        let content_height = assignment.lines.len() as f64 * assignment.metrics.line_height;
+        if content_height > box_h + EPSILON {
+            diagnostics.push(Diagnostic::error(
+                "text.fit_failed",
+                format!(
+                    "text '{}': chain content does not fit its box (overflow=\"fit\"): \
+                     needs ~{:.0}px height in {:.0}px box",
+                    text.id, content_height, box_h
+                ),
+                text.source_span,
+                Some(text.id.clone()),
+            ));
+        }
+    }
+
+    // Bracket order matches the non-chain path: PushTransform (rotation,
+    // outermost) → BeginShadow → glyphs → EndShadow → PopTransform.
+    // Rotation only when both w and h present (safe pivot center).
+    let rot = rotation_degrees(text.rotate.as_ref());
+    let text_rot = rot
+        .zip(Some(box_w))
+        .zip(box_h_opt)
+        .map(|((a, bw), bh)| (a, text_x + bw / 2.0, text_y + bh / 2.0));
+    if let Some((angle, cx, cy)) = text_rot {
+        commands.push(SceneCommand::PushTransform {
+            angle_deg: angle,
+            cx,
+            cy,
+        });
+    }
+
+    let has_shadow = if assignment.lines.is_empty() {
+        false
+    } else {
+        match text
+            .shadow
+            .as_ref()
+            .and_then(|p| resolve_property_shadow(p, resolved, &text.id))
+        {
+            Some(shadows) => {
+                commands.push(SceneCommand::BeginShadow { shadows });
+                true
+            }
+            None => false,
+        }
+    };
+
+    emit_lines(
+        &assignment.lines,
+        text_x,
+        text_y,
+        box_w,
+        align,
+        assignment.metrics,
+        font_size,
+        deco_thickness,
+        commands,
+    );
+
+    if has_shadow {
+        commands.push(SceneCommand::EndShadow);
+    }
+
+    if text_rot.is_some() {
+        commands.push(SceneCommand::PopTransform);
+    }
+
+    assignment.lines.len() as f64 * assignment.metrics.line_height
+}
 
 // ── Glyph conversion helper ───────────────────────────────────────────────────
 
@@ -41,7 +422,7 @@ fn run_to_scene_glyphs(run: &ZenithGlyphRun) -> Vec<SceneGlyph> {
 /// ref resolving to a `FontWeight`. A bare numeric literal (e.g. `font-weight=700`)
 /// is parsed directly; an unparsable literal falls back to `default`. Mirrors
 /// `resolve_property_dimension_px`.
-fn resolve_font_weight(
+pub(super) fn resolve_font_weight(
     prop: Option<&PropertyValue>,
     resolved: &BTreeMap<String, ResolvedToken>,
     default: u16,
@@ -69,7 +450,7 @@ fn resolve_font_weight(
 /// `true` so the caller can emit a `font.unresolved` advisory (worded for its
 /// own node kind) and shaping proceeds with the bundled face instead of
 /// silently dropping text. The probe weight/style match the shaping request.
-fn resolve_family_with_fallback(
+pub(super) fn resolve_family_with_fallback(
     fonts: &dyn FontProvider,
     requested: &str,
     default_family: &str,
@@ -105,6 +486,7 @@ pub(super) fn compile_text(
     engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    chains: &ChainAssignments,
     ctx: RenderCtx,
 ) -> f64 {
     // Skip invisible text nodes.
@@ -148,6 +530,28 @@ pub(super) fn compile_text(
     // Apply group translation offset.
     let text_x = text_x_raw + ctx.dx;
     let text_y = text_y_raw + ctx.dy;
+
+    // ── Threaded-text chain member ───────────────────────────────────
+    // If this node belongs to a text chain, its content was shaped and
+    // distributed once by the page-level chain pre-pass; render the lines
+    // ASSIGNED to this box instead of wrapping the node's own spans. A
+    // continuation member (empty spans) renders here too. This branch must
+    // precede the empty-spans early return below.
+    if text.chain.is_some()
+        && let Some(assignment) = chains.get(&text.id)
+    {
+        let fs = font_size_px(text, resolved, style_map);
+        return render_chain_member(
+            text,
+            assignment,
+            fs,
+            text_x,
+            text_y,
+            resolved,
+            commands,
+            diagnostics,
+        );
+    }
 
     // Skip silently if every span is empty (nothing to draw).
     if text.spans.iter().all(|s| s.text.is_empty()) {
@@ -451,213 +855,51 @@ pub(super) fn compile_text(
         }
     } else if let Some(box_w) = box_w_opt {
         // ── WRAP PATH (overflow): greedy cross-span word packing ──────
-        // Per-word token carrying its re-shaped runs plus the visual
-        // attributes inherited from its source span. A word may shape to
-        // multiple font-runs (per-glyph fallback), so `runs` is a Vec laid
-        // out left-to-right; `advance` is their summed width.
-        struct WordToken {
-            runs: Vec<ZenithGlyphRun>,
-            advance: f64,
-            color: Color,
-            underline: bool,
-            strikethrough: bool,
-        }
-        struct Line {
-            words: Vec<WordToken>,
-            content_w: f64,
-        }
+        // Reuses the SHARED shaping/packing/emit helpers (also used by the
+        // threaded-text chain distributor) so a wrapped node and a chain
+        // member produce byte-identical command streams. Convert the resolved
+        // `shaped_spans` to `ResolvedSpan` carriers, then shape → pack → emit.
+        let base_weight = resolve_font_weight(node_weight_prop, resolved, 400);
+        let resolved_spans: Vec<ResolvedSpan> = shaped_spans
+            .iter()
+            .map(|s| ResolvedSpan {
+                text: s.text.clone(),
+                color: s.color,
+                underline: s.underline,
+                strikethrough: s.strikethrough,
+                weight: s.weight,
+                style: s.style,
+            })
+            .collect();
 
-        // 1+2. Tokenize each (already-resolved) span into words and shape
-        // each word with per-glyph fallback. Capture shared ascent/line_height
-        // from the first successful word run (all words share font + size).
-        let mut tokens: Vec<WordToken> = Vec::new();
-        let mut ascent: f64 = 0.0;
-        let mut line_height: f64 = 0.0;
-        let mut have_metrics = false;
+        let (tokens, metrics) = shape_words(
+            &resolved_spans,
+            &families,
+            font_size,
+            base_weight,
+            engine,
+            fonts,
+            diagnostics,
+            &text.id,
+            text.source_span,
+        );
 
-        for shaped in &shaped_spans {
-            for word in shaped.text.split_whitespace() {
-                let req = ShapeRequest {
-                    text: word,
-                    families: &families,
-                    weight: shaped.weight,
-                    style: shaped.style,
-                    font_size,
-                };
-                match engine.shape_with_fallback(&req, fonts) {
-                    Err(e) => {
-                        diagnostics.push(Diagnostic::advisory(
-                            "scene.text_unshaped",
-                            format!("text node '{}' could not be shaped: {}", text.id, e.message),
-                            text.source_span,
-                            Some(text.id.clone()),
-                        ));
-                        // Skip this word; it contributes no token.
-                    }
-                    Ok(runs) => {
-                        if !have_metrics && let Some(first) = runs.first() {
-                            ascent = first.ascent as f64;
-                            line_height = first.line_height as f64;
-                            have_metrics = true;
-                        }
-                        let advance: f64 = runs.iter().map(|r| r.advance_width as f64).sum();
-                        tokens.push(WordToken {
-                            advance,
-                            color: shaped.color,
-                            underline: shaped.underline,
-                            strikethrough: shaped.strikethrough,
-                            runs,
-                        });
-                    }
-                }
-            }
-        }
-
-        // Shape a single space once (node base weight/style) for inter-word
-        // gaps and packing measurement.
-        let space_advance: f64 = {
-            let base_weight = resolve_font_weight(node_weight_prop, resolved, 400);
-            let req = ShapeRequest {
-                text: " ",
-                families: &families,
-                weight: base_weight,
-                style: FontStyle::Normal,
-                font_size,
-            };
-            match engine.shape(&req, fonts) {
-                Ok(run) => run.advance_width as f64,
-                Err(_) => 0.0,
-            }
-        };
-
-        // 3. Greedy pack tokens into lines, left-to-right and deterministic.
-        let mut lines: Vec<Line> = Vec::new();
-        let mut cur: Vec<WordToken> = Vec::new();
-        let mut line_w: f64 = 0.0;
-        for tok in tokens {
-            if !cur.is_empty() && line_w + space_advance + tok.advance > box_w {
-                let content_w = line_w;
-                lines.push(Line {
-                    words: std::mem::take(&mut cur),
-                    content_w,
-                });
-                line_w = 0.0;
-            }
-            let gap = if cur.is_empty() { 0.0 } else { space_advance };
-            line_w += gap + tok.advance;
-            cur.push(tok);
-        }
-        if !cur.is_empty() {
-            lines.push(Line {
-                words: cur,
-                content_w: line_w,
-            });
-        }
+        let lines = pack_lines(tokens, box_w, metrics.space_advance);
 
         // Record the actual line count for the overflow="fit" check below.
         fit_line_count = lines.len();
 
-        // 4. Emit each line, stacked by line_height, with per-line align.
-        let last_idx = lines.len().saturating_sub(1);
-        for (i, line) in lines.iter().enumerate() {
-            let baseline_y = text_y + ascent + (i as f64) * line_height;
-            let word_count = line.words.len();
-
-            let (base_x, gap) = match align {
-                "center" => (text_x + (box_w - line.content_w) / 2.0, space_advance),
-                "end" => (text_x + (box_w - line.content_w), space_advance),
-                "justify" => {
-                    if i != last_idx && word_count > 1 {
-                        let extra = (box_w - line.content_w) / (word_count as f64 - 1.0);
-                        (text_x, space_advance + extra)
-                    } else {
-                        // Last line (or single word) is start-aligned.
-                        (text_x, space_advance)
-                    }
-                }
-                // "start"/unknown → start-aligned.
-                _ => (text_x, space_advance),
-            };
-
-            // Precompute each word's left x along the line (base_x plus
-            // accumulated advances and gaps). Used for both decorations
-            // and glyph placement so positions stay exactly consistent.
-            let mut word_x: Vec<f64> = Vec::with_capacity(word_count);
-            {
-                let mut x = base_x;
-                for (wi, word) in line.words.iter().enumerate() {
-                    word_x.push(x);
-                    x += word.advance;
-                    if wi + 1 < word_count {
-                        x += gap;
-                    }
-                }
-            }
-
-            // Decorations FIRST (so glyphs paint on top), one FillRect per
-            // maximal contiguous same-flag run of words. The rect spans
-            // from the first word's x to the last word's right edge,
-            // covering interior spaces so the rule is continuous.
-            let underline_y = baseline_y + font_size as f64 * 0.12;
-            let strike_y = baseline_y - font_size as f64 * 0.30;
-            // (is_underline, deco rect y) for the two decoration kinds.
-            for (is_underline, deco_y) in [
-                (true, underline_y), // underline pass
-                (false, strike_y),   // strikethrough pass
-            ] {
-                let mut run_start: Option<(f64, Color)> = None;
-                let mut run_right: f64 = base_x;
-                for (wi, word) in line.words.iter().enumerate() {
-                    let on = if is_underline {
-                        word.underline
-                    } else {
-                        word.strikethrough
-                    };
-                    let wx = word_x.get(wi).copied().unwrap_or(base_x);
-                    if on {
-                        if run_start.is_none() {
-                            run_start = Some((wx, word.color));
-                        }
-                        run_right = wx + word.advance;
-                    } else if let Some((sx, color)) = run_start.take() {
-                        commands.push(SceneCommand::FillRect {
-                            x: sx,
-                            y: deco_y,
-                            w: run_right - sx,
-                            h: deco_thickness,
-                            color,
-                        });
-                    }
-                }
-                if let Some((sx, color)) = run_start.take() {
-                    commands.push(SceneCommand::FillRect {
-                        x: sx,
-                        y: deco_y,
-                        w: run_right - sx,
-                        h: deco_thickness,
-                        color,
-                    });
-                }
-            }
-
-            // Glyphs. A word may carry multiple font-runs (fallback); emit
-            // each at its accumulated offset within the word so sub-runs sit
-            // contiguously (matching the fast path's left-to-right layout).
-            for (wi, word) in line.words.iter().enumerate() {
-                let mut run_x = word_x.get(wi).copied().unwrap_or(base_x);
-                for run in &word.runs {
-                    commands.push(SceneCommand::DrawGlyphRun {
-                        x: run_x,
-                        y: baseline_y,
-                        font_id: run.font_id.clone(),
-                        font_size: run.font_size,
-                        color: word.color,
-                        glyphs: run_to_scene_glyphs(run),
-                    });
-                    run_x += run.advance_width as f64;
-                }
-            }
-        }
+        emit_lines(
+            &lines,
+            text_x,
+            text_y,
+            box_w,
+            align,
+            metrics,
+            font_size,
+            deco_thickness,
+            commands,
+        );
     }
 
     // ── overflow="fit" check ──────────────────────────────────────────

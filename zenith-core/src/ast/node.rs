@@ -216,6 +216,21 @@ pub struct TextNode {
     pub visible: Option<bool>,
     pub locked: Option<bool>,
     pub rotate: Option<Dimension>,
+    /// Threaded-text-flow chain id. When `Some(id)`, this text node is a member
+    /// of the chain named `id`; all text nodes sharing the same `chain` id form
+    /// an ordered chain (ordering = document source order). A long article
+    /// placed in the FIRST member's spans flows across every member's box in
+    /// order: each box consumes as much text as fits, the remainder continues in
+    /// the next member. Continuation members carry `chain=id` with empty spans.
+    ///
+    /// v0 semantics (documented):
+    /// - Content source: the first member (source order) that has non-empty
+    ///   spans is the sole content source; later members' spans are ignored
+    ///   (no concatenation).
+    /// - Shared style: all members are assumed to share font family/size/weight/
+    ///   fill; the whole chain is shaped with the FIRST member's resolved style.
+    ///   Each box re-wraps to its OWN width, so line height stays uniform.
+    pub chain: Option<String>,
     /// Inline text spans.
     pub spans: Vec<TextSpan>,
     /// Source declaration span, when available.

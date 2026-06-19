@@ -373,7 +373,7 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
 
     // Canonical property order: id, name, role, x, y, w, h, align, direction,
     // overflow, fill, font-family, font-size, font-weight, opacity, visible,
-    // locked, rotate, style
+    // locked, rotate, style, chain
     out.push_str(" id=\"");
     out.push_str(&t.id);
     out.push('"');
@@ -396,6 +396,7 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     write_opt_bool(out, "locked", &t.locked);
     write_opt_dimension(out, "rotate", &t.rotate);
     write_opt_str(out, "style", &t.style);
+    write_opt_str(out, "chain", &t.chain);
 
     // Unknown properties in sorted key order.
     for (key, prop) in &t.unknown_props {

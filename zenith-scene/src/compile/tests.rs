@@ -5006,3 +5006,156 @@ page id="page.ns" w=(px)200 h=(px)200 {
         "a shadow-less node must emit no shadow bracket: {cmds:?}"
     );
 }
+
+// ── Threaded text flow (chain) ────────────────────────────────────────
+
+/// Count the `DrawGlyphRun` commands whose baseline `y` falls in `[lo, hi)`.
+/// Used to attribute glyph runs to a particular chain member's box.
+fn glyph_runs_in_y(cmds: &[SceneCommand], lo: f64, hi: f64) -> usize {
+    cmds.iter()
+        .filter(|c| match c {
+            SceneCommand::DrawGlyphRun { y, .. } => *y >= lo && *y < hi,
+            _ => false,
+        })
+        .count()
+}
+
+/// A long article placed in box1 of a 2-box chain must fill box1 to its height
+/// and CONTINUE the remainder in box2: box1 emits a bounded number of glyph
+/// runs (its height / line-height), box2 emits the rest. Both boxes draw text;
+/// box1 does NOT draw every word.
+#[test]
+fn chain_two_box_distributes_overflow_to_second_box() {
+    // box1 is short (height 80) so only ~2 lines fit at 24px; the rest of the
+    // ~40-word article must flow into box2 (placed far below at y=1000).
+    let src = r##"zenith version=1 {
+  project id="proj.ch2" name="CH2"
+  tokens format="zenith-token-v1" {
+token id="color.ink" type="color"      value="#111827"
+token id="font.body" type="fontFamily" value="Noto Sans"
+token id="size.body" type="dimension"  value=(px)24
+  }
+  styles {}
+  document id="doc.ch2" title="CH2" {
+page id="page.ch2" w=(px)600 h=(px)1400 {
+  text id="box1" x=(px)10 y=(px)0 w=(px)300 h=(px)80 chain="article" fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" {
+    span "Alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu one two three four five six seven eight nine ten eleven twelve"
+  }
+  text id="box2" x=(px)10 y=(px)1000 w=(px)300 h=(px)380 chain="article" fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" {
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    // box1 baselines live near y in [0, 500); box2 near y in [1000, 1400).
+    let box1_runs = glyph_runs_in_y(cmds, 0.0, 500.0);
+    let box2_runs = glyph_runs_in_y(cmds, 1000.0, 1400.0);
+
+    assert!(box1_runs > 0, "box1 must draw text; got {box1_runs}");
+    assert!(
+        box2_runs > 0,
+        "box2 must receive the continuation; got {box2_runs}"
+    );
+    // box1 is height 80 at 24px line height → at most ~3 lines; the article has
+    // far more words than fit, so box2 must carry strictly more runs than box1.
+    assert!(
+        box2_runs > box1_runs,
+        "continuation box2 ({box2_runs}) must carry more than box1 ({box1_runs})"
+    );
+
+    // Determinism: a second compile yields byte-identical commands.
+    let result2 = compile(&doc, &default_provider());
+    assert_eq!(
+        result.scene.commands, result2.scene.commands,
+        "chain compile must be deterministic"
+    );
+}
+
+/// A chain whose content overflows even the LAST box, when that last member
+/// declares `overflow="fit"`, must raise a `text.fit_failed` Error on the last
+/// member.
+#[test]
+fn chain_last_box_overflow_fit_fails() {
+    // Both boxes are tiny (height 40 → 1 line each) but the article needs many
+    // lines; the last box (overflow="fit") cannot hold its remainder.
+    let src = r##"zenith version=1 {
+  project id="proj.chf" name="CHF"
+  tokens format="zenith-token-v1" {
+token id="color.ink" type="color"      value="#111827"
+token id="font.body" type="fontFamily" value="Noto Sans"
+token id="size.body" type="dimension"  value=(px)24
+  }
+  styles {}
+  document id="doc.chf" title="CHF" {
+page id="page.chf" w=(px)600 h=(px)1400 {
+  text id="cbox1" x=(px)10 y=(px)0 w=(px)300 h=(px)40 chain="article" fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" {
+    span "Alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey"
+  }
+  text id="cbox2" x=(px)10 y=(px)1000 w=(px)300 h=(px)40 overflow="fit" chain="article" fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" {
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    let fit_failed: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "text.fit_failed")
+        .collect();
+    assert_eq!(
+        fit_failed.len(),
+        1,
+        "exactly one text.fit_failed expected on the last member; got: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        fit_failed[0].subject_id.as_deref(),
+        Some("cbox2"),
+        "the fit failure must name the last chain member"
+    );
+}
+
+/// A non-chain text node must compile to a command stream identical to one
+/// produced when no chain machinery is involved — the chain pre-pass on a
+/// chain-free page is a no-op.
+#[test]
+fn non_chain_text_unaffected_by_chain_prepass() {
+    let src = r##"zenith version=1 {
+  project id="proj.nc" name="NC"
+  tokens format="zenith-token-v1" {
+token id="color.ink" type="color"      value="#111827"
+token id="font.body" type="fontFamily" value="Noto Sans"
+token id="size.body" type="dimension"  value=(px)24
+  }
+  styles {}
+  document id="doc.nc" title="NC" {
+page id="page.nc" w=(px)600 h=(px)200 {
+  text id="plain" x=(px)10 y=(px)20 w=(px)580 h=(px)40 fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" {
+    span "Hello Zenith"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let r1 = compile(&doc, &default_provider());
+    let r2 = compile(&doc, &default_provider());
+    assert_eq!(
+        r1.scene.commands, r2.scene.commands,
+        "non-chain compile must be deterministic and unaffected"
+    );
+    // Expect PushClip, DrawGlyphRun, PopClip (the single-line fast path).
+    assert_eq!(
+        r1.scene.commands.len(),
+        3,
+        "non-chain single-line text must emit exactly 3 commands; got {:?}",
+        r1.scene.commands
+    );
+}
