@@ -217,6 +217,38 @@ mod tests {
         }
     }
 
+    /// A text node with `font-weight=(token)"weight.bold"` must parse the
+    /// property into `font_weight = Some(TokenRef("weight.bold"))`.
+    #[test]
+    fn test_text_font_weight_token_parses() {
+        let src = r##"zenith version=1 {
+  project id="proj.fw" name="FW"
+  tokens format="zenith-token-v1" {
+    token id="weight.bold" type="fontWeight" value=700
+  }
+  styles {
+  }
+  document id="doc.fw" title="FW" {
+    page id="page.one" w=(px)640 h=(px)360 {
+      text id="t" x=(px)0 y=(px)0 w=(px)200 h=(px)50 font-weight=(token)"weight.bold" {
+        span "Bold"
+      }
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+        match &doc.body.pages[0].children[0] {
+            Node::Text(t) => assert_eq!(
+                t.font_weight,
+                Some(PropertyValue::TokenRef("weight.bold".to_owned())),
+                "font-weight token ref must parse into font_weight"
+            ),
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
     /// An unknown node kind must parse into `Node::Unknown`, never error.
     #[test]
     fn test_unknown_node_kind_forward_compat() {

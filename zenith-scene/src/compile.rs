@@ -572,13 +572,21 @@ fn compile_node(
             let node_opacity = text.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
             color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
 
-            // Shape the text.
-            // Weight and style are hardcoded to 400/Normal — the TextNode AST
-            // does not yet carry weight/style fields (future unit).
+            // Resolve font weight with style cascade; default 400 (regular).
+            // A fontWeight token (e.g. value 700) selects the bold face; the
+            // provider's weight-fallback handles unregistered weights.
+            let font_weight_prop = text
+                .font_weight
+                .as_ref()
+                .or_else(|| style_prop(&text.style, style_map, "font-weight"));
+            let weight = resolve_font_weight(font_weight_prop, resolved, 400);
+
+            // Shape the text. Style is hardcoded to Normal — the TextNode AST
+            // does not yet carry an italic/style field (future unit).
             let req = ShapeRequest {
                 text: &content,
                 families: &families,
-                weight: 400,
+                weight,
                 style: FontStyle::Normal,
                 font_size,
             };
@@ -1502,6 +1510,33 @@ fn resolve_property_dimension_px(
         // bringing literal visual dimensions to parity with token-backed ones.
         Some(PropertyValue::Dimension(dim)) => dim_to_px(dim.value, &dim.unit).unwrap_or(default),
         _ => default,
+    }
+}
+
+/// Resolve an optional font-weight property to a numeric weight (100–900).
+///
+/// Returns `default` when the property is absent, references a non-fontWeight
+/// (or unresolved) token, or carries a dimension. The idiomatic path is a token
+/// ref resolving to a `FontWeight`. A bare numeric literal (e.g. `font-weight=700`)
+/// is parsed directly; an unparsable literal falls back to `default`. Mirrors
+/// `resolve_property_dimension_px`.
+fn resolve_font_weight(
+    prop: Option<&PropertyValue>,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    default: u16,
+) -> u16 {
+    match prop {
+        Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
+            Some(rt) => match &rt.value {
+                ResolvedValue::FontWeight(w) => *w as u16,
+                _ => default,
+            },
+            None => default,
+        },
+        Some(PropertyValue::Literal(s)) => s.parse::<u16>().unwrap_or(default),
+        // A dimension is not a weight → fall back to the default.
+        Some(PropertyValue::Dimension(_)) => default,
+        None => default,
     }
 }
 
@@ -3899,6 +3934,67 @@ mod tests {
         assert!(
             font_id.contains("noto-sans-mono"),
             "default code font must be mono; got font_id {font_id}"
+        );
+    }
+
+    // ── Text node: font-weight token selects the bold face ───────────────────
+
+    /// A text node with a `font-weight` token resolving to 700 must emit a
+    /// `DrawGlyphRun` whose `font_id` is the BOLD Noto Sans face; a text node
+    /// with NO font-weight must resolve to the regular (400) face.
+    #[test]
+    fn text_node_font_weight_selects_bold_face() {
+        // Helper: extract the first DrawGlyphRun's font_id from a compiled doc.
+        fn first_run_font_id(src: &str) -> String {
+            let doc = parse(src);
+            let result = compile(&doc, &default_provider());
+            result
+                .scene
+                .commands
+                .iter()
+                .find_map(|c| match c {
+                    SceneCommand::DrawGlyphRun { font_id, .. } => Some(font_id.clone()),
+                    _ => None,
+                })
+                .expect("a DrawGlyphRun must exist")
+        }
+
+        // Bold: font-weight=(token)"weight.bold" → fontWeight 700 → bold face.
+        let bold_src = r##"zenith version=1 {
+  project id="proj.fw" name="FW"
+  tokens format="zenith-token-v1" {
+    token id="weight.bold" type="fontWeight" value=700
+  }
+  styles {}
+  document id="doc.fw" title="FW" {
+    page id="page.fw" w=(px)400 h=(px)200 {
+      text id="text.bold" x=(px)10 y=(px)20 w=(px)380 h=(px)40 font-weight=(token)"weight.bold" { span "Bold" }
+    }
+  }
+}
+"##;
+        let bold_font_id = first_run_font_id(bold_src);
+        assert!(
+            bold_font_id.contains("noto-sans-700"),
+            "font-weight 700 must select the bold face; got font_id {bold_font_id}"
+        );
+
+        // Regular: no font-weight → the default (400) face.
+        let regular_src = r##"zenith version=1 {
+  project id="proj.fw" name="FW"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.fw" title="FW" {
+    page id="page.fw" w=(px)400 h=(px)200 {
+      text id="text.reg" x=(px)10 y=(px)20 w=(px)380 h=(px)40 { span "Regular" }
+    }
+  }
+}
+"##;
+        let regular_font_id = first_run_font_id(regular_src);
+        assert!(
+            regular_font_id.contains("noto-sans-400") && !regular_font_id.contains("700"),
+            "absent font-weight must select the regular (400) face; got font_id {regular_font_id}"
         );
     }
 

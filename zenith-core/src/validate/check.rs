@@ -401,6 +401,15 @@ fn walk_node(
                 resolved_tokens,
                 diagnostics,
             );
+            check_visual_prop(
+                &t.id,
+                "font-weight",
+                t.font_weight.as_ref(),
+                VisualExpect::FontWeight,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
 
             // Unknown properties.
             for prop_name in t.unknown_props.keys() {
@@ -945,6 +954,7 @@ enum VisualExpect {
     Color,
     Dimension,
     FontFamily,
+    FontWeight,
 }
 
 /// Check a single visual property value:
@@ -994,6 +1004,9 @@ fn check_visual_prop(
                 }
                 VisualExpect::FontFamily => {
                     matches!(resolved.token_type, TokenType::FontFamily)
+                }
+                VisualExpect::FontWeight => {
+                    matches!(resolved.token_type, TokenType::FontWeight)
                 }
             };
 
@@ -1217,6 +1230,7 @@ fn visual_expect_name(e: VisualExpect) -> &'static str {
         VisualExpect::Color => "color",
         VisualExpect::Dimension => "dimension",
         VisualExpect::FontFamily => "fontFamily",
+        VisualExpect::FontWeight => "fontWeight",
     }
 }
 
@@ -1351,6 +1365,7 @@ mod tests {
             fill,
             font_family: None,
             font_size: None,
+            font_weight: None,
             opacity: None,
             visible: None,
             locked: None,
@@ -1528,6 +1543,44 @@ mod tests {
                 )],
             )],
         );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "token.unknown_reference"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── Test 4b: font-weight referencing a missing token ──────────────────
+
+    #[test]
+    fn font_weight_with_missing_token_ref_produces_unknown_reference() {
+        let text = Node::Text(TextNode {
+            id: "text.fw".to_owned(),
+            name: None,
+            role: None,
+            x: Some(px(0.0)),
+            y: Some(px(0.0)),
+            w: Some(px(200.0)),
+            h: Some(px(40.0)),
+            align: None,
+            direction: None,
+            overflow: None,
+            style: None,
+            fill: None,
+            font_family: None,
+            font_size: None,
+            font_weight: Some(token_ref("weight.does.not.exist")),
+            opacity: None,
+            visible: None,
+            locked: None,
+            rotate: None,
+            spans: vec![],
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        });
+        let doc = doc_with(vec![], vec![minimal_page("page.one", vec![text])]);
         let report = validate(&doc);
         assert!(
             has_code(&report, "token.unknown_reference"),
@@ -2229,6 +2282,7 @@ mod tests {
                     fill: None,
                     font_family: Some(token_ref("font.body")),
                     font_size: None,
+                    font_weight: None,
                     opacity: None,
                     visible: None,
                     locked: None,

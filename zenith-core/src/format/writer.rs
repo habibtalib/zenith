@@ -702,7 +702,8 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     out.push_str("text");
 
     // Canonical property order: id, name, role, x, y, w, h, align, direction,
-    // overflow, fill, font-family, font-size, opacity, visible, locked, rotate, style
+    // overflow, fill, font-family, font-size, font-weight, opacity, visible,
+    // locked, rotate, style
     out.push_str(" id=\"");
     out.push_str(&t.id);
     out.push('"');
@@ -718,6 +719,7 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     write_opt_property_value(out, "fill", &t.fill);
     write_opt_property_value(out, "font-family", &t.font_family);
     write_opt_property_value(out, "font-size", &t.font_size);
+    write_opt_property_value(out, "font-weight", &t.font_weight);
     write_opt_f64(out, "opacity", &t.opacity);
     write_opt_bool(out, "visible", &t.visible);
     write_opt_bool(out, "locked", &t.locked);
@@ -1249,6 +1251,60 @@ mod tests {
             pos_x < pos_fill,
             "x= must appear before fill= in canonical output; rect line: {rect_line:?}"
         );
+    }
+
+    /// **font-weight round-trip + ordering**: a text node with a `font-weight`
+    /// token must survive parse→format→parse, and the formatter must place
+    /// `font-weight` immediately AFTER `font-size` in the canonical output.
+    #[test]
+    fn test_text_font_weight_round_trip_and_order() {
+        use crate::ast::{Node, PropertyValue};
+        let src = r##"zenith version=1 {
+  project id="proj.fw" name="FW"
+  tokens format="zenith-token-v1" {
+    token id="size.body" type="dimension" value=(px)16
+    token id="weight.bold" type="fontWeight" value=700
+  }
+  styles {
+  }
+  document id="doc.fw" title="FW" {
+    page id="p" w=(px)100 h=(px)100 {
+      text id="t" x=(px)0 y=(px)0 w=(px)80 h=(px)40 font-size=(token)"size.body" font-weight=(token)"weight.bold" {
+        span "Bold"
+      }
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse");
+        let out = format_document(&doc).expect("format");
+        let text = String::from_utf8(out).unwrap();
+
+        // Canonical order: font-weight comes immediately after font-size.
+        let text_line = text
+            .lines()
+            .find(|l| l.trim_start().starts_with("text"))
+            .expect("must find text line");
+        let pos_size = text_line.find(" font-size=").expect("must find font-size=");
+        let pos_weight = text_line
+            .find(" font-weight=")
+            .expect("must find font-weight=");
+        assert!(
+            pos_size < pos_weight,
+            "font-weight must follow font-size; text line: {text_line:?}"
+        );
+
+        // Round-trip: re-parse preserves the font_weight token ref.
+        let doc2 = adapter.parse(text.as_bytes()).expect("re-parse");
+        match &doc2.body.pages[0].children[0] {
+            Node::Text(t) => assert_eq!(
+                t.font_weight,
+                Some(PropertyValue::TokenRef("weight.bold".to_owned())),
+                "font-weight must survive the format round-trip"
+            ),
+            other => panic!("expected Text, got {other:?}"),
+        }
     }
 
     /// **Booleans**: `visible=#false` must emit with `#false`, not `false` or `"false"`.

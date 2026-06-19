@@ -188,6 +188,8 @@ pub struct TextNode {
     pub fill: Option<PropertyValue>,
     pub font_family: Option<PropertyValue>,
     pub font_size: Option<PropertyValue>,
+    /// Numeric font weight (100–900), usually a `fontWeight` token ref.
+    pub font_weight: Option<PropertyValue>,
     pub opacity: Option<f64>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,
