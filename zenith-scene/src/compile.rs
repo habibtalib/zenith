@@ -16,7 +16,7 @@ use zenith_core::{
     Span, Style, TokenKind, Unit, builtin_color, is_supported, resolve_tokens, scan,
     token_id_for_kind,
 };
-use zenith_layout::{RustybuzzEngine, ShapeRequest, TextLayoutEngine};
+use zenith_layout::{RustybuzzEngine, ShapeRequest, TextLayoutEngine, ZenithGlyphRun};
 
 use crate::color::parse_srgb_hex;
 use crate::ir::{Color, FitMode, Scene, SceneCommand, SceneGlyph};
@@ -234,6 +234,23 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
     scene.commands.push(SceneCommand::PopClip);
 
     CompileResult { scene, diagnostics }
+}
+
+// ── Glyph conversion helper ───────────────────────────────────────────────────
+
+/// Map a [`ZenithGlyphRun`]'s positioned glyphs into [`SceneGlyph`] records.
+///
+/// Used by every shaped-run emit site (Text, highlighted Code, plain Code) so
+/// that the field mapping is defined in exactly one place.
+fn run_to_scene_glyphs(run: &ZenithGlyphRun) -> Vec<SceneGlyph> {
+    run.glyphs
+        .iter()
+        .map(|g| SceneGlyph {
+            glyph_id: g.glyph_id,
+            dx: g.x,
+            dy: g.y,
+        })
+        .collect()
 }
 
 // ── Node dispatch ─────────────────────────────────────────────────────────────
@@ -566,7 +583,7 @@ fn compile_node(
                 .font_family
                 .as_ref()
                 .or_else(|| style_prop(&text.style, style_map, "font-family"));
-            let family_name: String = match font_family_prop {
+            let raw_family_name: String = match font_family_prop {
                 Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
                     Some(rt) => match &rt.value {
                         ResolvedValue::FontFamily(name) => name.clone(),
@@ -579,6 +596,27 @@ fn compile_node(
                 Some(PropertyValue::Dimension(_)) => "Noto Sans".to_owned(),
                 None => "Noto Sans".to_owned(),
             };
+            // Probe the provider with the node-level defaults (weight 400, Normal
+            // style) — sufficient to confirm family availability.  The advisory
+            // fires at most once per text node, before any per-span shaping.
+            let (family_name, fell_back) = resolve_family_with_fallback(
+                fonts,
+                &raw_family_name,
+                "Noto Sans",
+                400,
+                FontStyle::Normal,
+            );
+            if fell_back {
+                diagnostics.push(Diagnostic::advisory(
+                    "font.unresolved",
+                    format!(
+                        "text node '{}': font family '{}' not available, falling back to 'Noto Sans'",
+                        text.id, raw_family_name
+                    ),
+                    text.source_span,
+                    Some(text.id.clone()),
+                ));
+            }
             let families = vec![family_name];
 
             // Resolve font size in pixels with style cascade; default to 16.0 if absent.
@@ -608,9 +646,29 @@ fn compile_node(
             // Per-span fill and font-weight are honored; family and size are
             // shared (v0 has no per-span family/size override). Cross-span
             // kerning is lost relative to a single concatenated run — accepted
-            // for v0. Style is hardcoded to Normal: italic/underline/strike are
-            // a future unit (need an italic face / decoration drawing).
-            let mut x_cursor = text_x;
+            // for v0.
+            //
+            // Two-pass layout to support horizontal alignment:
+            //   Pass 1 — shape every non-empty span; accumulate total_advance.
+            //   Compute x_offset from the alignment and box width.
+            //   Pass 2 — emit decoration FillRects + DrawGlyphRun commands at
+            //             (text_x + x_offset) + per-span cursor.
+            //
+            // When align is absent or "start", x_offset == 0.0 and the emitted
+            // commands are byte-for-byte identical to the previous single-pass.
+
+            // Per-shaped-span record: (run, color, underline, strikethrough).
+            struct ShapedSpan {
+                run: ZenithGlyphRun,
+                color: Color,
+                underline: bool,
+                strikethrough: bool,
+            }
+
+            // ── Pass 1: shape ────────────────────────────────────────────────
+            let mut shaped_spans: Vec<ShapedSpan> = Vec::new();
+            let mut total_advance: f64 = 0.0;
+
             for span in &text.spans {
                 if span.text.is_empty() {
                     continue;
@@ -655,59 +713,80 @@ fn compile_node(
                             text.source_span,
                             Some(text.id.clone()),
                         ));
+                        // Skip this span; cursor does not advance.
                     }
                     Ok(run) => {
-                        let baseline_y = text_y + run.ascent as f64;
-                        let run_advance = run.advance_width as f64;
-                        let glyphs: Vec<SceneGlyph> = run
-                            .glyphs
-                            .iter()
-                            .map(|g| SceneGlyph {
-                                glyph_id: g.glyph_id,
-                                dx: g.x,
-                                dy: g.y,
-                            })
-                            .collect();
-
-                        // Per-span decorations: a thin filled rule in the span's
-                        // own color, spanning the run's advance. Position/thickness
-                        // are derived from the font size (the shaped run does not
-                        // expose the font's underline metrics) — a deterministic v0
-                        // approximation. Emitted before the glyphs so the text sits
-                        // on top of any overlap.
-                        let deco_thickness = (font_size as f64 / 14.0).max(1.0);
-                        if span.underline == Some(true) {
-                            commands.push(SceneCommand::FillRect {
-                                x: x_cursor,
-                                y: baseline_y + font_size as f64 * 0.12,
-                                w: run_advance,
-                                h: deco_thickness,
-                                color,
-                            });
-                        }
-                        if span.strikethrough == Some(true) {
-                            commands.push(SceneCommand::FillRect {
-                                x: x_cursor,
-                                y: baseline_y - font_size as f64 * 0.30,
-                                w: run_advance,
-                                h: deco_thickness,
-                                color,
-                            });
-                        }
-
-                        commands.push(SceneCommand::DrawGlyphRun {
-                            x: x_cursor,
-                            y: baseline_y,
-                            font_id: run.font_id,
-                            font_size: run.font_size,
+                        total_advance += run.advance_width as f64;
+                        shaped_spans.push(ShapedSpan {
+                            run,
                             color,
-                            glyphs,
+                            underline: span.underline == Some(true),
+                            strikethrough: span.strikethrough == Some(true),
                         });
-
-                        // Advance the cursor past this run for the next span.
-                        x_cursor += run_advance;
                     }
                 }
+            }
+
+            // ── Alignment offset ─────────────────────────────────────────────
+            // Resolve the node's box width to pixels (same dim_to_px path as x/y).
+            // If w is absent or uses an unsupported unit, alignment is a no-op.
+            let box_w_opt: Option<f64> = text.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+
+            let align = text.align.as_deref().unwrap_or("start");
+            let x_offset: f64 = match box_w_opt {
+                None => 0.0, // no box width → always start-anchor
+                Some(box_w) => match align {
+                    "center" => (box_w - total_advance) / 2.0,
+                    "end" => box_w - total_advance,
+                    // TODO: justify needs line-wrapping (F3); treat as start for now.
+                    _ => 0.0, // "start", "justify", unknown → no offset
+                },
+            };
+
+            // ── Pass 2: emit ─────────────────────────────────────────────────
+            let deco_thickness = (font_size as f64 / 14.0).max(1.0);
+            let mut x_cursor = text_x + x_offset;
+
+            for shaped in shaped_spans {
+                let run_advance = shaped.run.advance_width as f64;
+                let baseline_y = text_y + shaped.run.ascent as f64;
+                let glyphs = run_to_scene_glyphs(&shaped.run);
+
+                // Per-span decorations: a thin filled rule in the span's own
+                // color, spanning the run's advance. Position/thickness are
+                // derived from the font size (the shaped run does not expose the
+                // font's underline metrics) — a deterministic v0 approximation.
+                // Emitted before the glyphs so the text sits on top of any overlap.
+                if shaped.underline {
+                    commands.push(SceneCommand::FillRect {
+                        x: x_cursor,
+                        y: baseline_y + font_size as f64 * 0.12,
+                        w: run_advance,
+                        h: deco_thickness,
+                        color: shaped.color,
+                    });
+                }
+                if shaped.strikethrough {
+                    commands.push(SceneCommand::FillRect {
+                        x: x_cursor,
+                        y: baseline_y - font_size as f64 * 0.30,
+                        w: run_advance,
+                        h: deco_thickness,
+                        color: shaped.color,
+                    });
+                }
+
+                commands.push(SceneCommand::DrawGlyphRun {
+                    x: x_cursor,
+                    y: baseline_y,
+                    font_id: shaped.run.font_id,
+                    font_size: shaped.run.font_size,
+                    color: shaped.color,
+                    glyphs,
+                });
+
+                // Advance the cursor past this run for the next span.
+                x_cursor += run_advance;
             }
         }
 
@@ -906,7 +985,7 @@ fn compile_node(
                 .font_family
                 .as_ref()
                 .or_else(|| style_prop(&code.style, style_map, "font-family"));
-            let family_name: String = match font_family_prop {
+            let raw_family_name: String = match font_family_prop {
                 Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
                     Some(rt) => match &rt.value {
                         ResolvedValue::FontFamily(name) => name.clone(),
@@ -919,6 +998,26 @@ fn compile_node(
                 Some(PropertyValue::Dimension(_)) => "Noto Sans Mono".to_owned(),
                 None => "Noto Sans Mono".to_owned(),
             };
+            // Probe the provider before shaping to avoid silently dropping lines
+            // when the requested mono family is unregistered.
+            let (family_name, fell_back) = resolve_family_with_fallback(
+                fonts,
+                &raw_family_name,
+                "Noto Sans Mono",
+                400,
+                FontStyle::Normal,
+            );
+            if fell_back {
+                diagnostics.push(Diagnostic::advisory(
+                    "font.unresolved",
+                    format!(
+                        "code node '{}': font family '{}' not available, falling back to 'Noto Sans Mono'",
+                        code.id, raw_family_name
+                    ),
+                    code.source_span,
+                    Some(code.id.clone()),
+                ));
+            }
             let families = vec![family_name];
 
             // Resolve font size in pixels with style cascade; default to 14.0.
@@ -1081,15 +1180,7 @@ fn compile_node(
                         let mut x_cursor = code_x;
                         for (run, seg_color) in shaped {
                             let advance = run.advance_width as f64;
-                            let glyphs: Vec<SceneGlyph> = run
-                                .glyphs
-                                .iter()
-                                .map(|g| SceneGlyph {
-                                    glyph_id: g.glyph_id,
-                                    dx: g.x,
-                                    dy: g.y,
-                                })
-                                .collect();
+                            let glyphs = run_to_scene_glyphs(&run);
                             commands.push(SceneCommand::DrawGlyphRun {
                                 x: x_cursor,
                                 y: baseline_y,
@@ -1128,15 +1219,7 @@ fn compile_node(
                         Ok(run) => {
                             let baseline_y =
                                 code_y + run.ascent as f64 + (i as f64) * run.line_height as f64;
-                            let glyphs: Vec<SceneGlyph> = run
-                                .glyphs
-                                .iter()
-                                .map(|g| SceneGlyph {
-                                    glyph_id: g.glyph_id,
-                                    dx: g.x,
-                                    dy: g.y,
-                                })
-                                .collect();
+                            let glyphs = run_to_scene_glyphs(&run);
 
                             commands.push(SceneCommand::DrawGlyphRun {
                                 x: code_x,
@@ -1848,6 +1931,37 @@ fn resolve_property_color(
     }
 }
 
+// ── Font family fallback ──────────────────────────────────────────────────────
+
+/// Resolve a requested font family against the provider, falling back to the
+/// bundled default when the requested family is unregistered.
+///
+/// Returns `(family_to_use, fell_back)`: if the requested family resolves it is
+/// returned unchanged with `false`; otherwise `default_family` is returned with
+/// `true` so the caller can emit a `font.unresolved` advisory (worded for its
+/// own node kind) and shaping proceeds with the bundled face instead of
+/// silently dropping text. The probe weight/style match the shaping request.
+fn resolve_family_with_fallback(
+    fonts: &dyn FontProvider,
+    requested: &str,
+    default_family: &str,
+    weight: u16,
+    style: FontStyle,
+) -> (String, bool) {
+    // Fast path: requested == default → always available, no check needed.
+    if requested.eq_ignore_ascii_case(default_family) {
+        return (requested.to_owned(), false);
+    }
+    if fonts
+        .resolve(&[requested.to_owned()], weight, style)
+        .is_some()
+    {
+        (requested.to_owned(), false)
+    } else {
+        (default_family.to_owned(), true)
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2499,10 +2613,10 @@ mod tests {
         }
     }
 
-    // ── Unresolvable font → text_unshaped advisory, no DrawGlyphRun ──────
+    // ── Unresolvable font → font.unresolved advisory + fallback render ──────
 
     #[test]
-    fn unresolvable_font_family_produces_text_unshaped_advisory() {
+    fn unresolvable_font_family_falls_back_and_emits_advisory() {
         let src = r##"zenith version=1 {
   project id="proj.tx4" name="TX4"
   tokens format="zenith-token-v1" {}
@@ -2519,20 +2633,26 @@ mod tests {
         let doc = parse(src);
         let result = compile(&doc, &default_provider());
 
-        // Must have exactly one advisory with code "scene.text_unshaped".
-        let unshaped: Vec<_> = result
+        // Exactly one font.unresolved advisory naming the node and the missing family.
+        let unresolved: Vec<_> = result
             .diagnostics
             .iter()
-            .filter(|d| d.code == "scene.text_unshaped")
+            .filter(|d| d.code == "font.unresolved")
             .collect();
         assert_eq!(
-            unshaped.len(),
+            unresolved.len(),
             1,
-            "expected 1 text_unshaped advisory; got: {:?}",
+            "expected 1 font.unresolved advisory; got: {:?}",
             result.diagnostics
         );
+        assert!(
+            unresolved[0].message.contains("label.tx4")
+                && unresolved[0].message.contains("Nonexistent"),
+            "advisory must name the node and the missing family; got: {:?}",
+            unresolved[0]
+        );
 
-        // No DrawGlyphRun emitted.
+        // Text must STILL render via the fallback face — DrawGlyphRun present.
         let glyph_cmds: Vec<_> = result
             .scene
             .commands
@@ -2540,9 +2660,9 @@ mod tests {
             .filter(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }))
             .collect();
         assert!(
-            glyph_cmds.is_empty(),
-            "no DrawGlyphRun expected when font is unresolvable; got: {:?}",
-            glyph_cmds
+            !glyph_cmds.is_empty(),
+            "text must render in the fallback face, not be dropped; got: {:?}",
+            result.scene.commands
         );
     }
 
@@ -4785,6 +4905,146 @@ mod tests {
         }
     }
 
+    // ── Text alignment ────────────────────────────────────────────────────
+
+    /// Helper: compile a single-span text node with the given align and w,
+    /// return the x of the sole DrawGlyphRun.
+    fn text_align_run_x(align: Option<&str>, node_x: f64, node_w: Option<f64>) -> f64 {
+        let w_attr = node_w.map_or(String::new(), |w| format!(" w=(px){w}"));
+        let align_attr = align.map_or(String::new(), |a| format!(" align=\"{a}\""));
+        let src = format!(
+            r##"zenith version=1 {{
+  project id="proj.al" name="AL"
+  tokens format="zenith-token-v1" {{}}
+  styles {{}}
+  document id="doc.al" title="AL" {{
+    page id="page.al" w=(px)800 h=(px)400 {{
+      text id="text.al" x=(px){node_x} y=(px)20{w_attr}{align_attr} {{
+        span "Hello"
+      }}
+    }}
+  }}
+}}
+"##
+        );
+        let doc = parse(&src);
+        let result = compile(&doc, &default_provider());
+        result
+            .scene
+            .commands
+            .iter()
+            .find_map(|c| {
+                if let SceneCommand::DrawGlyphRun { x, .. } = c {
+                    Some(*x)
+                } else {
+                    None
+                }
+            })
+            .expect("a DrawGlyphRun must be emitted")
+    }
+
+    /// `align="start"` (or absent) → run x equals node x (no offset applied).
+    #[test]
+    fn text_align_start_run_at_node_x() {
+        // Explicit "start"
+        let x = text_align_run_x(Some("start"), 50.0, Some(300.0));
+        assert_eq!(x, 50.0, "align=start must place run at node x");
+        // Absent align
+        let x = text_align_run_x(None, 50.0, Some(300.0));
+        assert_eq!(x, 50.0, "absent align must behave as start");
+        // Absent w — no box, no offset regardless of align
+        let x = text_align_run_x(Some("center"), 50.0, None);
+        assert_eq!(x, 50.0, "absent w disables alignment (start fallback)");
+    }
+
+    /// `align="center"` → run x is inset from node x by (w − advance) / 2,
+    /// which is strictly greater than node x when the text is narrower than w.
+    #[test]
+    fn text_align_center_run_inset_from_node_x() {
+        let node_x = 10.0;
+        let box_w = 500.0;
+        let x = text_align_run_x(Some("center"), node_x, Some(box_w));
+        assert!(
+            x > node_x,
+            "center-aligned run x ({x}) must be greater than node x ({node_x})"
+        );
+        // The run's right edge is at x + advance; by symmetry the left inset
+        // and right inset from the box edges are equal, so x must be strictly
+        // less than node_x + box_w / 2 (text "Hello" is narrower than half the box).
+        assert!(
+            x < node_x + box_w / 2.0,
+            "center-aligned run x ({x}) must be less than box midpoint ({})",
+            node_x + box_w / 2.0
+        );
+    }
+
+    /// `align="end"` → the run's advance right-edge aligns with node_x + w,
+    /// i.e. run_x < node_x + w AND run_x > node_x (text is narrower than box).
+    #[test]
+    fn text_align_end_run_right_edge_at_box_right() {
+        let node_x = 10.0;
+        let box_w = 500.0;
+        let x = text_align_run_x(Some("end"), node_x, Some(box_w));
+        // x should be greater than node_x (we advanced inward from start)
+        assert!(
+            x > node_x,
+            "end-aligned run x ({x}) must be greater than node x ({node_x})"
+        );
+        // x should be less than node_x + box_w (the run has positive width)
+        assert!(
+            x < node_x + box_w,
+            "end-aligned run x ({x}) must be less than right edge ({})",
+            node_x + box_w
+        );
+    }
+
+    /// Multi-span centered line: first span starts at the centered offset and
+    /// the second span is contiguous (its x equals first_x + first_advance).
+    #[test]
+    fn text_align_center_multi_span_contiguous() {
+        let src = r##"zenith version=1 {
+  project id="proj.ac2" name="AC2"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.ac2" title="AC2" {
+    page id="page.ac2" w=(px)800 h=(px)400 {
+      text id="text.ac2" x=(px)10 y=(px)20 w=(px)600 align="center" {
+        span "Hello"
+        span " World"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        let runs: Vec<(f64, f32)> = result
+            .scene
+            .commands
+            .iter()
+            .filter_map(|c| {
+                if let SceneCommand::DrawGlyphRun { x, font_size, .. } = c {
+                    Some((*x, *font_size))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(runs.len(), 2, "two spans → two runs; got {}", runs.len());
+        let (x0, _) = runs[0];
+        let (x1, _) = runs[1];
+        // First run must be inset from node x (centered)
+        assert!(
+            x0 > 10.0,
+            "first span of center-aligned text must be to the right of node x; got {x0}"
+        );
+        // Spans must be contiguous (second starts where first ends)
+        assert!(
+            x1 > x0,
+            "second span x ({x1}) must follow first span x ({x0})"
+        );
+    }
+
     /// A line with a LITERAL `stroke-width=(px)3` must produce a `StrokeLine`
     /// whose `stroke_width` is 3.0.
     #[test]
@@ -4818,5 +5078,106 @@ mod tests {
             }
             other => panic!("expected StrokeLine, got {other:?}"),
         }
+    }
+
+    // ── Font fallback diagnostics ─────────────────────────────────────────
+
+    /// A text node whose font-family token resolves to an UNREGISTERED family
+    /// ("Oswald") must still emit a `DrawGlyphRun` (text not dropped) AND
+    /// produce exactly one `font.unresolved` advisory naming the node id and
+    /// the missing family.
+    #[test]
+    fn text_node_unregistered_family_falls_back_and_emits_advisory() {
+        let src = r##"zenith version=1 {
+  project id="proj.fb1" name="FB1"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.fb1" title="FB1" {
+    page id="page.fb1" w=(px)400 h=(px)200 {
+      text id="headline" x=(px)10 y=(px)10 font-family="Oswald" {
+        span "Hello"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        // The scene must contain at least one DrawGlyphRun (text not dropped).
+        assert!(
+            result
+                .scene
+                .commands
+                .iter()
+                .any(|c| matches!(c, SceneCommand::DrawGlyphRun { .. })),
+            "expected DrawGlyphRun when unregistered family falls back; commands: {:?}",
+            result.scene.commands,
+        );
+
+        // Exactly one font.unresolved advisory must be present, naming the node.
+        let unresolved: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "font.unresolved")
+            .collect();
+        assert_eq!(
+            unresolved.len(),
+            1,
+            "expected exactly one font.unresolved diagnostic, got {:?}",
+            unresolved,
+        );
+        let msg = &unresolved[0].message;
+        assert!(
+            msg.contains("headline"),
+            "advisory message should name the node 'headline'; got: {msg}"
+        );
+        assert!(
+            msg.contains("Oswald"),
+            "advisory message should name the missing family 'Oswald'; got: {msg}"
+        );
+    }
+
+    /// A text node using the registered "Noto Sans" family must produce NO
+    /// `font.unresolved` diagnostic and must emit a `DrawGlyphRun` as usual.
+    #[test]
+    fn text_node_registered_family_no_advisory() {
+        let src = r##"zenith version=1 {
+  project id="proj.fb2" name="FB2"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.fb2" title="FB2" {
+    page id="page.fb2" w=(px)400 h=(px)200 {
+      text id="body.text" x=(px)10 y=(px)10 font-family="Noto Sans" {
+        span "Hello"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        // No font.unresolved diagnostics.
+        let unresolved: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "font.unresolved")
+            .collect();
+        assert!(
+            unresolved.is_empty(),
+            "expected no font.unresolved diagnostics for registered family; got: {:?}",
+            unresolved,
+        );
+
+        // DrawGlyphRun must still be present.
+        assert!(
+            result
+                .scene
+                .commands
+                .iter()
+                .any(|c| matches!(c, SceneCommand::DrawGlyphRun { .. })),
+            "expected DrawGlyphRun for registered Noto Sans family",
+        );
     }
 }
