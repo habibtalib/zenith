@@ -210,13 +210,15 @@ impl FontProvider for BytesFontProvider {
 
 /// Build a `BytesFontProvider` preloaded with the bundled default fonts.
 ///
-/// Four faces are embedded at compile time, all Apache-2.0:
+/// Five faces are embedded at compile time, all Apache-2.0:
 /// - Noto Sans Regular (`"Noto Sans"`, weight 400, Normal) — the proportional
 ///   default for text nodes.
 /// - Noto Sans Bold (`"Noto Sans"`, weight 700, Normal) — resolved when a node
 ///   requests `font-weight` 700.
 /// - Noto Sans Italic (`"Noto Sans"`, weight 400, Italic) — resolved when a
 ///   span requests italic.
+/// - Noto Sans Bold Italic (`"Noto Sans"`, weight 700, Italic) — resolved for a
+///   span that is BOTH bold and italic (completes the weight×style matrix).
 /// - Noto Sans Mono Regular (`"Noto Sans Mono"`, weight 400, Normal) — the
 ///   monospace default for code nodes.
 #[must_use]
@@ -227,12 +229,15 @@ pub fn default_provider() -> BytesFontProvider {
         Arc::from(&include_bytes!("../../../assets/fonts/NotoSans-Bold.ttf")[..]);
     let sans_italic: Arc<[u8]> =
         Arc::from(&include_bytes!("../../../assets/fonts/NotoSans-Italic.ttf")[..]);
+    let sans_bold_italic: Arc<[u8]> =
+        Arc::from(&include_bytes!("../../../assets/fonts/NotoSans-BoldItalic.ttf")[..]);
     let mono: Arc<[u8]> =
         Arc::from(&include_bytes!("../../../assets/fonts/NotoSansMono-Regular.ttf")[..]);
     let mut provider = BytesFontProvider::new();
     provider.register("Noto Sans", 400, FontStyle::Normal, sans, 0);
     provider.register("Noto Sans", 700, FontStyle::Normal, sans_bold, 0);
     provider.register("Noto Sans", 400, FontStyle::Italic, sans_italic, 0);
+    provider.register("Noto Sans", 700, FontStyle::Italic, sans_bold_italic, 0);
     provider.register("Noto Sans Mono", 400, FontStyle::Normal, mono, 0);
     provider
 }
@@ -320,6 +325,29 @@ mod tests {
         );
         let data = result.unwrap();
         assert!(data.id.contains("noto-sans"), "id should contain noto-sans");
+    }
+
+    #[test]
+    fn bold_italic_resolves_distinct_combined_face() {
+        // Weight 700 + Italic must resolve EXACTLY to the bold-italic face — not
+        // fall back to bold-upright or regular-italic.
+        let p = default_provider();
+        let bold = p
+            .resolve(&["Noto Sans".to_string()], 700, FontStyle::Normal)
+            .expect("bold resolves");
+        let italic = p
+            .resolve(&["Noto Sans".to_string()], 400, FontStyle::Italic)
+            .expect("italic resolves");
+        let bold_italic = p
+            .resolve(&["Noto Sans".to_string()], 700, FontStyle::Italic)
+            .expect("bold-italic resolves");
+        assert!(
+            bold_italic.id.contains("700") && bold_italic.id.contains("italic"),
+            "bold-italic id should encode both 700 and italic, got {}",
+            bold_italic.id
+        );
+        assert_ne!(bold_italic.id, bold.id, "must differ from bold-upright");
+        assert_ne!(bold_italic.id, italic.id, "must differ from regular-italic");
     }
 
     #[test]
