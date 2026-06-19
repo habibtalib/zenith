@@ -26,9 +26,11 @@
 //! - [`visual`] — visual-property token type/existence/raw-literal checks.
 //! - [`nodes`] — the recursive node walk and geometry helpers.
 //! - [`contrast`] — the WCAG 2.2 contrast advisory.
+//! - [`safezone`] — safe-zone exclusion/required overlap advisories.
 
 mod contrast;
 mod nodes;
+mod safezone;
 mod visual;
 
 #[cfg(test)]

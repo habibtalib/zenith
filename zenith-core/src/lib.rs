@@ -22,9 +22,9 @@ pub use ast::{
     AssetBlock, AssetDecl, AssetKind, CodeNode, Dimension, Document, DocumentBody, EllipseNode,
     FrameNode, GradientLiteral, GradientStopRef, GroupNode, ImageNode, LineNode, Node,
     ObjectPosition, Page, Point, PolygonNode, PolylineNode, Project, PropertyValue, RectNode,
-    ShadowLayerRef, ShadowLiteral, Span, Style, StyleBlock, TextNode, TextSpan, Token, TokenBlock,
-    TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownProperty, UnknownStyleProp,
-    UnknownValue, dim_to_px,
+    SafeZone, SafeZoneType, ShadowLayerRef, ShadowLiteral, Span, Style, StyleBlock, TextNode,
+    TextSpan, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode,
+    UnknownProperty, UnknownStyleProp, UnknownValue, dim_to_px,
 };
 pub use color::{contrast_ratio, parse_rgb, relative_luminance};
 pub use diagnostics::{Diagnostic, Severity};

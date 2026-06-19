@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 
 use crate::ast::{
     CodeNode, DocumentBody, EllipseNode, FrameNode, GroupNode, ImageNode, LineNode, Node, Page,
-    Point, PolygonNode, PolylineNode, RectNode, TextNode, TextSpan,
+    Point, PolygonNode, PolylineNode, RectNode, SafeZone, SafeZoneType, TextNode, TextSpan,
 };
 
 use super::{
@@ -54,9 +54,40 @@ fn write_page(page: &Page, out: &mut String, depth: usize) {
     write_opt_property_value(out, "background", &page.background);
 
     out.push_str(" {\n");
+    // Safe-zones are page metadata, emitted before the renderable children.
+    for zone in &page.safe_zones {
+        write_safe_zone(zone, out, depth + 1);
+    }
     write_children_block(&page.children, out, depth);
     indent(out, depth);
     out.push_str("}\n");
+}
+
+/// Emit a single `safe-zone` line:
+/// `safe-zone id="..." type="exclusion|required" x=(px)N y=(px)N w=(px)N h=(px)N label="..."`
+/// (`label` is omitted when `None`).
+fn write_safe_zone(zone: &SafeZone, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("safe-zone");
+    out.push_str(" id=\"");
+    out.push_str(&zone.id);
+    out.push('"');
+    out.push_str(" type=\"");
+    out.push_str(match zone.zone_type {
+        SafeZoneType::Exclusion => "exclusion",
+        SafeZoneType::Required => "required",
+    });
+    out.push('"');
+    out.push_str(" x=");
+    out.push_str(&fmt_dimension(&zone.x));
+    out.push_str(" y=");
+    out.push_str(&fmt_dimension(&zone.y));
+    out.push_str(" w=");
+    out.push_str(&fmt_dimension(&zone.w));
+    out.push_str(" h=");
+    out.push_str(&fmt_dimension(&zone.h));
+    write_opt_str(out, "label", &zone.label);
+    out.push('\n');
 }
 
 /// Emit each child node in source order at `depth + 1` indentation.

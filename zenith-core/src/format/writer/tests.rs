@@ -143,6 +143,9 @@ fn strip_spans(mut doc: crate::ast::Document) -> crate::ast::Document {
     // Pages and nodes
     for page in &mut doc.body.pages {
         page.source_span = None;
+        for zone in &mut page.safe_zones {
+            zone.source_span = None;
+        }
         for node in &mut page.children {
             strip_node_span(node);
         }
@@ -1296,4 +1299,72 @@ fn test_code_font_weight_round_trip_and_order() {
         ),
         other => panic!("expected Code, got {other:?}"),
     }
+}
+
+/// A `.zen` document with a `safe-zone` declared as a page child.
+const SAFE_ZONE_DOC: &str = r##"zenith version=1 {
+  project id="proj.sz" name="Safe Zone Project"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.sz" title="Safe Zone Doc" {
+    page id="page.one" w=(px)1500 h=(px)500 {
+      safe-zone id="sz.avatar" type="exclusion" x=(px)0 y=(px)358 w=(px)175 h=(px)142 label="X avatar dead zone"
+      rect id="logo" x=(px)600 y=(px)40 w=(px)200 h=(px)80 fill="#ffffff"
+    }
+  }
+}
+"##;
+
+/// **Parse**: a `safe-zone` page child lands in `page.safe_zones`, NOT in
+/// `page.children`.
+#[test]
+fn test_safe_zone_parses_into_page_not_children() {
+    let adapter = KdlAdapter;
+    let doc = adapter
+        .parse(SAFE_ZONE_DOC.as_bytes())
+        .expect("parse must succeed");
+    let page = &doc.body.pages[0];
+
+    assert_eq!(page.safe_zones.len(), 1, "exactly one safe-zone parsed");
+    let zone = &page.safe_zones[0];
+    assert_eq!(zone.id, "sz.avatar");
+    assert_eq!(zone.zone_type, crate::ast::SafeZoneType::Exclusion);
+    assert_eq!(zone.label.as_deref(), Some("X avatar dead zone"));
+
+    // The renderable rect is the ONLY child; the safe-zone is not a child.
+    assert_eq!(page.children.len(), 1, "only the rect is a child node");
+    match &page.children[0] {
+        Node::Rect(r) => assert_eq!(r.id, "logo"),
+        other => panic!("expected Rect, got {other:?}"),
+    }
+}
+
+/// **Format round-trip**: a safe-zone survives a parse → format → parse pass
+/// unchanged (spans excluded).
+#[test]
+fn test_safe_zone_format_round_trip() {
+    let adapter = KdlAdapter;
+    let doc_orig = adapter
+        .parse(SAFE_ZONE_DOC.as_bytes())
+        .expect("original parse");
+    let formatted = format_document(&doc_orig).expect("format");
+
+    // The emitted line carries the canonical safe-zone shape.
+    let text = String::from_utf8(formatted.clone()).expect("utf8");
+    assert!(
+        text.contains(
+            "safe-zone id=\"sz.avatar\" type=\"exclusion\" \
+             x=(px)0 y=(px)358 w=(px)175 h=(px)142 label=\"X avatar dead zone\""
+        ),
+        "formatted safe-zone line missing/incorrect; output:\n{text}"
+    );
+
+    let doc_reparsed = adapter.parse(&formatted).expect("re-parse after format");
+    assert_eq!(
+        strip_spans(doc_orig),
+        strip_spans(doc_reparsed),
+        "safe-zone must survive a format round-trip (spans excluded)"
+    );
 }

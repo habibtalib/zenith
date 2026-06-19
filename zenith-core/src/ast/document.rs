@@ -26,9 +26,37 @@ pub struct Page {
     /// Page height — required.
     pub height: Dimension,
     pub background: Option<PropertyValue>,
+    /// Author-declared safe/dead zones for this page. These are not rendering
+    /// nodes; the validator checks page children against them.
+    pub safe_zones: Vec<SafeZone>,
     /// Child content nodes in z-order (first = bottommost, last = topmost).
     pub children: Vec<Node>,
     /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+}
+
+/// The kind of a [`SafeZone`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum SafeZoneType {
+    /// Content must NOT overlap this zone (e.g. a platform UI dead zone).
+    Exclusion,
+    /// Content must overlap this zone (e.g. a guaranteed-visible region).
+    Required,
+}
+
+/// A named safe/dead zone declared on a [`Page`].
+///
+/// Declared as a `safe-zone` child of a `page`; it is a sibling of rendering
+/// nodes but is itself not rendered.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SafeZone {
+    pub id: String,
+    pub zone_type: SafeZoneType,
+    pub x: Dimension,
+    pub y: Dimension,
+    pub w: Dimension,
+    pub h: Dimension,
+    pub label: Option<String>,
     pub source_span: Option<Span>,
 }
 

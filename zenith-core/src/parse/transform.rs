@@ -10,7 +10,7 @@ use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
 use crate::ast::{
     Span,
     asset::{AssetBlock, AssetDecl, AssetKind},
-    document::{Document, DocumentBody, Page, Project},
+    document::{Document, DocumentBody, Page, Project, SafeZone, SafeZoneType},
     node::{
         CodeNode, EllipseNode, FrameNode, GroupNode, ImageNode, LineNode, Node, ObjectPosition,
         Point, PolygonNode, PolylineNode, RectNode, TextNode, TextSpan, UnknownNode,
@@ -810,7 +810,21 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
         .and_then(|e| entry_to_property_value(e).ok());
 
     let source_span = node_span(node);
-    let children = transform_children(node)?;
+
+    // A page's children block mixes `safe-zone` declarations (page metadata,
+    // not rendering nodes) with renderable nodes. Split them here: safe-zones
+    // go to `page.safe_zones`; everything else through `transform_node`.
+    let mut safe_zones: Vec<SafeZone> = Vec::new();
+    let mut children: Vec<Node> = Vec::new();
+    if let Some(doc) = node.children() {
+        for child in doc.nodes() {
+            if child.name().value() == "safe-zone" {
+                safe_zones.push(transform_safe_zone(child)?);
+            } else {
+                children.push(transform_node(child)?);
+            }
+        }
+    }
 
     Ok(Page {
         id,
@@ -818,8 +832,73 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
         width,
         height,
         background,
+        safe_zones,
         children,
         source_span,
+    })
+}
+
+/// Transform a `safe-zone` page child into a [`SafeZone`].
+///
+/// Reads required `id` and `x`/`y`/`w`/`h` dimensions; `type` maps to
+/// [`SafeZoneType`] (`"exclusion"` → Exclusion, `"required"` → Required, any
+/// other / absent value defaults to Exclusion); `label` is optional.
+fn transform_safe_zone(node: &KdlNode) -> Result<SafeZone, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+
+    let zone_type = match optional_string_prop(node, "type") {
+        Some("required") => SafeZoneType::Required,
+        _ => SafeZoneType::Exclusion,
+    };
+
+    let x = node
+        .entry("x")
+        .ok_or_else(|| {
+            ParseError::spanless(
+                ParseErrorCode::InvalidPropertyValue,
+                format!("safe-zone `{id}` is missing required property `x`"),
+            )
+        })
+        .and_then(|e| entry_to_dimension(e, "x"))?;
+    let y = node
+        .entry("y")
+        .ok_or_else(|| {
+            ParseError::spanless(
+                ParseErrorCode::InvalidPropertyValue,
+                format!("safe-zone `{id}` is missing required property `y`"),
+            )
+        })
+        .and_then(|e| entry_to_dimension(e, "y"))?;
+    let w = node
+        .entry("w")
+        .ok_or_else(|| {
+            ParseError::spanless(
+                ParseErrorCode::InvalidPropertyValue,
+                format!("safe-zone `{id}` is missing required property `w`"),
+            )
+        })
+        .and_then(|e| entry_to_dimension(e, "w"))?;
+    let h = node
+        .entry("h")
+        .ok_or_else(|| {
+            ParseError::spanless(
+                ParseErrorCode::InvalidPropertyValue,
+                format!("safe-zone `{id}` is missing required property `h`"),
+            )
+        })
+        .and_then(|e| entry_to_dimension(e, "h"))?;
+
+    let label = optional_string_prop(node, "label").map(str::to_owned);
+
+    Ok(SafeZone {
+        id,
+        zone_type,
+        x,
+        y,
+        w,
+        h,
+        label,
+        source_span: node_span(node),
     })
 }
 
