@@ -519,9 +519,8 @@ fn compile_node(
             let text_x = text_x_raw + ctx.dx;
             let text_y = text_y_raw + ctx.dy;
 
-            // Concatenate span text; skip silently if empty (nothing to draw).
-            let content: String = text.spans.iter().map(|s| s.text.as_str()).collect();
-            if content.is_empty() {
+            // Skip silently if every span is empty (nothing to draw).
+            if text.spans.iter().all(|s| s.text.is_empty()) {
                 return;
             }
 
@@ -554,72 +553,90 @@ fn compile_node(
             let font_size: f32 =
                 resolve_property_dimension_px(&font_size_prop, resolved, 16.0) as f32;
 
-            // Resolve fill color with style cascade; default to opaque black.
-            let fill_prop = text
+            // Node opacity, applied once and cascaded with ctx.opacity onto
+            // every span's alpha below.
+            let node_opacity = text.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
+
+            // Node-level fill/weight props with style cascade — these are the
+            // per-span fallbacks (span override → node → style → default).
+            let node_fill_prop: Option<&PropertyValue> = text
                 .fill
                 .as_ref()
                 .or_else(|| style_prop(&text.style, style_map, "fill"));
-            let mut color = fill_prop
-                .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &text.id))
-                .unwrap_or(Color {
-                    r: 0,
-                    g: 0,
-                    b: 0,
-                    a: 255,
-                });
-
-            // Apply node opacity then cascade ctx.opacity on top.
-            let node_opacity = text.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
-            color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
-
-            // Resolve font weight with style cascade; default 400 (regular).
-            // A fontWeight token (e.g. value 700) selects the bold face; the
-            // provider's weight-fallback handles unregistered weights.
-            let font_weight_prop = text
+            let node_weight_prop: Option<&PropertyValue> = text
                 .font_weight
                 .as_ref()
                 .or_else(|| style_prop(&text.style, style_map, "font-weight"));
-            let weight = resolve_font_weight(font_weight_prop, resolved, 400);
 
-            // Shape the text. Style is hardcoded to Normal — the TextNode AST
-            // does not yet carry an italic/style field (future unit).
-            let req = ShapeRequest {
-                text: &content,
-                families: &families,
-                weight,
-                style: FontStyle::Normal,
-                font_size,
-            };
-
-            match engine.shape(&req, fonts) {
-                Err(e) => {
-                    diagnostics.push(Diagnostic::advisory(
-                        "scene.text_unshaped",
-                        format!("text node '{}' could not be shaped: {}", text.id, e.message),
-                        text.source_span,
-                        Some(text.id.clone()),
-                    ));
+            // Shape EACH span as its own run, positioning runs left-to-right.
+            // Per-span fill and font-weight are honored; family and size are
+            // shared (v0 has no per-span family/size override). Cross-span
+            // kerning is lost relative to a single concatenated run — accepted
+            // for v0. Style is hardcoded to Normal: italic/underline/strike are
+            // a future unit (need an italic face / decoration drawing).
+            let mut x_cursor = text_x;
+            for span in &text.spans {
+                if span.text.is_empty() {
+                    continue;
                 }
-                Ok(run) => {
-                    let baseline_y = text_y + run.ascent as f64;
-                    let glyphs: Vec<SceneGlyph> = run
-                        .glyphs
-                        .iter()
-                        .map(|g| SceneGlyph {
-                            glyph_id: g.glyph_id,
-                            dx: g.x,
-                            dy: g.y,
-                        })
-                        .collect();
 
-                    commands.push(SceneCommand::DrawGlyphRun {
-                        x: text_x,
-                        y: baseline_y,
-                        font_id: run.font_id,
-                        font_size: run.font_size,
-                        color,
-                        glyphs,
+                // Per-span fill: span.fill overrides node fill; default black.
+                let fill_prop = span.fill.as_ref().or(node_fill_prop);
+                let mut color = fill_prop
+                    .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &text.id))
+                    .unwrap_or(Color {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 255,
                     });
+                color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+
+                // Per-span weight: span.font_weight overrides node weight; 400.
+                let weight_prop = span.font_weight.as_ref().or(node_weight_prop);
+                let weight = resolve_font_weight(weight_prop, resolved, 400);
+
+                let req = ShapeRequest {
+                    text: &span.text,
+                    families: &families,
+                    weight,
+                    style: FontStyle::Normal,
+                    font_size,
+                };
+
+                match engine.shape(&req, fonts) {
+                    Err(e) => {
+                        diagnostics.push(Diagnostic::advisory(
+                            "scene.text_unshaped",
+                            format!("text node '{}' could not be shaped: {}", text.id, e.message),
+                            text.source_span,
+                            Some(text.id.clone()),
+                        ));
+                    }
+                    Ok(run) => {
+                        let baseline_y = text_y + run.ascent as f64;
+                        let glyphs: Vec<SceneGlyph> = run
+                            .glyphs
+                            .iter()
+                            .map(|g| SceneGlyph {
+                                glyph_id: g.glyph_id,
+                                dx: g.x,
+                                dy: g.y,
+                            })
+                            .collect();
+
+                        commands.push(SceneCommand::DrawGlyphRun {
+                            x: x_cursor,
+                            y: baseline_y,
+                            font_id: run.font_id,
+                            font_size: run.font_size,
+                            color,
+                            glyphs,
+                        });
+
+                        // Advance the cursor past this run for the next span.
+                        x_cursor += run.advance_width as f64;
+                    }
                 }
             }
         }
@@ -3995,6 +4012,156 @@ mod tests {
         assert!(
             regular_font_id.contains("noto-sans-400") && !regular_font_id.contains("700"),
             "absent font-weight must select the regular (400) face; got font_id {regular_font_id}"
+        );
+    }
+
+    // ── Per-span text rendering ───────────────────────────────────────────
+
+    /// Collect every `DrawGlyphRun` (x, color, font_id) in source order.
+    fn glyph_runs(src: &str) -> Vec<(f64, Color, String)> {
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        result
+            .scene
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                SceneCommand::DrawGlyphRun {
+                    x, color, font_id, ..
+                } => Some((*x, color.clone(), font_id.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Two spans with different fill tokens → two runs, distinct colors, the
+    /// second positioned to the right of the first.
+    #[test]
+    fn text_spans_render_with_per_span_fill_and_order() {
+        let src = r##"zenith version=1 {
+  project id="proj.ps" name="PS"
+  tokens format="zenith-token-v1" {
+    token id="color.red" type="color" value="#ff0000"
+    token id="color.blue" type="color" value="#0000ff"
+  }
+  styles {}
+  document id="doc.ps" title="PS" {
+    page id="page.ps" w=(px)400 h=(px)200 {
+      text id="text.ps" x=(px)10 y=(px)20 w=(px)380 h=(px)40 {
+        span "Red" fill=(token)"color.red"
+        span "Blue" fill=(token)"color.blue"
+      }
+    }
+  }
+}
+"##;
+        let runs = glyph_runs(src);
+        assert_eq!(
+            runs.len(),
+            2,
+            "expected two DrawGlyphRun; got {}",
+            runs.len()
+        );
+
+        let (x0, c0, _) = &runs[0];
+        let (x1, c1, _) = &runs[1];
+        assert_eq!((c0.r, c0.g, c0.b), (0xff, 0x00, 0x00), "first span red");
+        assert_eq!((c1.r, c1.g, c1.b), (0x00, 0x00, 0xff), "second span blue");
+        assert!(
+            x1 > x0,
+            "second run x ({x1}) must be greater than first ({x0})"
+        );
+    }
+
+    /// A bold second span → its run resolves to the 700 face while the first
+    /// (regular) span resolves to the 400 face.
+    #[test]
+    fn text_spans_render_with_per_span_weight() {
+        let src = r##"zenith version=1 {
+  project id="proj.pw" name="PW"
+  tokens format="zenith-token-v1" {
+    token id="weight.bold" type="fontWeight" value=700
+  }
+  styles {}
+  document id="doc.pw" title="PW" {
+    page id="page.pw" w=(px)400 h=(px)200 {
+      text id="text.pw" x=(px)10 y=(px)20 w=(px)380 h=(px)40 {
+        span "Reg"
+        span "Bold" font-weight=(token)"weight.bold"
+      }
+    }
+  }
+}
+"##;
+        let runs = glyph_runs(src);
+        assert_eq!(
+            runs.len(),
+            2,
+            "expected two DrawGlyphRun; got {}",
+            runs.len()
+        );
+        assert!(
+            runs[0].2.contains("noto-sans-400"),
+            "first span must use the regular (400) face; got {}",
+            runs[0].2
+        );
+        assert!(
+            runs[1].2.contains("noto-sans-700"),
+            "second span must use the bold (700) face; got {}",
+            runs[1].2
+        );
+    }
+
+    /// A single-span node emits exactly one run (non-breaking regression).
+    #[test]
+    fn text_single_span_emits_one_run() {
+        let src = r##"zenith version=1 {
+  project id="proj.ss" name="SS"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.ss" title="SS" {
+    page id="page.ss" w=(px)400 h=(px)200 {
+      text id="text.ss" x=(px)10 y=(px)20 w=(px)380 h=(px)40 { span "Solo" }
+    }
+  }
+}
+"##;
+        let runs = glyph_runs(src);
+        assert_eq!(runs.len(), 1, "single span must emit exactly one run");
+    }
+
+    /// An empty span between two non-empty spans is skipped (no run emitted),
+    /// yet positioning of the following span still accounts for the previous
+    /// span's advance — i.e. empty spans don't emit but don't break order.
+    #[test]
+    fn text_empty_span_is_skipped_without_breaking_order() {
+        let src = r##"zenith version=1 {
+  project id="proj.es" name="ES"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.es" title="ES" {
+    page id="page.es" w=(px)400 h=(px)200 {
+      text id="text.es" x=(px)10 y=(px)20 w=(px)380 h=(px)40 {
+        span "AAAA"
+        span ""
+        span "BBBB"
+      }
+    }
+  }
+}
+"##;
+        let runs = glyph_runs(src);
+        assert_eq!(
+            runs.len(),
+            2,
+            "empty span must be skipped → two runs; got {}",
+            runs.len()
+        );
+        let (x0, _, _) = &runs[0];
+        let (x1, _, _) = &runs[1];
+        assert!(
+            x1 > x0,
+            "third span x ({x1}) must follow the first span's advance ({x0})"
         );
     }
 
