@@ -106,10 +106,12 @@ fn fmt_dimension(d: &Dimension) -> String {
 ///
 /// - `TokenRef("color.bg")`  →  `(token)"color.bg"`
 /// - `Literal("center")`     →  `"center"`
+/// - `Dimension((px)24)`     →  `(px)24`
 fn fmt_property_value(pv: &PropertyValue) -> String {
     match pv {
         PropertyValue::TokenRef(id) => format!("(token)\"{id}\""),
         PropertyValue::Literal(s) => format!("\"{s}\""),
+        PropertyValue::Dimension(d) => fmt_dimension(d),
     }
 }
 
@@ -1158,6 +1160,56 @@ mod tests {
             !text.contains("(pt)48.0"),
             "must not contain (pt)48.0 in output"
         );
+    }
+
+    /// **Literal visual dimension round-trip**: a `stroke-width=(px)2` literal
+    /// must format as `(px)2` (not `(px)2.0`, not `"2"`) and re-parse back to a
+    /// `Dimension(2.0, Px)`.
+    #[test]
+    fn test_literal_dimension_round_trips() {
+        use crate::ast::{Dimension, Node, PropertyValue, Unit};
+        let src = r##"zenith version=1 {
+  project id="proj.ld" name="LD"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.ld" title="LD" {
+    page id="p" w=(px)100 h=(px)100 {
+      rect id="r" x=(px)0 y=(px)0 w=(px)10 h=(px)10 stroke-width=(px)2
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse");
+        let out = format_document(&doc).expect("format");
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains("stroke-width=(px)2"),
+            "expected `stroke-width=(px)2`, got:\n{text}"
+        );
+        assert!(
+            !text.contains("(px)2.0"),
+            "must not emit (px)2.0; got:\n{text}"
+        );
+        assert!(
+            !text.contains("stroke-width=\"2\""),
+            "must not emit a quoted literal; got:\n{text}"
+        );
+
+        // Re-parse the formatted output → still a Dimension(2.0, Px).
+        let doc2 = adapter.parse(text.as_bytes()).expect("re-parse");
+        match &doc2.body.pages[0].children[0] {
+            Node::Rect(r) => assert_eq!(
+                r.stroke_width,
+                Some(PropertyValue::Dimension(Dimension {
+                    value: 2.0,
+                    unit: Unit::Px,
+                }))
+            ),
+            other => panic!("expected Rect, got {other:?}"),
+        }
     }
 
     /// **Canonical property order**: a rect with `fill` before `x` in source

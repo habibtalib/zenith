@@ -59,11 +59,37 @@ fn entry_to_property_value(entry: &KdlEntry) -> Result<PropertyValue, ParseError
                 format!("(token) annotation requires a string value, got: {other:?}"),
             )),
         },
-        _ => {
+        // A known/unknown unit annotation on a numeric value → dimension literal.
+        // This brings literal visual dimensions (e.g. `font-size=(px)24`) to
+        // parity with token-backed dimensions. Non-numeric annotated values fall
+        // through to the literal branch unchanged.
+        Some(ann) => match kdl_value_to_f64(entry.value()) {
+            Some(value) => Ok(PropertyValue::Dimension(Dimension {
+                value,
+                unit: Unit::from_annotation(ann),
+            })),
+            None => Ok(PropertyValue::Literal(kdl_value_to_literal_string(
+                entry.value(),
+            ))),
+        },
+        None => {
             // Treat as a literal, serialised to a string.
             let literal = kdl_value_to_literal_string(entry.value());
             Ok(PropertyValue::Literal(literal))
         }
+    }
+}
+
+/// Extract an `f64` magnitude from a numeric `KdlValue` (`Integer`/`Float`).
+///
+/// Returns `None` for non-numeric values. Shared by the dimension extraction in
+/// both the geometry and visual-property parse paths so the `KdlValue → f64`
+/// conversion lives in exactly one place.
+fn kdl_value_to_f64(v: &KdlValue) -> Option<f64> {
+    match v {
+        KdlValue::Integer(n) => Some(*n as f64),
+        KdlValue::Float(f) => Some(*f),
+        _ => None,
     }
 }
 
@@ -87,16 +113,15 @@ fn entry_to_dimension(entry: &KdlEntry, prop: &str) -> Result<Dimension, ParseEr
         )
     })?;
     let unit = Unit::from_annotation(unit_str);
-    let value = match entry.value() {
-        KdlValue::Integer(n) => *n as f64,
-        KdlValue::Float(f) => *f,
-        other => {
-            return Err(ParseError::spanless(
-                ParseErrorCode::InvalidPropertyValue,
-                format!("property `{prop}` must be numeric, got: {other:?}"),
-            ));
-        }
-    };
+    let value = kdl_value_to_f64(entry.value()).ok_or_else(|| {
+        ParseError::spanless(
+            ParseErrorCode::InvalidPropertyValue,
+            format!(
+                "property `{prop}` must be numeric, got: {:?}",
+                entry.value()
+            ),
+        )
+    })?;
     Ok(Dimension { value, unit })
 }
 

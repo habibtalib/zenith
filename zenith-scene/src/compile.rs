@@ -540,6 +540,8 @@ fn compile_node(
                     None => "Noto Sans".to_owned(),
                 },
                 Some(PropertyValue::Literal(name)) => name.clone(),
+                // A dimension is not a family name → fall back to the default.
+                Some(PropertyValue::Dimension(_)) => "Noto Sans".to_owned(),
                 None => "Noto Sans".to_owned(),
             };
             let families = vec![family_name];
@@ -818,6 +820,8 @@ fn compile_node(
                     None => "Noto Sans Mono".to_owned(),
                 },
                 Some(PropertyValue::Literal(name)) => name.clone(),
+                // A dimension is not a family name → fall back to the default.
+                Some(PropertyValue::Dimension(_)) => "Noto Sans Mono".to_owned(),
                 None => "Noto Sans Mono".to_owned(),
             };
             let families = vec![family_name];
@@ -1494,6 +1498,9 @@ fn resolve_property_dimension_px(
             },
             None => default,
         },
+        // A literal dimension (e.g. `font-size=(px)24`) resolves directly,
+        // bringing literal visual dimensions to parity with token-backed ones.
+        Some(PropertyValue::Dimension(dim)) => dim_to_px(dim.value, &dim.unit).unwrap_or(default),
         _ => default,
     }
 }
@@ -1577,6 +1584,19 @@ fn resolve_property_color(
                 None
             }
         },
+        // A dimension is not a color; advise and skip (mirrors wrong-type tokens).
+        PropertyValue::Dimension(_) => {
+            diagnostics.push(Diagnostic::advisory(
+                "scene.wrong_token_type",
+                format!(
+                    "node '{}' has a dimension value where a color is expected; skipped",
+                    subject_id
+                ),
+                None,
+                Some(subject_id.to_owned()),
+            ));
+            None
+        }
     }
 }
 
@@ -3995,5 +4015,111 @@ mod tests {
         assert_eq!(fill_reds(&via_compile), fill_reds(&via_page0));
         // And it is page 1, not page 2.
         assert!(fill_reds(&via_compile).contains(&0x25));
+    }
+
+    // ── Literal visual dimensions (no token) resolve at compile time ──────────
+
+    /// A rect with a LITERAL `radius=(px)16` (no token) must emit a
+    /// `FillRoundedRect` whose radius is 16.0 — previously the literal was
+    /// dropped and the radius defaulted to 0.0 (a plain FillRect).
+    #[test]
+    fn rect_literal_radius_emits_fill_rounded_rect() {
+        let src = r##"zenith version=1 {
+  project id="proj.lr" name="LR"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#112233"
+  }
+  styles {}
+  document id="doc.lr" title="LR" {
+    page id="page.lr" w=(px)100 h=(px)100 {
+      rect id="rect.lr" x=(px)10 y=(px)10 w=(px)40 h=(px)40 radius=(px)16 fill=(token)"color.fill"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        let cmds = &result.scene.commands;
+        match cmds
+            .iter()
+            .find(|c| matches!(c, SceneCommand::FillRoundedRect { .. }))
+        {
+            Some(SceneCommand::FillRoundedRect { radius, .. }) => {
+                assert!(
+                    (*radius - 16.0).abs() < 0.01,
+                    "literal radius must resolve to 16px, got {radius}"
+                );
+            }
+            other => panic!("expected FillRoundedRect, got {other:?}"),
+        }
+    }
+
+    /// A text node with a LITERAL `font-size=(px)20` must produce a
+    /// `DrawGlyphRun` whose `font_size` is 20.0.
+    #[test]
+    fn text_literal_font_size_resolves() {
+        let src = r##"zenith version=1 {
+  project id="proj.lfs" name="LFS"
+  tokens format="zenith-token-v1" {
+    token id="color.text" type="color" value="#111827"
+  }
+  styles {}
+  document id="doc.lfs" title="LFS" {
+    page id="page.lfs" w=(px)320 h=(px)200 {
+      text id="text.lfs" x=(px)10 y=(px)10 w=(px)200 h=(px)50 fill=(token)"color.text" font-size=(px)20 {
+        span "Hi"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        match result
+            .scene
+            .commands
+            .iter()
+            .find(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }))
+        {
+            Some(SceneCommand::DrawGlyphRun { font_size, .. }) => {
+                assert_eq!(*font_size, 20.0, "literal font-size must resolve to 20px");
+            }
+            other => panic!("expected DrawGlyphRun, got {other:?}"),
+        }
+    }
+
+    /// A line with a LITERAL `stroke-width=(px)3` must produce a `StrokeLine`
+    /// whose `stroke_width` is 3.0.
+    #[test]
+    fn line_literal_stroke_width_resolves() {
+        let src = r##"zenith version=1 {
+  project id="proj.lsw" name="LSW"
+  tokens format="zenith-token-v1" {
+    token id="color.rule" type="color" value="#94a3b8"
+  }
+  styles {}
+  document id="doc.lsw" title="LSW" {
+    page id="page.lsw" w=(px)320 h=(px)200 {
+      line id="line.lsw" x1=(px)40 y1=(px)100 x2=(px)280 y2=(px)100 stroke=(token)"color.rule" stroke-width=(px)3
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        match result
+            .scene
+            .commands
+            .iter()
+            .find(|c| matches!(c, SceneCommand::StrokeLine { .. }))
+        {
+            Some(SceneCommand::StrokeLine { stroke_width, .. }) => {
+                assert_eq!(
+                    *stroke_width, 3.0,
+                    "literal stroke-width must resolve to 3px"
+                );
+            }
+            other => panic!("expected StrokeLine, got {other:?}"),
+        }
     }
 }

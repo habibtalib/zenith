@@ -166,6 +166,57 @@ mod tests {
         }
     }
 
+    /// A literal (non-token) visual dimension must parse into
+    /// `PropertyValue::Dimension`, preserving its numeric value and unit, rather
+    /// than being silently dropped to a `Literal` string.
+    #[test]
+    fn test_literal_visual_dimension_parses() {
+        use crate::ast::Dimension;
+        let src = r##"zenith version=1 {
+  project id="proj.dim" name="Dim"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.dim" title="Dim" {
+    page id="page.one" w=(px)640 h=(px)360 {
+      text id="t" x=(px)0 y=(px)0 w=(px)200 h=(px)50 font-size=(px)24 {
+        span "Hi"
+      }
+      rect id="r" x=(px)0 y=(px)0 w=(px)10 h=(px)10 stroke-width=(pt)13
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+        let page = &doc.body.pages[0];
+
+        match &page.children[0] {
+            Node::Text(t) => assert_eq!(
+                t.font_size,
+                Some(PropertyValue::Dimension(Dimension {
+                    value: 24.0,
+                    unit: Unit::Px,
+                })),
+                "literal font-size=(px)24 must parse as a Dimension"
+            ),
+            other => panic!("expected Text, got {other:?}"),
+        }
+
+        match &page.children[1] {
+            Node::Rect(r) => assert_eq!(
+                r.stroke_width,
+                Some(PropertyValue::Dimension(Dimension {
+                    value: 13.0,
+                    unit: Unit::Pt,
+                })),
+                "literal stroke-width=(pt)13 must parse as a Dimension with Pt unit"
+            ),
+            other => panic!("expected Rect, got {other:?}"),
+        }
+    }
+
     /// An unknown node kind must parse into `Node::Unknown`, never error.
     #[test]
     fn test_unknown_node_kind_forward_compat() {

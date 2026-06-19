@@ -1015,7 +1015,7 @@ fn check_visual_prop(
             }
         }
 
-        PropertyValue::Literal(_) => {
+        PropertyValue::Literal(_) | PropertyValue::Dimension(_) => {
             diagnostics.push(Diagnostic::error(
                 "token.raw_visual_literal",
                 format!(
@@ -2992,6 +2992,33 @@ mod tests {
             codes(&report)
         );
         assert!(report.has_errors());
+    }
+
+    // ── text: literal font-size dimension → token.raw_visual_literal ─────
+
+    /// A literal `font-size=(px)24` (a `PropertyValue::Dimension`, not a token)
+    /// must be treated as a raw visual literal — the same advisory a literal
+    /// color receives. It still resolves at compile time; validate just flags it.
+    #[test]
+    fn text_literal_font_size_dimension_is_raw_visual_literal() {
+        let font_size = Some(PropertyValue::Dimension(px(24.0)));
+        let text = match minimal_text("text.lfs", Some(token_ref("color.fill"))) {
+            Node::Text(mut t) => {
+                t.font_size = font_size;
+                Node::Text(t)
+            }
+            other => other,
+        };
+        let doc = doc_with(
+            vec![color_token("color.fill")],
+            vec![minimal_page("page.one", vec![text])],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "token.raw_visual_literal"),
+            "a literal font-size dimension must flag token.raw_visual_literal; codes: {:?}",
+            codes(&report)
+        );
     }
 
     // ── polygon: unknown fill-rule warns ──────────────────────────────────

@@ -42,6 +42,8 @@ pub struct Dimension {
 pub enum PropertyValue {
     /// A reference to a design token, e.g. `(token)"color.text.primary"`.
     TokenRef(String),
-    /// A raw literal value stored as a string.
+    /// A raw literal value stored as a string (e.g. a hex color `"#ff0000"`).
     Literal(String),
+    /// A literal dimension with an explicit unit, e.g. `(px)24` or `(pt)13`.
+    Dimension(Dimension),
 }
