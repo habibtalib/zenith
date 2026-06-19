@@ -2,7 +2,7 @@
 //!
 //! Entry point: [`compile`].
 //!
-//! Rect, ellipse, line, text, and group nodes are compiled; the page
+//! Rect, ellipse, line, text, code, and group nodes are compiled; the page
 //! background is emitted first; unknown nodes produce an advisory diagnostic
 //! and are skipped.
 
@@ -721,17 +721,180 @@ fn compile_node(
         }
 
         Node::Code(code) => {
-            // Code compilation lands in the next unit; surface (never silently
-            // drop) the node as a tracked advisory so the gap is visible.
-            diagnostics.push(Diagnostic::advisory(
-                "scene.unsupported_node",
-                format!(
-                    "code node '{}' is not yet rendered (compilation lands in the next unit)",
-                    code.id
-                ),
-                code.source_span,
-                Some(code.id.clone()),
-            ));
+            // Skip invisible code nodes.
+            if code.visible == Some(false) {
+                return;
+            }
+
+            // Resolve geometry — x and y are required; skip if absent or bad unit.
+            let (Some(x_dim), Some(y_dim)) = (&code.x, &code.y) else {
+                diagnostics.push(Diagnostic::advisory(
+                    "scene.missing_geometry",
+                    format!(
+                        "code node '{}' is missing x or y geometry; skipped",
+                        code.id
+                    ),
+                    code.source_span,
+                    Some(code.id.clone()),
+                ));
+                return;
+            };
+
+            let Some(code_x_raw) = dim_to_px(x_dim.value, &x_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "code node",
+                    &code.id,
+                    "x",
+                    code.source_span,
+                ));
+                return;
+            };
+            let Some(code_y_raw) = dim_to_px(y_dim.value, &y_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "code node",
+                    &code.id,
+                    "y",
+                    code.source_span,
+                ));
+                return;
+            };
+
+            // Width/height are OPTIONAL; they bound the clip rectangle when
+            // present. A bad unit yields None (no clip), not a hard skip.
+            let code_w: Option<f64> = code.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+            let code_h: Option<f64> = code.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+
+            // Apply group translation offset.
+            let code_x = code_x_raw + ctx.dx;
+            let code_y = code_y_raw + ctx.dy;
+
+            // Resolve font family with style cascade.
+            // Priority: node-local font_family → style font-family → default
+            // "Noto Sans Mono" (the monospace default for code).
+            let font_family_prop = code
+                .font_family
+                .as_ref()
+                .or_else(|| style_prop(&code.style, style_map, "font-family"));
+            let family_name: String = match font_family_prop {
+                Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
+                    Some(rt) => match &rt.value {
+                        ResolvedValue::FontFamily(name) => name.clone(),
+                        _ => "Noto Sans Mono".to_owned(),
+                    },
+                    None => "Noto Sans Mono".to_owned(),
+                },
+                Some(PropertyValue::Literal(name)) => name.clone(),
+                None => "Noto Sans Mono".to_owned(),
+            };
+            let families = vec![family_name];
+
+            // Resolve font size in pixels with style cascade; default to 14.0.
+            let font_size_prop = code
+                .font_size
+                .clone()
+                .or_else(|| style_prop(&code.style, style_map, "font-size").cloned());
+            let font_size: f32 =
+                resolve_property_dimension_px(&font_size_prop, resolved, 14.0) as f32;
+
+            // Resolve fill color with style cascade; default to opaque black.
+            let fill_prop = code
+                .fill
+                .as_ref()
+                .or_else(|| style_prop(&code.style, style_map, "fill"));
+            let mut color = fill_prop
+                .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &code.id))
+                .unwrap_or(Color {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                });
+
+            // Apply node opacity then cascade ctx.opacity on top.
+            let node_opacity = code.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
+            color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+
+            // Tab expansion: replace each literal tab with `tab_width` spaces
+            // (default 4). A `tab_width` of 0 makes tabs vanish — acceptable.
+            let tab_width = code.tab_width.unwrap_or(4) as usize;
+            let expanded = code.content.replace('\t', &" ".repeat(tab_width));
+
+            // Overflow clip: clipping is the default; only `overflow="visible"`
+            // disables it. The clip is applied only when enabled AND both w and
+            // h resolved (the clip rectangle is fully determined). Resolve the
+            // decision BEFORE the PushClip so push/pop stay balanced across the
+            // emission loop (mirrors compile_frame/compile_image discipline).
+            let clip_enabled = code.overflow.as_deref() != Some("visible");
+            let clip_box = match (clip_enabled, code_w, code_h) {
+                (true, Some(w), Some(h)) => Some((w, h)),
+                _ => None,
+            };
+            if let Some((w, h)) = clip_box {
+                commands.push(SceneCommand::PushClip {
+                    x: code_x,
+                    y: code_y,
+                    w,
+                    h,
+                });
+            }
+
+            // Multi-line emission: each physical line becomes its own glyph run,
+            // stacked by `line_height`. Blank lines emit no run but the index `i`
+            // still advances, preserving their vertical space. All non-blank
+            // lines share identical ascent/line_height (same font + size), so the
+            // per-line metrics give consistent stacking.
+            for (i, line) in expanded.split('\n').enumerate() {
+                if line.is_empty() {
+                    continue;
+                }
+
+                let req = ShapeRequest {
+                    text: line,
+                    families: &families,
+                    weight: 400,
+                    style: FontStyle::Normal,
+                    font_size,
+                };
+
+                match engine.shape(&req, fonts) {
+                    Err(e) => {
+                        diagnostics.push(Diagnostic::advisory(
+                            "scene.text_unshaped",
+                            format!("code node '{}' could not be shaped: {}", code.id, e.message),
+                            code.source_span,
+                            Some(code.id.clone()),
+                        ));
+                        continue;
+                    }
+                    Ok(run) => {
+                        let baseline_y =
+                            code_y + run.ascent as f64 + (i as f64) * run.line_height as f64;
+                        let glyphs: Vec<SceneGlyph> = run
+                            .glyphs
+                            .iter()
+                            .map(|g| SceneGlyph {
+                                glyph_id: g.glyph_id,
+                                dx: g.x,
+                                dy: g.y,
+                            })
+                            .collect();
+
+                        commands.push(SceneCommand::DrawGlyphRun {
+                            x: code_x,
+                            y: baseline_y,
+                            font_id: run.font_id,
+                            font_size: run.font_size,
+                            // Cloned per line: `color` is reused across every line's run.
+                            color: color.clone(),
+                            glyphs,
+                        });
+                    }
+                }
+            }
+
+            if clip_box.is_some() {
+                commands.push(SceneCommand::PopClip);
+            }
         }
 
         Node::Unknown(unknown) => {
@@ -3412,5 +3575,276 @@ mod tests {
             }
             other => panic!("expected a single StrokeRect, got {other:?}"),
         }
+    }
+
+    // ── Code node: multi-line stacks DrawGlyphRun by line_height ─────────────
+
+    #[test]
+    fn code_node_multi_line_stacks_by_line_height() {
+        // A 3-line code node (no w/h → no clip) emits 3 DrawGlyphRun commands
+        // whose baselines increase by a constant delta equal to line_height.
+        let src = r##"zenith version=1 {
+  project id="proj.cd1" name="CD1"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.cd1" title="CD1" {
+    page id="page.cd1" w=(px)400 h=(px)200 {
+      code id="code.cd1" x=(px)10 y=(px)20 font-size=(px)14 overflow="visible" {
+        content "line one\nline two\nline three"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        let unshaped: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "scene.text_unshaped")
+            .collect();
+        assert!(
+            unshaped.is_empty(),
+            "no text_unshaped diagnostics expected; got: {:?}",
+            result.diagnostics
+        );
+
+        let runs: Vec<f64> = result
+            .scene
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                SceneCommand::DrawGlyphRun { y, .. } => Some(*y),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(runs.len(), 3, "expected 3 DrawGlyphRun; got {}", runs.len());
+
+        let d0 = runs[1] - runs[0];
+        let d1 = runs[2] - runs[1];
+        assert!(d0 > 0.0, "baselines must increase; got {runs:?}");
+        assert!(
+            (d0 - d1).abs() < 0.001,
+            "inter-line delta must be constant (line_height); got {d0} vs {d1}"
+        );
+    }
+
+    // ── Code node: overflow clip wraps the runs; "visible" omits the clip ────
+
+    #[test]
+    fn code_node_overflow_clip_wraps_runs() {
+        // Default overflow + w/h present → PushClip, runs…, PopClip.
+        let src = r##"zenith version=1 {
+  project id="proj.cd2" name="CD2"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.cd2" title="CD2" {
+    page id="page.cd2" w=(px)400 h=(px)200 {
+      code id="code.cd2" x=(px)10 y=(px)20 w=(px)300 h=(px)80 {
+        content "alpha\nbeta"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        let cmds = &result.scene.commands;
+
+        // First command after the page background is PushClip; last is PopClip.
+        let first_run = cmds
+            .iter()
+            .position(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }))
+            .expect("a DrawGlyphRun must exist");
+        assert!(
+            matches!(cmds[first_run - 1], SceneCommand::PushClip { .. }),
+            "PushClip must immediately precede the first run; got {:?}",
+            cmds[first_run - 1]
+        );
+        assert!(
+            matches!(cmds.last(), Some(SceneCommand::PopClip)),
+            "PopClip must be the final command; got {:?}",
+            cmds.last()
+        );
+
+        // overflow="visible" → no clip at all.
+        let src_vis = r##"zenith version=1 {
+  project id="proj.cd2v" name="CD2V"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.cd2v" title="CD2V" {
+    page id="page.cd2v" w=(px)400 h=(px)200 {
+      code id="code.cd2v" x=(px)10 y=(px)20 w=(px)300 h=(px)80 overflow="visible" {
+        content "alpha\nbeta"
+      }
+    }
+  }
+}
+"##;
+        let doc_vis = parse(src_vis);
+        let result_vis = compile(&doc_vis, &default_provider());
+        // The page itself always wraps content in one PushClip/PopClip. With
+        // overflow=visible the code node must add NO clip of its own, so exactly
+        // one PushClip (the page) should be present — not two.
+        let push_clips = result_vis
+            .scene
+            .commands
+            .iter()
+            .filter(|c| matches!(c, SceneCommand::PushClip { .. }))
+            .count();
+        assert_eq!(
+            push_clips, 1,
+            "overflow=visible must add no clip beyond the page's; got {:?}",
+            result_vis.scene.commands
+        );
+    }
+
+    // ── Code node: blank middle line preserves vertical space ────────────────
+
+    #[test]
+    fn code_node_blank_line_preserves_spacing() {
+        // "a\n\nb" → 2 runs (blank skipped), but "b" sits at i=2 spacing:
+        // baseline_b == code_y + ascent + 2*line_height.
+        let src = r##"zenith version=1 {
+  project id="proj.cd3" name="CD3"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.cd3" title="CD3" {
+    page id="page.cd3" w=(px)400 h=(px)200 {
+      code id="code.cd3" x=(px)10 y=(px)20 font-size=(px)14 overflow="visible" {
+        content "a\n\nb"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        let runs: Vec<f64> = result
+            .scene
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                SceneCommand::DrawGlyphRun { y, .. } => Some(*y),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            runs.len(),
+            2,
+            "blank middle line must be skipped → 2 runs; got {}",
+            runs.len()
+        );
+
+        // The delta between "a" (i=0) and "b" (i=2) must equal 2*line_height,
+        // i.e. exactly twice a single-step delta. Derive a single step from a
+        // separate two-line node sharing the same font/size.
+        let src2 = r##"zenith version=1 {
+  project id="proj.cd3b" name="CD3B"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.cd3b" title="CD3B" {
+    page id="page.cd3b" w=(px)400 h=(px)200 {
+      code id="code.cd3b" x=(px)10 y=(px)20 font-size=(px)14 overflow="visible" {
+        content "a\nb"
+      }
+    }
+  }
+}
+"##;
+        let doc2 = parse(src2);
+        let result2 = compile(&doc2, &default_provider());
+        let runs2: Vec<f64> = result2
+            .scene
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                SceneCommand::DrawGlyphRun { y, .. } => Some(*y),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(runs2.len(), 2);
+        let single_step = runs2[1] - runs2[0];
+        let blank_gap = runs[1] - runs[0];
+        assert!(
+            (blank_gap - 2.0 * single_step).abs() < 0.001,
+            "blank line must reserve one line: expected 2*{single_step}, got {blank_gap}"
+        );
+    }
+
+    // ── Code node: leading tab expands and the node compiles cleanly ─────────
+
+    #[test]
+    fn code_node_tab_expansion_compiles() {
+        // A line with a leading tab and tab-width=2 expands to 2 leading spaces.
+        // Exact glyph counts are brittle, so assert the node compiles to a run
+        // without a shaping error.
+        let src = r##"zenith version=1 {
+  project id="proj.cd4" name="CD4"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.cd4" title="CD4" {
+    page id="page.cd4" w=(px)400 h=(px)200 {
+      code id="code.cd4" x=(px)10 y=(px)20 tab-width=2 overflow="visible" {
+        content "\tindented"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        let unshaped: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "scene.text_unshaped")
+            .collect();
+        assert!(
+            unshaped.is_empty(),
+            "no shaping error expected: {unshaped:?}"
+        );
+        let run_count = result
+            .scene
+            .commands
+            .iter()
+            .filter(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }))
+            .count();
+        assert_eq!(run_count, 1, "expected one DrawGlyphRun");
+    }
+
+    // ── Code node: default font family is the mono face ──────────────────────
+
+    #[test]
+    fn code_node_default_font_is_mono() {
+        // No font-family → the run's font_id resolves to the mono face.
+        let src = r##"zenith version=1 {
+  project id="proj.cd5" name="CD5"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.cd5" title="CD5" {
+    page id="page.cd5" w=(px)400 h=(px)200 {
+      code id="code.cd5" x=(px)10 y=(px)20 overflow="visible" {
+        content "fn main() {}"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        let font_id = result
+            .scene
+            .commands
+            .iter()
+            .find_map(|c| match c {
+                SceneCommand::DrawGlyphRun { font_id, .. } => Some(font_id.clone()),
+                _ => None,
+            })
+            .expect("a DrawGlyphRun must exist");
+        assert!(
+            font_id.contains("noto-sans-mono"),
+            "default code font must be mono; got font_id {font_id}"
+        );
     }
 }
