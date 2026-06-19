@@ -141,7 +141,12 @@ pub fn run() -> ExitCode {
             if let Some(png_out) = &args.png {
                 // Source image asset bytes relative to the .zen file's parent
                 // directory so `image` nodes render their raster.
-                match commands::render::to_png_with_dir(&src, args.path.parent(), args.page) {
+                match commands::render::to_png_with_dir(
+                    &src,
+                    args.path.parent(),
+                    args.page,
+                    args.locked,
+                ) {
                     Ok(artifact) => {
                         if let Err(e) = write_bytes(png_out, &artifact.png) {
                             eprintln!("error writing PNG to '{}': {}", png_out.display(), e);
@@ -171,7 +176,7 @@ pub fn run() -> ExitCode {
                     eprintln!("error creating directory '{}': {}", dir.display(), e);
                     return ExitCode::from(2);
                 }
-                match commands::render::to_png_all_pages(&src, args.path.parent()) {
+                match commands::render::to_png_all_pages(&src, args.path.parent(), args.locked) {
                     Ok(artifacts) => {
                         let mut all_diagnostics = Vec::new();
                         for (i, artifact) in artifacts.iter().enumerate() {

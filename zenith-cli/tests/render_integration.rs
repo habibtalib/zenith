@@ -19,7 +19,7 @@ fn assert_example_renders(name: &str) {
     let src = std::fs::read_to_string(&fixture)
         .unwrap_or_else(|e| panic!("could not read {}: {}", fixture.display(), e));
 
-    let png = to_png_with_dir(&src, Some(&examples_dir), 1)
+    let png = to_png_with_dir(&src, Some(&examples_dir), 1, false)
         .unwrap_or_else(|e| panic!("render failed (exit {}): {}", e.exit_code, e.message))
         .png;
 
@@ -39,7 +39,7 @@ fn assert_example_renders(name: &str) {
     );
 
     // Determinism: two renders must be byte-identical.
-    let png2 = to_png_with_dir(&src, Some(&examples_dir), 1)
+    let png2 = to_png_with_dir(&src, Some(&examples_dir), 1, false)
         .unwrap_or_else(|e| panic!("second render failed (exit {}): {}", e.exit_code, e.message))
         .png;
     assert_eq!(
@@ -106,4 +106,86 @@ fn rounded_zen_renders_to_valid_png() {
 #[test]
 fn code_zen_renders_to_valid_png() {
     assert_example_renders("code");
+}
+
+// ── --locked sha256 verification ────────────────────────────────────────────────
+
+/// Path to the workspace-root `examples/` directory (where `assets/swatch.png`
+/// lives) so `--locked` asset verification can read real bytes.
+fn examples_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("examples")
+}
+
+/// The known SHA-256 of `examples/assets/swatch.png`.
+const SWATCH_SHA256: &str = "9c3fdf4f9c609c6ec749d4ccbd75fda384b32962d5d3893424e22e1fad44c042";
+
+/// Build a `.zen` document referencing `assets/swatch.png` with the given
+/// `sha256` property text. When `sha256` is `None` the property is omitted.
+fn swatch_doc(sha256: Option<&str>) -> String {
+    let sha_prop = match sha256 {
+        Some(h) => format!(" sha256=\"{h}\""),
+        None => String::new(),
+    };
+    format!(
+        r##"zenith version=1 {{
+  project id="proj.image" name="Image Example"
+  assets {{
+    asset id="asset.swatch" kind="image" src="assets/swatch.png"{sha_prop}
+  }}
+  tokens format="zenith-token-v1" {{
+    token id="color.bg" type="color" value="#f8fafc"
+  }}
+  styles {{
+  }}
+  document id="doc.image" title="Image Example" {{
+    page id="page.image" w=(px)320 h=(px)200 background=(token)"color.bg" {{
+      image id="img.swatch" asset="asset.swatch" x=(px)40 y=(px)40 w=(px)160 h=(px)120 fit="stretch"
+    }}
+  }}
+}}
+"##
+    )
+}
+
+#[test]
+fn locked_correct_sha256_renders_ok() {
+    let src = swatch_doc(Some(SWATCH_SHA256));
+    let result = to_png_with_dir(&src, Some(&examples_dir()), 1, true);
+    assert!(
+        result.is_ok(),
+        "correct sha256 in --locked mode must render: {:?}",
+        result.err().map(|e| e.message)
+    );
+}
+
+#[test]
+fn locked_wrong_sha256_errors_exit_2() {
+    // Flip the last hex digit.
+    let wrong = "9c3fdf4f9c609c6ec749d4ccbd75fda384b32962d5d3893424e22e1fad44c043";
+    let src = swatch_doc(Some(wrong));
+    let err = to_png_with_dir(&src, Some(&examples_dir()), 1, true)
+        .expect_err("wrong sha256 in --locked mode must error");
+    assert_eq!(err.exit_code, 2, "sha256 mismatch must exit with code 2");
+}
+
+#[test]
+fn locked_missing_sha256_errors_exit_2() {
+    let src = swatch_doc(None);
+    let err = to_png_with_dir(&src, Some(&examples_dir()), 1, true)
+        .expect_err("missing sha256 in --locked mode must error");
+    assert_eq!(err.exit_code, 2, "missing sha256 must exit with code 2");
+}
+
+#[test]
+fn unlocked_wrong_sha256_renders_ok() {
+    let wrong = "0000000000000000000000000000000000000000000000000000000000000000";
+    let src = swatch_doc(Some(wrong));
+    let result = to_png_with_dir(&src, Some(&examples_dir()), 1, false);
+    assert!(
+        result.is_ok(),
+        "wrong sha256 must be ignored when not locked: {:?}",
+        result.err().map(|e| e.message)
+    );
 }

@@ -9,6 +9,7 @@
 
 use std::path::Path;
 
+use sha2::{Digest, Sha256};
 use zenith_core::{
     AssetKind, BytesAssetProvider, Diagnostic, Document, KdlAdapter, KdlSource, default_provider,
     validate,
@@ -96,7 +97,7 @@ pub fn to_scene_json(src: &str, page: usize) -> Result<SceneArtifact, RenderCmdE
 /// - The `page` is out of range (exit code 2).
 /// - Rendering fails (exit code 2).
 pub fn to_png(src: &str, page: usize) -> Result<PngArtifact, RenderCmdErr> {
-    to_png_with_dir(src, None, page)
+    to_png_with_dir(src, None, page, false)
 }
 
 /// Like [`to_png`], but sources image asset bytes from `project_dir` (the
@@ -108,17 +109,23 @@ pub fn to_png(src: &str, page: usize) -> Result<PngArtifact, RenderCmdErr> {
 /// render time — never a panic). When `project_dir` is `None` no assets are
 /// loaded.
 ///
+/// When `locked` is set, every image asset's bytes are verified against its
+/// declared `sha256` and any mismatch, missing hash, or read failure is a hard
+/// error (exit code 2). When `project_dir` is `None` there are no assets, so
+/// `locked` is a no-op.
+///
 /// `page` is the 1-based page number to render.
 pub fn to_png_with_dir(
     src: &str,
     project_dir: Option<&Path>,
     page: usize,
+    locked: bool,
 ) -> Result<PngArtifact, RenderCmdErr> {
     let fonts = default_provider();
     let doc = parse_validate(src)?;
     let page_index = resolve_page_index(&doc, page)?;
     let assets = match project_dir {
-        Some(dir) => build_asset_provider(&doc, dir),
+        Some(dir) => build_asset_provider(&doc, dir, locked)?,
         None => BytesAssetProvider::new(),
     };
     let compile_result = compile_page(&doc, &fonts, page_index);
@@ -135,10 +142,13 @@ pub fn to_png_with_dir(
 ///
 /// Image asset bytes are sourced once from `project_dir` (shared across all
 /// pages). Returns `Err` on parse failure (exit 2), validation errors (exit 1),
-/// an empty document (exit 2), or a render failure (exit 2).
+/// an empty document (exit 2), or a render failure (exit 2). When `locked` is
+/// set, image asset bytes are verified against their declared `sha256` (exit 2
+/// on any mismatch/missing hash/read failure).
 pub fn to_png_all_pages(
     src: &str,
     project_dir: Option<&Path>,
+    locked: bool,
 ) -> Result<Vec<PngArtifact>, RenderCmdErr> {
     let fonts = default_provider();
     let doc = parse_validate(src)?;
@@ -150,7 +160,7 @@ pub fn to_png_all_pages(
         ));
     }
     let assets = match project_dir {
-        Some(dir) => build_asset_provider(&doc, dir),
+        Some(dir) => build_asset_provider(&doc, dir, locked)?,
         None => BytesAssetProvider::new(),
     };
     let mut artifacts = Vec::with_capacity(page_count);
@@ -169,31 +179,73 @@ pub fn to_png_all_pages(
 /// Build a [`BytesAssetProvider`] from a parsed document and the project
 /// directory (the `.zen` file's parent).
 ///
-/// Only `image`-kind assets are loaded (SVG/font are deferred). On a read
-/// failure the asset is skipped with a warning. No `sha256` verification is
-/// done in this unit.
-//
-// TODO(locked): verify sha256 in --locked mode
-fn build_asset_provider(doc: &Document, project_dir: &Path) -> BytesAssetProvider {
+/// Only `image`-kind assets are loaded (SVG/font are deferred).
+///
+/// When `locked` is `false` (the default), a read failure skips the asset with
+/// a warning and no hash is checked. When `locked` is `true`, every image asset
+/// must read successfully and its bytes must match its declared `sha256`
+/// (compared case-insensitively, trimmed); a read failure, a missing hash, or a
+/// mismatch is a hard error (exit code 2).
+fn build_asset_provider(
+    doc: &Document,
+    project_dir: &Path,
+    locked: bool,
+) -> Result<BytesAssetProvider, RenderCmdErr> {
     let mut provider = BytesAssetProvider::new();
     for decl in &doc.assets.assets {
         if decl.kind != AssetKind::Image {
             continue;
         }
         let path = project_dir.join(&decl.src);
-        match std::fs::read(&path) {
-            Ok(bytes) => provider.register(&decl.id, AssetKind::Image, bytes.into()),
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
             Err(e) => {
+                if locked {
+                    return Err(RenderCmdErr::new(
+                        format!(
+                            "--locked: could not read asset '{}' from '{}': {}",
+                            decl.id,
+                            path.display(),
+                            e
+                        ),
+                        2,
+                    ));
+                }
                 eprintln!(
                     "warning: could not read asset '{}' from '{}': {}; image will be skipped",
                     decl.id,
                     path.display(),
                     e
                 );
+                continue;
+            }
+        };
+
+        if locked {
+            let declared = match decl.sha256.as_deref() {
+                Some(d) => d,
+                None => {
+                    return Err(RenderCmdErr::new(
+                        format!("--locked: asset '{}' has no declared sha256", decl.id),
+                        2,
+                    ));
+                }
+            };
+            let hex = format!("{:x}", Sha256::digest(&bytes));
+            if declared.trim().to_lowercase() != hex {
+                return Err(RenderCmdErr::new(
+                    format!(
+                        "--locked: asset '{}' sha256 mismatch (declared {}, actual {})",
+                        decl.id, declared, hex
+                    ),
+                    2,
+                ));
             }
         }
+
+        provider.register(&decl.id, AssetKind::Image, bytes.into());
     }
-    provider
+    Ok(provider)
 }
 
 // ── Shared pipeline helper ────────────────────────────────────────────────────
@@ -421,7 +473,7 @@ mod tests {
     #[test]
     fn to_png_all_pages_returns_one_artifact_per_page() {
         let artifacts =
-            to_png_all_pages(TWO_PAGE_DOC, None).expect("all-pages render must succeed");
+            to_png_all_pages(TWO_PAGE_DOC, None, false).expect("all-pages render must succeed");
         assert_eq!(
             artifacts.len(),
             2,
@@ -449,7 +501,7 @@ mod tests {
   document id="doc.e" title="E" {}
 }
 "##;
-        let err = to_png_all_pages(empty, None).expect_err("a doc with no pages must error");
+        let err = to_png_all_pages(empty, None, false).expect_err("a doc with no pages must error");
         assert_eq!(err.exit_code, 2);
     }
 }

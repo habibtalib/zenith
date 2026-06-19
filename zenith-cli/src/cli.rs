@@ -107,6 +107,10 @@ pub struct RenderArgs {
     #[arg(long, value_name = "DIR")]
     pub all_pages: Option<PathBuf>,
 
+    /// Verify each image asset's bytes against its declared `sha256` and fail on mismatch.
+    #[arg(long)]
+    pub locked: bool,
+
     /// Emit machine-readable JSON (diagnostics + output path) to stdout.
     #[arg(long)]
     pub json: bool,
