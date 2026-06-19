@@ -6,7 +6,7 @@
 use zenith_core::{KdlAdapter, KdlSource, validate};
 
 use crate::commands::serialize_pretty;
-use crate::json_types::{self, DiagnosticJson, ValidateOutput};
+use crate::json_types::{DiagnosticJson, ValidateOutput};
 
 // ── Result type ───────────────────────────────────────────────────────────────
 
@@ -85,17 +85,11 @@ fn format_human(diagnostics: &[zenith_core::Diagnostic]) -> String {
     if diagnostics.is_empty() {
         return "ok — no diagnostics".to_owned();
     }
-    let mut out = String::new();
-    for d in diagnostics {
-        let sev = json_types::severity_str(&d.severity);
-        let subject = d
-            .subject_id
-            .as_deref()
-            .map(|s| format!(" ({})", s))
-            .unwrap_or_default();
-        out.push_str(&format!("{}[{}]{}: {}\n", sev, d.code, subject, d.message));
-    }
-    out.trim_end().to_owned()
+    diagnostics
+        .iter()
+        .map(crate::commands::format_diagnostic_line)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

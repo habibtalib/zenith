@@ -112,19 +112,20 @@ pub fn run() -> ExitCode {
             // --scene ─────────────────────────────────────────────────────────
             if let Some(scene_out) = &args.scene {
                 match commands::render::to_scene_json(&src) {
-                    Ok(json) => {
-                        if let Err(e) = std::fs::write(scene_out, json.as_bytes()) {
+                    Ok(artifact) => {
+                        if let Err(e) = std::fs::write(scene_out, artifact.json.as_bytes()) {
                             eprintln!("error writing scene to '{}': {}", scene_out.display(), e);
                             return ExitCode::from(2);
                         }
                         if args.json {
                             let out = RenderOutput {
                                 schema: "zenith-render-v1",
-                                diagnostics: vec![],
+                                diagnostics: artifact.diagnostics.iter().map(Into::into).collect(),
                             };
                             println!("{}", serialize_pretty(&out));
                         } else {
                             println!("scene written to '{}'", scene_out.display());
+                            print_diagnostics_stderr(&artifact.diagnostics);
                         }
                     }
                     Err(e) => {
@@ -139,19 +140,20 @@ pub fn run() -> ExitCode {
                 // Source image asset bytes relative to the .zen file's parent
                 // directory so `image` nodes render their raster.
                 match commands::render::to_png_with_dir(&src, args.path.parent()) {
-                    Ok(bytes) => {
-                        if let Err(e) = write_bytes(png_out, &bytes) {
+                    Ok(artifact) => {
+                        if let Err(e) = write_bytes(png_out, &artifact.png) {
                             eprintln!("error writing PNG to '{}': {}", png_out.display(), e);
                             return ExitCode::from(2);
                         }
                         if args.json {
                             let out = RenderOutput {
                                 schema: "zenith-render-v1",
-                                diagnostics: vec![],
+                                diagnostics: artifact.diagnostics.iter().map(Into::into).collect(),
                             };
                             println!("{}", serialize_pretty(&out));
                         } else {
                             println!("PNG written to '{}'", png_out.display());
+                            print_diagnostics_stderr(&artifact.diagnostics);
                         }
                     }
                     Err(e) => {
@@ -210,6 +212,17 @@ pub fn run() -> ExitCode {
 
             ExitCode::from(outcome.exit_code)
         }
+    }
+}
+
+// ── Diagnostics ───────────────────────────────────────────────────────────────
+
+/// Print compile-stage diagnostics (advisories/warnings) to stderr, one per
+/// line, so they are surfaced without polluting the stdout success message.
+/// Does nothing when there are no diagnostics.
+fn print_diagnostics_stderr(diagnostics: &[zenith_core::Diagnostic]) {
+    for d in diagnostics {
+        eprintln!("{}", commands::format_diagnostic_line(d));
     }
 }
 

@@ -19,3 +19,15 @@ pub mod validate;
 pub(crate) fn serialize_pretty<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|e| e.to_string())
 }
+
+/// Format a single diagnostic as a human-readable line:
+/// `severity[code] (subject_id): message` (the subject is omitted when absent).
+pub(crate) fn format_diagnostic_line(d: &zenith_core::Diagnostic) -> String {
+    let sev = crate::json_types::severity_str(&d.severity);
+    let subject = d
+        .subject_id
+        .as_deref()
+        .map(|s| format!(" ({})", s))
+        .unwrap_or_default();
+    format!("{}[{}]{}: {}", sev, d.code, subject, d.message)
+}

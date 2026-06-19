@@ -10,7 +10,8 @@
 use std::path::Path;
 
 use zenith_core::{
-    AssetKind, BytesAssetProvider, Document, KdlAdapter, KdlSource, default_provider, validate,
+    AssetKind, BytesAssetProvider, Diagnostic, Document, KdlAdapter, KdlSource, default_provider,
+    validate,
 };
 use zenith_render::render_png;
 use zenith_scene::compile;
@@ -35,21 +36,46 @@ impl RenderCmdErr {
     }
 }
 
+// ── Artifacts ─────────────────────────────────────────────────────────────────
+
+/// Scene JSON plus the compile-stage diagnostics that produced it.
+#[derive(Debug)]
+pub struct SceneArtifact {
+    /// The serialised scene JSON.
+    pub json: String,
+    /// Compile-stage diagnostics (advisories/warnings surfaced by `compile`).
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Rendered PNG bytes plus the compile-stage diagnostics that produced them.
+#[derive(Debug)]
+pub struct PngArtifact {
+    /// The encoded PNG bytes.
+    pub png: Vec<u8>,
+    /// Compile-stage diagnostics (advisories/warnings surfaced by `compile`).
+    pub diagnostics: Vec<Diagnostic>,
+}
+
 // ── Entry points ──────────────────────────────────────────────────────────────
 
-/// Parse `src`, validate it, compile the scene, and return the scene JSON.
+/// Parse `src`, validate it, compile the scene, and return the scene JSON plus
+/// the compile-stage diagnostics.
 ///
 /// Returns `Err` when:
 /// - The source fails to parse (exit code 2).
 /// - The document has validation errors (exit code 1).
 /// - Scene JSON serialisation fails (exit code 2).
-pub fn to_scene_json(src: &str) -> Result<String, RenderCmdErr> {
+pub fn to_scene_json(src: &str) -> Result<SceneArtifact, RenderCmdErr> {
     let provider = default_provider();
     let compile_result = parse_validate_compile(src, &provider)?;
-    compile_result
+    let json = compile_result
         .scene
         .to_json()
-        .map_err(|e| RenderCmdErr::new(format!("scene serialisation error: {e}"), 2))
+        .map_err(|e| RenderCmdErr::new(format!("scene serialisation error: {e}"), 2))?;
+    Ok(SceneArtifact {
+        json,
+        diagnostics: compile_result.diagnostics,
+    })
 }
 
 /// Parse `src`, validate it, compile the scene, and return PNG bytes.
@@ -63,7 +89,7 @@ pub fn to_scene_json(src: &str) -> Result<String, RenderCmdErr> {
 /// - The source fails to parse (exit code 2).
 /// - The document has validation errors (exit code 1).
 /// - Rendering fails (exit code 2).
-pub fn to_png(src: &str) -> Result<Vec<u8>, RenderCmdErr> {
+pub fn to_png(src: &str) -> Result<PngArtifact, RenderCmdErr> {
     to_png_with_dir(src, None)
 }
 
@@ -75,7 +101,7 @@ pub fn to_png(src: &str) -> Result<Vec<u8>, RenderCmdErr> {
 /// a warning and skips that asset (the matching image is then skipped at
 /// render time — never a panic). When `project_dir` is `None` no assets are
 /// loaded.
-pub fn to_png_with_dir(src: &str, project_dir: Option<&Path>) -> Result<Vec<u8>, RenderCmdErr> {
+pub fn to_png_with_dir(src: &str, project_dir: Option<&Path>) -> Result<PngArtifact, RenderCmdErr> {
     let fonts = default_provider();
     let doc = parse_validate(src)?;
     let assets = match project_dir {
@@ -83,8 +109,12 @@ pub fn to_png_with_dir(src: &str, project_dir: Option<&Path>) -> Result<Vec<u8>,
         None => BytesAssetProvider::new(),
     };
     let compile_result = compile(&doc, &fonts);
-    render_png(&compile_result.scene, &fonts, &assets)
-        .map_err(|e| RenderCmdErr::new(format!("render error: {e}"), 2))
+    let png = render_png(&compile_result.scene, &fonts, &assets)
+        .map_err(|e| RenderCmdErr::new(format!("render error: {e}"), 2))?;
+    Ok(PngArtifact {
+        png,
+        diagnostics: compile_result.diagnostics,
+    })
 }
 
 /// Build a [`BytesAssetProvider`] from a parsed document and the project
@@ -192,9 +222,26 @@ mod tests {
 }
 "##;
 
+    /// A document whose only content node is an UNKNOWN kind. It parses (the
+    /// kind is preserved for forward-compat), validates without errors (unknown
+    /// kinds are a warning, not an error), and compiles with a
+    /// `scene.unsupported_node` ADVISORY — a reliable compile-stage diagnostic.
+    const UNKNOWN_NODE_DOC: &str = r##"zenith version=1 {
+  project id="proj.u" name="Unknown Node"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.u" title="Unknown Node" {
+    page id="page.u" w=(px)100 h=(px)100 {
+      sparkle id="sparkle.1"
+    }
+  }
+}
+"##;
+
     #[test]
     fn to_png_returns_png_magic_bytes() {
-        let png = to_png(VALID_DOC).expect("render must succeed");
+        let artifact = to_png(VALID_DOC).expect("render must succeed");
+        let png = &artifact.png;
         assert!(
             png.len() >= 4,
             "PNG must have at least 4 bytes; got {}",
@@ -209,8 +256,37 @@ mod tests {
 
     #[test]
     fn to_png_is_non_empty() {
-        let png = to_png(VALID_DOC).expect("render must succeed");
-        assert!(!png.is_empty(), "PNG output must not be empty");
+        let artifact = to_png(VALID_DOC).expect("render must succeed");
+        assert!(!artifact.png.is_empty(), "PNG output must not be empty");
+    }
+
+    #[test]
+    fn to_png_surfaces_compile_diagnostics() {
+        let artifact = to_png(UNKNOWN_NODE_DOC).expect("render must succeed");
+        assert!(
+            artifact
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "scene.unsupported_node"),
+            "render must surface the compile-stage advisory; got {:?}",
+            artifact
+                .diagnostics
+                .iter()
+                .map(|d| d.code.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn to_scene_json_surfaces_compile_diagnostics() {
+        let artifact = to_scene_json(UNKNOWN_NODE_DOC).expect("scene must succeed");
+        assert!(
+            artifact
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "scene.unsupported_node"),
+            "scene JSON path must surface the compile-stage advisory"
+        );
     }
 
     #[test]
@@ -229,7 +305,9 @@ mod tests {
 
     #[test]
     fn to_scene_json_contains_schema_field() {
-        let json = to_scene_json(VALID_DOC).expect("scene JSON must succeed");
+        let json = to_scene_json(VALID_DOC)
+            .expect("scene JSON must succeed")
+            .json;
         assert!(
             json.contains("zenith-scene-v1"),
             "scene JSON must contain schema field; got snippet: {}",
@@ -245,8 +323,8 @@ mod tests {
 
     #[test]
     fn to_png_deterministic_two_runs_equal() {
-        let png1 = to_png(VALID_DOC).expect("run 1");
-        let png2 = to_png(VALID_DOC).expect("run 2");
+        let png1 = to_png(VALID_DOC).expect("run 1").png;
+        let png2 = to_png(VALID_DOC).expect("run 2").png;
         assert_eq!(png1, png2, "two renders of the same doc must be identical");
     }
 }

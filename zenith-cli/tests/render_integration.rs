@@ -20,7 +20,8 @@ fn assert_example_renders(name: &str) {
         .unwrap_or_else(|e| panic!("could not read {}: {}", fixture.display(), e));
 
     let png = to_png_with_dir(&src, Some(&examples_dir))
-        .unwrap_or_else(|e| panic!("render failed (exit {}): {}", e.exit_code, e.message));
+        .unwrap_or_else(|e| panic!("render failed (exit {}): {}", e.exit_code, e.message))
+        .png;
 
     // Must be non-empty.
     assert!(!png.is_empty(), "PNG output must not be empty");
@@ -39,7 +40,8 @@ fn assert_example_renders(name: &str) {
 
     // Determinism: two renders must be byte-identical.
     let png2 = to_png_with_dir(&src, Some(&examples_dir))
-        .unwrap_or_else(|e| panic!("second render failed (exit {}): {}", e.exit_code, e.message));
+        .unwrap_or_else(|e| panic!("second render failed (exit {}): {}", e.exit_code, e.message))
+        .png;
     assert_eq!(
         png, png2,
         "two renders of {name}.zen must produce identical bytes"
@@ -94,4 +96,14 @@ fn star_zen_renders_to_valid_png() {
 #[test]
 fn styled_zen_renders_to_valid_png() {
     assert_example_renders("styled");
+}
+
+#[test]
+fn rounded_zen_renders_to_valid_png() {
+    assert_example_renders("rounded");
+}
+
+#[test]
+fn code_zen_renders_to_valid_png() {
+    assert_example_renders("code");
 }
