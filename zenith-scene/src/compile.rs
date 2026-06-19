@@ -19,7 +19,9 @@ use zenith_core::{
 use zenith_layout::{RustybuzzEngine, ShapeRequest, TextLayoutEngine, ZenithGlyphRun};
 
 use crate::color::parse_srgb_hex;
-use crate::ir::{Color, FitMode, Scene, SceneCommand, SceneGlyph};
+use crate::ir::{
+    Color, FitMode, GradientPaint, GradientStop, Scene, SceneCommand, SceneGlyph, ShadowSpec,
+};
 
 // ── Render context ────────────────────────────────────────────────────────────
 
@@ -203,16 +205,27 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
     });
 
     // ── Step 5: optional page background ─────────────────────────────────
-    if let Some(bg_prop) = &page.background
-        && let Some(color) = resolve_property_color(bg_prop, resolved, &mut diagnostics, &page.id)
-    {
-        scene.commands.push(SceneCommand::FillRect {
-            x: 0.0,
-            y: 0.0,
-            w: page_w,
-            h: page_h,
-            color,
-        });
+    if let Some(bg_prop) = &page.background {
+        if let Some(gradient) = resolve_property_gradient(bg_prop, resolved, &page.id) {
+            // Page background applies no opacity cascade (mirrors the solid path).
+            scene.commands.push(SceneCommand::FillRectGradient {
+                x: 0.0,
+                y: 0.0,
+                w: page_w,
+                h: page_h,
+                gradient,
+            });
+        } else if let Some(color) =
+            resolve_property_color(bg_prop, resolved, &mut diagnostics, &page.id)
+        {
+            scene.commands.push(SceneCommand::FillRect {
+                x: 0.0,
+                y: 0.0,
+                w: page_w,
+                h: page_h,
+                color,
+            });
+        }
     }
 
     // ── Step 6: children in source order (z-order: first = bottom) ───────
@@ -388,28 +401,65 @@ fn compile_node(
                 });
             }
 
+            // SHADOW bracket (innermost of the rotation, behind fill+stroke).
+            // Only opened once we are committed to emitting the draws below; the
+            // matching EndShadow rides at the arm's single tail.
+            let has_shadow = match rect
+                .shadow
+                .as_ref()
+                .and_then(|p| resolve_property_shadow(p, resolved, &rect.id))
+            {
+                Some(shadows) => {
+                    commands.push(SceneCommand::BeginShadow { shadows });
+                    true
+                }
+                None => false,
+            };
+
             // FILL (emitted first, under the stroke) — node-local prop overrides
             // style cascade.
             let fill_prop = rect
                 .fill
                 .as_ref()
                 .or_else(|| style_prop(&rect.style, style_map, "fill"));
-            if let Some(fill_prop) = fill_prop
-                && let Some(mut color) =
+            if let Some(fill_prop) = fill_prop {
+                if let Some(mut gradient) = resolve_property_gradient(fill_prop, resolved, &rect.id)
+                {
+                    apply_gradient_opacity(&mut gradient, node_opacity, ctx.opacity);
+                    if radius > 0.0 {
+                        commands.push(SceneCommand::FillRoundedRectGradient {
+                            x,
+                            y,
+                            w,
+                            h,
+                            radius,
+                            gradient,
+                        });
+                    } else {
+                        commands.push(SceneCommand::FillRectGradient {
+                            x,
+                            y,
+                            w,
+                            h,
+                            gradient,
+                        });
+                    }
+                } else if let Some(mut color) =
                     resolve_property_color(fill_prop, resolved, diagnostics, &rect.id)
-            {
-                color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
-                if radius > 0.0 {
-                    commands.push(SceneCommand::FillRoundedRect {
-                        x,
-                        y,
-                        w,
-                        h,
-                        radius,
-                        color,
-                    });
-                } else {
-                    commands.push(SceneCommand::FillRect { x, y, w, h, color });
+                {
+                    color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+                    if radius > 0.0 {
+                        commands.push(SceneCommand::FillRoundedRect {
+                            x,
+                            y,
+                            w,
+                            h,
+                            radius,
+                            color,
+                        });
+                    } else {
+                        commands.push(SceneCommand::FillRect { x, y, w, h, color });
+                    }
                 }
             }
 
@@ -484,6 +534,10 @@ fn compile_node(
                         });
                     }
                 }
+            }
+
+            if has_shadow {
+                commands.push(SceneCommand::EndShadow);
             }
 
             if rot.is_some() {
@@ -571,18 +625,44 @@ fn compile_node(
                 });
             }
 
+            // SHADOW bracket (behind fill+stroke). Opened only when committed to
+            // drawing; EndShadow rides at the arm's single tail.
+            let has_shadow = match ellipse
+                .shadow
+                .as_ref()
+                .and_then(|p| resolve_property_shadow(p, resolved, &ellipse.id))
+            {
+                Some(shadows) => {
+                    commands.push(SceneCommand::BeginShadow { shadows });
+                    true
+                }
+                None => false,
+            };
+
             // FILL (emitted first, under the stroke) — node-local prop overrides
             // style cascade.
             let fill_prop = ellipse
                 .fill
                 .as_ref()
                 .or_else(|| style_prop(&ellipse.style, style_map, "fill"));
-            if let Some(fill_prop) = fill_prop
-                && let Some(mut color) =
+            if let Some(fill_prop) = fill_prop {
+                if let Some(mut gradient) =
+                    resolve_property_gradient(fill_prop, resolved, &ellipse.id)
+                {
+                    apply_gradient_opacity(&mut gradient, node_opacity, ctx.opacity);
+                    commands.push(SceneCommand::FillEllipseGradient {
+                        x,
+                        y,
+                        w,
+                        h,
+                        gradient,
+                    });
+                } else if let Some(mut color) =
                     resolve_property_color(fill_prop, resolved, diagnostics, &ellipse.id)
-            {
-                color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
-                commands.push(SceneCommand::FillEllipse { x, y, w, h, color });
+                {
+                    color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+                    commands.push(SceneCommand::FillEllipse { x, y, w, h, color });
+                }
             }
 
             // STROKE (emitted on top of the fill) — node-local prop overrides
@@ -613,6 +693,10 @@ fn compile_node(
 
             // If neither fill nor stroke is present, the ellipse draws nothing —
             // no diagnostic needed (an invisible ellipse is valid in v0).
+
+            if has_shadow {
+                commands.push(SceneCommand::EndShadow);
+            }
 
             if rot.is_some() {
                 commands.push(SceneCommand::PopTransform);
@@ -868,6 +952,25 @@ fn compile_node(
                     cy,
                 });
             }
+
+            // SHADOW bracket (behind the glyph runs + decorations). Opened only
+            // when there is ink to draw (at least one shaped span); EndShadow
+            // rides at the arm's single tail, before any PopTransform.
+            let has_shadow = if shaped_spans.is_empty() {
+                false
+            } else {
+                match text
+                    .shadow
+                    .as_ref()
+                    .and_then(|p| resolve_property_shadow(p, resolved, &text.id))
+                {
+                    Some(shadows) => {
+                        commands.push(SceneCommand::BeginShadow { shadows });
+                        true
+                    }
+                    None => false,
+                }
+            };
 
             // Tracks actual line count after emit; set by whichever path runs.
             // Used solely by the overflow="fit" check below.
@@ -1191,6 +1294,10 @@ fn compile_node(
                 }
             }
 
+            if has_shadow {
+                commands.push(SceneCommand::EndShadow);
+            }
+
             if text_rot.is_some() {
                 commands.push(SceneCommand::PopTransform);
             }
@@ -1325,7 +1432,7 @@ fn compile_node(
         }
 
         Node::Image(image) => {
-            compile_image(image, commands, diagnostics, ctx);
+            compile_image(image, resolved, commands, diagnostics, ctx);
         }
 
         Node::Polygon(poly) => {
@@ -2130,6 +2237,7 @@ fn compile_group(
 /// resolved at render time.
 fn compile_image(
     image: &ImageNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     ctx: RenderCtx,
@@ -2224,6 +2332,20 @@ fn compile_image(
         });
     }
 
+    // SHADOW bracket (behind the image ink, inside the rotation). Opened only
+    // here, where the DrawImage below is guaranteed to follow.
+    let has_shadow = match image
+        .shadow
+        .as_ref()
+        .and_then(|p| resolve_property_shadow(p, resolved, &image.id))
+    {
+        Some(shadows) => {
+            commands.push(SceneCommand::BeginShadow { shadows });
+            true
+        }
+        None => false,
+    };
+
     // Box-clip (G-22): push the box, draw the image, pop. The image is always
     // clipped to its declared box ∩ enclosing clips.
     commands.push(SceneCommand::PushClip { x, y, w, h });
@@ -2239,6 +2361,10 @@ fn compile_image(
         opacity,
     });
     commands.push(SceneCommand::PopClip);
+
+    if has_shadow {
+        commands.push(SceneCommand::EndShadow);
+    }
 
     if rot.is_some() {
         commands.push(SceneCommand::PopTransform);
@@ -2699,6 +2825,105 @@ fn resolve_property_color(
             ));
             None
         }
+    }
+}
+
+/// Resolve a fill `PropertyValue` into a [`GradientPaint`], or `None`.
+///
+/// Returns `Some` only when `prop` is a `TokenRef` whose token resolved to a
+/// `ResolvedValue::Gradient`. Each stop's color is resolved from its
+/// `color_token_id` via the resolved token map (must be `ResolvedValue::Color`);
+/// stops whose color cannot resolve are skipped. Returns `None` (so the caller
+/// falls back to the solid path) for non-gradient props, or when fewer than two
+/// valid stops survive.
+fn resolve_property_gradient(
+    prop: &PropertyValue,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    _subject_id: &str,
+) -> Option<GradientPaint> {
+    let PropertyValue::TokenRef(token_id) = prop else {
+        return None;
+    };
+    let ResolvedValue::Gradient(g) = &resolved.get(token_id.as_str())?.value else {
+        return None;
+    };
+
+    let mut stops: Vec<GradientStop> = Vec::with_capacity(g.stops.len());
+    for (offset, color_token_id) in &g.stops {
+        let Some(rt) = resolved.get(color_token_id.as_str()) else {
+            continue;
+        };
+        let ResolvedValue::Color(hex) = &rt.value else {
+            continue;
+        };
+        let Some(color) = parse_srgb_hex(hex) else {
+            continue;
+        };
+        stops.push(GradientStop {
+            offset: *offset,
+            color,
+        });
+    }
+
+    if stops.len() < 2 {
+        return None;
+    }
+    Some(GradientPaint {
+        angle_deg: g.angle_deg,
+        stops,
+    })
+}
+
+/// Resolve a `shadow` `PropertyValue` into a list of [`ShadowSpec`] layers, or
+/// `None`.
+///
+/// Mirrors [`resolve_property_gradient`]: returns `Some` only when `prop` is a
+/// `TokenRef` whose token resolved to a `ResolvedValue::Shadow`. Each layer's
+/// color is resolved from its `color_token` via the resolved token map (must be
+/// `ResolvedValue::Color`); layers whose color cannot resolve are skipped.
+/// Returns `None` for non-shadow props, or when zero valid layers survive.
+fn resolve_property_shadow(
+    prop: &PropertyValue,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    _subject_id: &str,
+) -> Option<Vec<ShadowSpec>> {
+    let PropertyValue::TokenRef(token_id) = prop else {
+        return None;
+    };
+    let ResolvedValue::Shadow(s) = &resolved.get(token_id.as_str())?.value else {
+        return None;
+    };
+
+    let mut layers: Vec<ShadowSpec> = Vec::with_capacity(s.layers.len());
+    for layer in &s.layers {
+        let Some(rt) = resolved.get(layer.color_token.as_str()) else {
+            continue;
+        };
+        let ResolvedValue::Color(hex) = &rt.value else {
+            continue;
+        };
+        let Some(color) = parse_srgb_hex(hex) else {
+            continue;
+        };
+        layers.push(ShadowSpec {
+            dx: layer.dx,
+            dy: layer.dy,
+            blur: layer.blur,
+            color,
+        });
+    }
+
+    if layers.is_empty() {
+        return None;
+    }
+    Some(layers)
+}
+
+/// Apply the cascaded opacity multiplier to every stop's alpha, matching the
+/// solid path's `color.a = (color.a * node_opacity * ctx.opacity).round()`.
+fn apply_gradient_opacity(gradient: &mut GradientPaint, node_opacity: f64, ctx_opacity: f64) {
+    for stop in &mut gradient.stops {
+        stop.color.a = (stop.color.a as f64 * node_opacity * ctx_opacity).round() as u8;
     }
 }
 
@@ -7159,6 +7384,229 @@ mod tests {
             fit_errors.is_empty(),
             "absent overflow must never produce text.fit_failed; got: {:?}",
             fit_errors
+        );
+    }
+
+    // ── Gradient fill compilation (GRAD-2) ────────────────────────────────
+
+    /// A page background, a rect fill, and an ellipse fill all referencing a
+    /// gradient token must emit the corresponding `*Gradient` commands with the
+    /// resolved stop colors and angle.
+    #[test]
+    fn gradient_fill_emits_gradient_commands() {
+        let src = r##"zenith version=1 {
+  project id="proj.g" name="G"
+  tokens format="zenith-token-v1" {
+    token id="color.top" type="color" value="#112233"
+    token id="color.bottom" type="color" value="#445566"
+    token id="grad.bg" type="gradient" angle=(deg)90 {
+      stop offset=0.0 color=(token)"color.top"
+      stop offset=1.0 color=(token)"color.bottom"
+    }
+  }
+  styles {}
+  document id="doc.g" title="G" {
+    page id="page.g" w=(px)640 h=(px)360 background=(token)"grad.bg" {
+      rect id="rect.g" x=(px)10 y=(px)20 w=(px)100 h=(px)50 fill=(token)"grad.bg"
+      ellipse id="ell.g" x=(px)10 y=(px)20 w=(px)100 h=(px)50 fill=(token)"grad.bg"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        let cmds = &result.scene.commands;
+
+        // Page background gradient (full page, no opacity cascade).
+        match &cmds[1] {
+            SceneCommand::FillRectGradient {
+                x,
+                y,
+                w,
+                h,
+                gradient,
+            } => {
+                assert_eq!((*x, *y, *w, *h), (0.0, 0.0, 640.0, 360.0));
+                assert_eq!(gradient.angle_deg, 90.0);
+                assert_eq!(gradient.stops.len(), 2);
+                assert_eq!(gradient.stops[0].offset, 0.0);
+                assert_eq!(gradient.stops[0].color.r, 0x11);
+                assert_eq!(gradient.stops[0].color.a, 255);
+                assert_eq!(gradient.stops[1].color.r, 0x44);
+            }
+            other => panic!("expected FillRectGradient bg, got {other:?}"),
+        }
+
+        // Rect fill gradient.
+        let has_rect_grad = cmds.iter().any(|c| {
+            matches!(
+                c,
+                SceneCommand::FillRectGradient { x, w, .. } if *x == 10.0 && *w == 100.0
+            )
+        });
+        assert!(has_rect_grad, "expected rect FillRectGradient: {cmds:?}");
+
+        // Ellipse fill gradient.
+        let has_ell_grad = cmds
+            .iter()
+            .any(|c| matches!(c, SceneCommand::FillEllipseGradient { .. }));
+        assert!(has_ell_grad, "expected FillEllipseGradient: {cmds:?}");
+    }
+
+    /// A SOLID color fill must still emit the plain `FillRect` / `FillEllipse`
+    /// (the gradient path must not perturb the solid path).
+    #[test]
+    fn solid_fill_unchanged_by_gradient_support() {
+        let src = r##"zenith version=1 {
+  project id="proj.s" name="S"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#112233"
+  }
+  styles {}
+  document id="doc.s" title="S" {
+    page id="page.s" w=(px)640 h=(px)360 {
+      rect id="rect.s" x=(px)0 y=(px)0 w=(px)640 h=(px)360 fill=(token)"color.fill"
+      ellipse id="ell.s" x=(px)0 y=(px)0 w=(px)100 h=(px)50 fill=(token)"color.fill"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        let cmds = &result.scene.commands;
+        assert!(
+            cmds.iter()
+                .any(|c| matches!(c, SceneCommand::FillRect { .. })),
+            "solid rect must emit FillRect: {cmds:?}"
+        );
+        assert!(
+            cmds.iter()
+                .any(|c| matches!(c, SceneCommand::FillEllipse { .. })),
+            "solid ellipse must emit FillEllipse: {cmds:?}"
+        );
+        assert!(
+            !cmds.iter().any(|c| matches!(
+                c,
+                SceneCommand::FillRectGradient { .. } | SceneCommand::FillEllipseGradient { .. }
+            )),
+            "solid fills must not emit gradient commands: {cmds:?}"
+        );
+    }
+
+    // ── Shadow compilation (SHAD-2) ───────────────────────────────────────
+
+    /// A text node and a rect node carrying a `shadow=(token)` must emit a
+    /// `BeginShadow { shadows:[…] }` … `EndShadow` bracket around their draw
+    /// commands, with the layer color resolved from the referenced color token.
+    #[test]
+    fn shadow_emits_begin_end_bracket() {
+        let src = r##"zenith version=1 {
+  project id="proj.sh" name="Sh"
+  tokens format="zenith-token-v1" {
+    token id="color.shadow" type="color" value="#102030"
+    token id="color.fill" type="color" value="#445566"
+    token id="shadow.soft" type="shadow" {
+      layer dx=(px)2 dy=(px)3 blur=(px)4 color=(token)"color.shadow"
+    }
+  }
+  styles {}
+  document id="doc.sh" title="Sh" {
+    page id="page.sh" w=(px)200 h=(px)200 {
+      rect id="rect.sh" x=(px)10 y=(px)10 w=(px)80 h=(px)40 fill=(token)"color.fill" shadow=(token)"shadow.soft"
+      text id="text.sh" x=(px)10 y=(px)80 shadow=(token)"shadow.soft" {
+        span "Hello"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        let cmds = &result.scene.commands;
+
+        // Locate the first BeginShadow and verify the resolved layer.
+        let begin = cmds.iter().find_map(|c| match c {
+            SceneCommand::BeginShadow { shadows } => Some(shadows),
+            _ => None,
+        });
+        let shadows = begin.expect("a BeginShadow must be emitted");
+        assert_eq!(shadows.len(), 1, "one shadow layer: {shadows:?}");
+        let layer = shadows.first().expect("layer present");
+        assert_eq!((layer.dx, layer.dy, layer.blur), (2.0, 3.0, 4.0));
+        assert_eq!(layer.color.r, 0x10);
+        assert_eq!(layer.color.g, 0x20);
+        assert_eq!(layer.color.b, 0x30);
+        assert_eq!(layer.color.a, 0xff);
+
+        // BeginShadow/EndShadow must be balanced, and a Begin must precede a
+        // draw which precedes the End (bracket order).
+        let begins = cmds
+            .iter()
+            .filter(|c| matches!(c, SceneCommand::BeginShadow { .. }))
+            .count();
+        let ends = cmds
+            .iter()
+            .filter(|c| matches!(c, SceneCommand::EndShadow))
+            .count();
+        assert_eq!(begins, 2, "rect + text each open a shadow: {cmds:?}");
+        assert_eq!(ends, 2, "each shadow must be closed: {cmds:?}");
+
+        // The first Begin is immediately followed by a fill and closed by an End.
+        let begin_idx = cmds
+            .iter()
+            .position(|c| matches!(c, SceneCommand::BeginShadow { .. }))
+            .expect("begin index");
+        let end_idx = cmds
+            .iter()
+            .position(|c| matches!(c, SceneCommand::EndShadow))
+            .expect("end index");
+        assert!(begin_idx < end_idx, "Begin must precede End");
+        let has_draw_between = cmds
+            .get(begin_idx + 1..end_idx)
+            .map(|window| {
+                window
+                    .iter()
+                    .any(|c| matches!(c, SceneCommand::FillRect { .. }))
+            })
+            .unwrap_or(false);
+        assert!(
+            has_draw_between,
+            "a draw must sit inside the bracket: {cmds:?}"
+        );
+    }
+
+    /// A node WITHOUT a shadow must emit a command stream byte-identical to the
+    /// pre-shadow behavior: no `BeginShadow`/`EndShadow` anywhere.
+    #[test]
+    fn no_shadow_emits_no_bracket() {
+        let src = r##"zenith version=1 {
+  project id="proj.ns" name="Ns"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#445566"
+  }
+  styles {}
+  document id="doc.ns" title="Ns" {
+    page id="page.ns" w=(px)200 h=(px)200 {
+      rect id="rect.ns" x=(px)10 y=(px)10 w=(px)80 h=(px)40 fill=(token)"color.fill"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        let cmds = &result.scene.commands;
+        assert!(
+            !cmds.iter().any(|c| matches!(
+                c,
+                SceneCommand::BeginShadow { .. } | SceneCommand::EndShadow
+            )),
+            "a shadow-less node must emit no shadow bracket: {cmds:?}"
         );
     }
 }

@@ -382,4 +382,151 @@ mod tests {
             err.code
         );
     }
+
+    /// A gradient token (angle + 2 stops) parses into the expected AST shape:
+    /// `TokenType::Gradient` + `TokenLiteral::Gradient` with both stops in order.
+    #[test]
+    fn test_gradient_token_parses() {
+        let src = r##"zenith version=1 {
+  project id="proj.grad" name="Grad"
+  tokens format="zenith-token-v1" {
+    token id="color.navy.top" type="color" value="#001133"
+    token id="color.black.bottom" type="color" value="#000000"
+    token id="gradient.bg.hero" type="gradient" angle=(deg)90 {
+      stop offset=0.0 color=(token)"color.navy.top"
+      stop offset=1.0 color=(token)"color.black.bottom"
+    }
+  }
+  styles {
+  }
+  document id="doc.grad" title="Grad" {
+    page id="p" w=(px)100 h=(px)100 {
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+
+        let grad = doc
+            .tokens
+            .tokens
+            .iter()
+            .find(|t| t.id == "gradient.bg.hero")
+            .expect("gradient token present");
+        assert_eq!(grad.token_type, TokenType::Gradient);
+        match &grad.value {
+            TokenValue::Literal(TokenLiteral::Gradient(g)) => {
+                assert_eq!(g.angle_deg, 90.0);
+                assert_eq!(g.stops.len(), 2);
+                assert_eq!(g.stops[0].offset, 0.0);
+                assert_eq!(g.stops[0].color_token, "color.navy.top");
+                assert_eq!(g.stops[1].offset, 1.0);
+                assert_eq!(g.stops[1].color_token, "color.black.bottom");
+            }
+            other => panic!("expected gradient literal, got {other:?}"),
+        }
+    }
+
+    /// When `angle=` is absent the gradient defaults to 90 degrees.
+    #[test]
+    fn test_gradient_token_default_angle() {
+        let src = r##"zenith version=1 {
+  project id="proj.grad" name="Grad"
+  tokens format="zenith-token-v1" {
+    token id="color.a" type="color" value="#001133"
+    token id="color.b" type="color" value="#000000"
+    token id="gradient.bg" type="gradient" {
+      stop offset=0.0 color=(token)"color.a"
+      stop offset=1.0 color=(token)"color.b"
+    }
+  }
+  styles {
+  }
+  document id="doc.grad" title="Grad" {
+    page id="p" w=(px)100 h=(px)100 {
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+        let grad = doc
+            .tokens
+            .tokens
+            .iter()
+            .find(|t| t.id == "gradient.bg")
+            .expect("gradient token present");
+        match &grad.value {
+            TokenValue::Literal(TokenLiteral::Gradient(g)) => assert_eq!(g.angle_deg, 90.0),
+            other => panic!("expected gradient literal, got {other:?}"),
+        }
+    }
+
+    /// A shadow token (2 layers: drop shadow + outer glow) parses into the
+    /// expected AST shape, and a text node's `shadow=(token)"..."` prop parses
+    /// into a `TokenRef`.
+    #[test]
+    fn test_shadow_token_and_node_prop_parse() {
+        let src = r##"zenith version=1 {
+  project id="proj.shadow" name="Shadow"
+  tokens format="zenith-token-v1" {
+    token id="color.shadow.black" type="color" value="#000000"
+    token id="color.glow.cyan" type="color" value="#00ffff"
+    token id="shadow.headline" type="shadow" {
+      layer dx=(px)8 dy=(px)8 blur=(px)24 color=(token)"color.shadow.black"
+      layer dx=(px)0 dy=(px)0 blur=(px)20 color=(token)"color.glow.cyan"
+    }
+  }
+  styles {
+  }
+  document id="doc.shadow" title="Shadow" {
+    page id="p" w=(px)100 h=(px)100 {
+      text id="headline" x=(px)0 y=(px)0 w=(px)100 h=(px)40 shadow=(token)"shadow.headline" {
+        span "Hi"
+      }
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+
+        let shadow = doc
+            .tokens
+            .tokens
+            .iter()
+            .find(|t| t.id == "shadow.headline")
+            .expect("shadow token present");
+        assert_eq!(shadow.token_type, TokenType::Shadow);
+        match &shadow.value {
+            TokenValue::Literal(TokenLiteral::Shadow(s)) => {
+                assert_eq!(s.layers.len(), 2);
+                assert_eq!(s.layers[0].dx, 8.0);
+                assert_eq!(s.layers[0].dy, 8.0);
+                assert_eq!(s.layers[0].blur, 24.0);
+                assert_eq!(s.layers[0].color_token, "color.shadow.black");
+                assert_eq!(s.layers[1].dx, 0.0);
+                assert_eq!(s.layers[1].dy, 0.0);
+                assert_eq!(s.layers[1].blur, 20.0);
+                assert_eq!(s.layers[1].color_token, "color.glow.cyan");
+            }
+            other => panic!("expected shadow literal, got {other:?}"),
+        }
+
+        // The text node carries the shadow token ref.
+        let page = &doc.body.pages[0];
+        let text = page
+            .children
+            .iter()
+            .find_map(|n| match n {
+                Node::Text(t) if t.id == "headline" => Some(t),
+                _ => None,
+            })
+            .expect("headline text node present");
+        assert_eq!(
+            text.shadow,
+            Some(PropertyValue::TokenRef("shadow.headline".to_owned()))
+        );
+    }
 }

@@ -324,11 +324,53 @@ fn write_token(token: &Token, out: &mut String, depth: usize) {
         TokenType::Number => "number",
         TokenType::FontFamily => "fontFamily",
         TokenType::FontWeight => "fontWeight",
+        TokenType::Gradient => "gradient",
+        TokenType::Shadow => "shadow",
         TokenType::Unknown(s) => s.as_str(),
     };
     out.push_str(" type=\"");
     out.push_str(type_str);
     out.push('"');
+
+    // Gradient tokens have no scalar `value=`; they emit an `angle` prop plus a
+    // brace block of `stop` children. Handle and return before the value path.
+    if let TokenValue::Literal(TokenLiteral::Gradient(g)) = &token.value {
+        out.push_str(" angle=(deg)");
+        out.push_str(&fmt_f64(g.angle_deg));
+        out.push_str(" {\n");
+        for stop in &g.stops {
+            indent(out, depth + 1);
+            out.push_str("stop offset=");
+            out.push_str(&fmt_f64(stop.offset));
+            out.push_str(" color=(token)\"");
+            out.push_str(&stop.color_token);
+            out.push_str("\"\n");
+        }
+        indent(out, depth);
+        out.push_str("}\n");
+        return;
+    }
+
+    // Shadow tokens have no scalar `value=`; they emit a brace block of `layer`
+    // children. Handle and return before the value path.
+    if let TokenValue::Literal(TokenLiteral::Shadow(s)) = &token.value {
+        out.push_str(" {\n");
+        for layer in &s.layers {
+            indent(out, depth + 1);
+            out.push_str("layer dx=(px)");
+            out.push_str(&fmt_f64(layer.dx));
+            out.push_str(" dy=(px)");
+            out.push_str(&fmt_f64(layer.dy));
+            out.push_str(" blur=(px)");
+            out.push_str(&fmt_f64(layer.blur));
+            out.push_str(" color=(token)\"");
+            out.push_str(&layer.color_token);
+            out.push_str("\"\n");
+        }
+        indent(out, depth);
+        out.push_str("}\n");
+        return;
+    }
 
     // value
     out.push_str(" value=");
@@ -345,6 +387,11 @@ fn write_token(token: &Token, out: &mut String, depth: usize) {
             TokenLiteral::Number(n) => {
                 out.push_str(&fmt_f64(*n));
             }
+            // Gradient and shadow literals are emitted by the early-return
+            // blocks above; these arms are unreachable but keep the match
+            // exhaustive.
+            TokenLiteral::Gradient(_) => {}
+            TokenLiteral::Shadow(_) => {}
         },
         TokenValue::Reference { token_id } => {
             out.push_str("(token)\"");
@@ -504,6 +551,7 @@ fn write_rect(r: &RectNode, out: &mut String, depth: usize) {
     write_opt_property_value(out, "stroke", &r.stroke);
     write_opt_property_value(out, "stroke-width", &r.stroke_width);
     write_opt_str(out, "stroke-alignment", &r.stroke_alignment);
+    write_opt_property_value(out, "shadow", &r.shadow);
     write_opt_f64(out, "opacity", &r.opacity);
     write_opt_bool(out, "visible", &r.visible);
     write_opt_bool(out, "locked", &r.locked);
@@ -543,6 +591,7 @@ fn write_image(i: &ImageNode, out: &mut String, depth: usize) {
     write_opt_str(out, "fit", &i.fit);
     write_opt_object_position(out, "object-position-x", &i.object_position_x);
     write_opt_object_position(out, "object-position-y", &i.object_position_y);
+    write_opt_property_value(out, "shadow", &i.shadow);
     write_opt_f64(out, "opacity", &i.opacity);
     write_opt_bool(out, "visible", &i.visible);
     write_opt_bool(out, "locked", &i.locked);
@@ -579,6 +628,7 @@ fn write_ellipse(e: &EllipseNode, out: &mut String, depth: usize) {
     write_opt_property_value(out, "fill", &e.fill);
     write_opt_property_value(out, "stroke", &e.stroke);
     write_opt_property_value(out, "stroke-width", &e.stroke_width);
+    write_opt_property_value(out, "shadow", &e.shadow);
     write_opt_f64(out, "opacity", &e.opacity);
     write_opt_bool(out, "visible", &e.visible);
     write_opt_bool(out, "locked", &e.locked);
@@ -723,6 +773,7 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     write_opt_property_value(out, "font-family", &t.font_family);
     write_opt_property_value(out, "font-size", &t.font_size);
     write_opt_property_value(out, "font-weight", &t.font_weight);
+    write_opt_property_value(out, "shadow", &t.shadow);
     write_opt_f64(out, "opacity", &t.opacity);
     write_opt_bool(out, "visible", &t.visible);
     write_opt_bool(out, "locked", &t.locked);
@@ -1370,6 +1421,218 @@ mod tests {
             ),
             other => panic!("expected Text, got {other:?}"),
         }
+    }
+
+    /// **Gradient round-trip**: a gradient token (angle + 2 stops) must
+    /// parse→format→parse byte-stably, emit the `stop` brace block, and a page
+    /// background referencing it must NOT flag the stop colors as `token.unused`.
+    #[test]
+    fn test_gradient_token_round_trip() {
+        let src = r##"zenith version=1 {
+  project id="proj.grad" name="Grad"
+  tokens format="zenith-token-v1" {
+    token id="color.navy.top" type="color" value="#001133"
+    token id="color.black.bottom" type="color" value="#000000"
+    token id="gradient.bg.hero" type="gradient" angle=(deg)90 {
+      stop offset=0 color=(token)"color.navy.top"
+      stop offset=1 color=(token)"color.black.bottom"
+    }
+  }
+  styles {
+  }
+  document id="doc.grad" title="Grad" {
+    page id="p" w=(px)100 h=(px)100 background=(token)"gradient.bg.hero" {
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc1 = adapter.parse(src.as_bytes()).expect("parse 1");
+        let s1 = format_document(&doc1).expect("format 1");
+        let formatted = String::from_utf8(s1.clone()).expect("utf8");
+
+        // The gradient emits a brace block with two stop children.
+        assert!(
+            formatted.contains("type=\"gradient\" angle=(deg)90 {"),
+            "expected gradient header; got:\n{formatted}"
+        );
+        assert!(
+            formatted.contains("stop offset=0 color=(token)\"color.navy.top\""),
+            "expected first stop; got:\n{formatted}"
+        );
+        assert!(
+            formatted.contains("stop offset=1 color=(token)\"color.black.bottom\""),
+            "expected second stop; got:\n{formatted}"
+        );
+
+        // Idempotency: format(format(doc)) == format(doc).
+        let doc2 = adapter.parse(&s1).expect("parse 2");
+        let s2 = format_document(&doc2).expect("format 2");
+        assert_eq!(
+            formatted,
+            String::from_utf8(s2).expect("utf8"),
+            "gradient formatting must be idempotent"
+        );
+
+        // AST round-trip (spans stripped).
+        assert_eq!(
+            strip_spans(doc1),
+            strip_spans(doc2),
+            "gradient AST must survive format round-trip"
+        );
+    }
+
+    /// **Gradient fill validates clean**: a page background referencing a
+    /// gradient token type-checks OK, and the gradient's stop colors are not
+    /// falsely flagged `token.unused`.
+    #[test]
+    fn test_gradient_fill_validates_without_unused() {
+        let src = r##"zenith version=1 {
+  project id="proj.grad" name="Grad"
+  tokens format="zenith-token-v1" {
+    token id="color.navy.top" type="color" value="#001133"
+    token id="color.black.bottom" type="color" value="#000000"
+    token id="gradient.bg.hero" type="gradient" angle=(deg)90 {
+      stop offset=0 color=(token)"color.navy.top"
+      stop offset=1 color=(token)"color.black.bottom"
+    }
+  }
+  styles {
+  }
+  document id="doc.grad" title="Grad" {
+    page id="p" w=(px)100 h=(px)100 {
+      rect id="r" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fill=(token)"gradient.bg.hero"
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse");
+        // `validate` runs token resolution internally and merges all diagnostics.
+        let report = crate::validate::validate(&doc);
+
+        let codes: Vec<&str> = report.diagnostics.iter().map(|d| d.code.as_str()).collect();
+        assert!(
+            !codes.contains(&"token.incompatible_property"),
+            "gradient fill must be type-compatible; codes: {codes:?}"
+        );
+        assert!(
+            !codes.contains(&"token.unused"),
+            "gradient stop colors must not be flagged unused; codes: {codes:?}"
+        );
+        assert!(
+            !codes.contains(&"token.raw_visual_literal"),
+            "gradient token ref must not be a raw literal; codes: {codes:?}"
+        );
+    }
+
+    /// **Shadow round-trip**: a shadow token (2 layers) must parse→format→parse
+    /// byte-stably, emit the `layer` brace block, and a text node referencing it
+    /// (via `shadow=(token)"..."`) must survive the round-trip.
+    #[test]
+    fn test_shadow_token_round_trip() {
+        let src = r##"zenith version=1 {
+  project id="proj.shadow" name="Shadow"
+  tokens format="zenith-token-v1" {
+    token id="color.shadow.black" type="color" value="#000000"
+    token id="color.glow.cyan" type="color" value="#00ffff"
+    token id="shadow.headline" type="shadow" {
+      layer dx=(px)8 dy=(px)8 blur=(px)24 color=(token)"color.shadow.black"
+      layer dx=(px)0 dy=(px)0 blur=(px)20 color=(token)"color.glow.cyan"
+    }
+  }
+  styles {
+  }
+  document id="doc.shadow" title="Shadow" {
+    page id="p" w=(px)100 h=(px)100 {
+      text id="headline" x=(px)0 y=(px)0 w=(px)100 h=(px)40 shadow=(token)"shadow.headline" {
+        span "Hi"
+      }
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc1 = adapter.parse(src.as_bytes()).expect("parse 1");
+        let s1 = format_document(&doc1).expect("format 1");
+        let formatted = String::from_utf8(s1.clone()).expect("utf8");
+
+        // The shadow emits a brace block with two layer children.
+        assert!(
+            formatted.contains("type=\"shadow\" {"),
+            "expected shadow header; got:\n{formatted}"
+        );
+        assert!(
+            formatted.contains(
+                "layer dx=(px)8 dy=(px)8 blur=(px)24 color=(token)\"color.shadow.black\""
+            ),
+            "expected first layer; got:\n{formatted}"
+        );
+        assert!(
+            formatted.contains(" shadow=(token)\"shadow.headline\""),
+            "expected node shadow prop; got:\n{formatted}"
+        );
+
+        // Idempotency.
+        let doc2 = adapter.parse(&s1).expect("parse 2");
+        let s2 = format_document(&doc2).expect("format 2");
+        assert_eq!(
+            formatted,
+            String::from_utf8(s2).expect("utf8"),
+            "shadow formatting must be idempotent"
+        );
+
+        // AST round-trip (spans stripped).
+        assert_eq!(
+            strip_spans(doc1),
+            strip_spans(doc2),
+            "shadow AST must survive format round-trip"
+        );
+    }
+
+    /// **Shadow on a node validates clean**: a text node referencing a shadow
+    /// token type-checks OK, and the shadow's layer colors are not falsely
+    /// flagged `token.unused`.
+    #[test]
+    fn test_shadow_node_validates_without_unused() {
+        let src = r##"zenith version=1 {
+  project id="proj.shadow" name="Shadow"
+  tokens format="zenith-token-v1" {
+    token id="color.shadow.black" type="color" value="#000000"
+    token id="color.glow.cyan" type="color" value="#00ffff"
+    token id="shadow.headline" type="shadow" {
+      layer dx=(px)8 dy=(px)8 blur=(px)24 color=(token)"color.shadow.black"
+      layer dx=(px)0 dy=(px)0 blur=(px)20 color=(token)"color.glow.cyan"
+    }
+  }
+  styles {
+  }
+  document id="doc.shadow" title="Shadow" {
+    page id="p" w=(px)100 h=(px)100 {
+      text id="headline" x=(px)0 y=(px)0 w=(px)100 h=(px)40 shadow=(token)"shadow.headline" {
+        span "Hi"
+      }
+    }
+  }
+}
+"##;
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse");
+        let report = crate::validate::validate(&doc);
+
+        let codes: Vec<&str> = report.diagnostics.iter().map(|d| d.code.as_str()).collect();
+        assert!(
+            !codes.contains(&"token.incompatible_property"),
+            "shadow ref must be type-compatible; codes: {codes:?}"
+        );
+        assert!(
+            !codes.contains(&"token.unused"),
+            "shadow layer colors must not be flagged unused; codes: {codes:?}"
+        );
+        assert!(
+            !codes.contains(&"token.raw_visual_literal"),
+            "shadow token ref must not be a raw literal; codes: {codes:?}"
+        );
     }
 
     /// **Booleans**: `visible=#false` must emit with `#false`, not `false` or `"false"`.

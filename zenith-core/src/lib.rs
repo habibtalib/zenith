@@ -20,10 +20,11 @@ pub mod validate;
 pub use asset::{AssetData, AssetProvider, BytesAssetProvider};
 pub use ast::{
     AssetBlock, AssetDecl, AssetKind, CodeNode, Dimension, Document, DocumentBody, EllipseNode,
-    FrameNode, GroupNode, ImageNode, LineNode, Node, ObjectPosition, Page, Point, PolygonNode,
-    PolylineNode, Project, PropertyValue, RectNode, Span, Style, StyleBlock, TextNode, TextSpan,
-    Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownProperty,
-    UnknownStyleProp, UnknownValue, dim_to_px,
+    FrameNode, GradientLiteral, GradientStopRef, GroupNode, ImageNode, LineNode, Node,
+    ObjectPosition, Page, Point, PolygonNode, PolylineNode, Project, PropertyValue, RectNode,
+    ShadowLayerRef, ShadowLiteral, Span, Style, StyleBlock, TextNode, TextSpan, Token, TokenBlock,
+    TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownProperty, UnknownStyleProp,
+    UnknownValue, dim_to_px,
 };
 pub use color::{contrast_ratio, parse_rgb, relative_luminance};
 pub use diagnostics::{Diagnostic, Severity};
@@ -31,7 +32,8 @@ pub use error::{FormatError, ParseError, ParseErrorCode};
 pub use font::{BytesFontProvider, FontData, FontProvider, FontStyle, default_provider};
 pub use parse::{KdlAdapter, KdlSource};
 pub use tokens::{
-    HighlightToken, ResolvedToken, ResolvedValue, SyntaxTheme, TokenKind, TokenResolution,
-    builtin_color, is_supported, resolve_tokens, scan, token_id_for_kind,
+    HighlightToken, ResolvedGradient, ResolvedShadow, ResolvedShadowLayer, ResolvedToken,
+    ResolvedValue, SyntaxTheme, TokenKind, TokenResolution, builtin_color, is_supported,
+    resolve_tokens, scan, token_id_for_kind,
 };
 pub use validate::{ValidationReport, validate};

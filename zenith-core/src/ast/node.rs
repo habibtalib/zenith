@@ -88,6 +88,8 @@ pub struct ImageNode {
     /// Vertical object-position anchor (string anchor or `(pct)N`).
     pub object_position_y: Option<ObjectPosition>,
     pub opacity: Option<f64>,
+    /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
+    pub shadow: Option<PropertyValue>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,
     pub rotate: Option<Dimension>,
@@ -114,6 +116,8 @@ pub struct RectNode {
     pub stroke: Option<PropertyValue>,
     pub stroke_width: Option<PropertyValue>,
     pub stroke_alignment: Option<String>,
+    /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
+    pub shadow: Option<PropertyValue>,
     pub opacity: Option<f64>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,
@@ -168,6 +172,8 @@ pub struct EllipseNode {
     pub fill: Option<PropertyValue>,
     pub stroke: Option<PropertyValue>,
     pub stroke_width: Option<PropertyValue>,
+    /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
+    pub shadow: Option<PropertyValue>,
     pub opacity: Option<f64>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,
@@ -197,6 +203,8 @@ pub struct TextNode {
     pub font_size: Option<PropertyValue>,
     /// Numeric font weight (100–900), usually a `fontWeight` token ref.
     pub font_weight: Option<PropertyValue>,
+    /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
+    pub shadow: Option<PropertyValue>,
     pub opacity: Option<f64>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,

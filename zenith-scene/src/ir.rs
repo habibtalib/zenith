@@ -24,6 +24,53 @@ pub struct Color {
     pub a: u8,
 }
 
+// ── Gradient paint ────────────────────────────────────────────────────────────
+
+/// A single color stop within a [`GradientPaint`].
+///
+/// `offset` is the normalized position along the gradient line in `0.0..=1.0`;
+/// `color` is the (alpha-cascaded) stop color.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct GradientStop {
+    /// Normalized position along the gradient line, `0.0..=1.0`.
+    pub offset: f64,
+    /// Stop color (straight / un-pre-multiplied alpha).
+    pub color: Color,
+}
+
+/// A linear gradient fill paint.
+///
+/// `angle_deg` is the gradient-line direction in degrees, clockwise from +x
+/// (screen coordinates: +y is downward, so `90` is top-to-bottom). `stops`
+/// holds at least two ordered color stops.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct GradientPaint {
+    /// Gradient-line angle in degrees, clockwise from +x.
+    pub angle_deg: f64,
+    /// Ordered color stops (at least two).
+    pub stops: Vec<GradientStop>,
+}
+
+// ── Shadow ────────────────────────────────────────────────────────────────────
+
+/// A single drop-shadow / outer-glow layer.
+///
+/// `dx`/`dy` are the offset (pixels) of the shadow relative to the ink; `blur`
+/// is the Gaussian blur sigma (pixels, `>= 0`); `color` is the shadow color
+/// (straight / un-pre-multiplied alpha). A node may carry several layers, all
+/// painted behind the ink.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ShadowSpec {
+    /// Horizontal offset in pixels (positive = rightward).
+    pub dx: f64,
+    /// Vertical offset in pixels (positive = downward).
+    pub dy: f64,
+    /// Gaussian blur sigma in pixels (`>= 0`).
+    pub blur: f64,
+    /// Shadow color (straight / un-pre-multiplied alpha).
+    pub color: Color,
+}
+
 // ── Fit mode ────────────────────────────────────────────────────────────────
 
 /// How a raster image asset scales to fill its declared box.
@@ -95,6 +142,31 @@ pub enum SceneCommand {
         w: f64,
         h: f64,
         color: Color,
+    },
+    /// Fill an axis-aligned rectangle with a linear gradient.
+    FillRectGradient {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        gradient: GradientPaint,
+    },
+    /// Fill a rectangle with uniform corner radius, painted with a linear gradient.
+    FillRoundedRectGradient {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        radius: f64,
+        gradient: GradientPaint,
+    },
+    /// Fill an axis-aligned ellipse with a linear gradient.
+    FillEllipseGradient {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        gradient: GradientPaint,
     },
     /// Stroke an axis-aligned ellipse (centered on the ellipse path; no
     /// stroke-alignment in v0).
@@ -200,6 +272,17 @@ pub enum SceneCommand {
     PushTransform { angle_deg: f64, cx: f64, cy: f64 },
     /// Pop the most recent pushed transform.
     PopTransform,
+    // ── Shadow capture ────────────────────────────────────────────────────
+    /// Open an isolated capture of the following draw commands. The captured
+    /// ink is buffered offscreen until the matching [`SceneCommand::EndShadow`].
+    ///
+    /// `shadows` are painted in *reverse* order at `EndShadow` (so the
+    /// first-declared layer ends up on top of later layers), all *behind* the
+    /// crisp ink.
+    BeginShadow { shadows: Vec<ShadowSpec> },
+    /// Close the active shadow capture: paint the blurred shadow layers, then
+    /// composite the captured ink on top.
+    EndShadow,
 }
 
 // ── Scene glyph ───────────────────────────────────────────────────────────────

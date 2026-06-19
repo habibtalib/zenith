@@ -17,7 +17,9 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::ast::token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue};
+use crate::ast::token::{
+    GradientLiteral, ShadowLiteral, Token, TokenBlock, TokenLiteral, TokenType, TokenValue,
+};
 use crate::ast::value::{Dimension, Unit};
 use crate::diagnostics::Diagnostic;
 
@@ -31,6 +33,38 @@ pub enum ResolvedValue {
     Number(f64),
     FontFamily(String),
     FontWeight(u32),
+    Gradient(ResolvedGradient),
+    Shadow(ResolvedShadow),
+}
+
+/// A resolved gradient: an angle plus an ordered list of `(offset, color token
+/// id)` stops. Offsets are clamped into `0.0..=1.0`. Stop-color existence and
+/// type are checked in a second pass over the fully-resolved token map.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedGradient {
+    /// Angle in degrees, clockwise from +x.
+    pub angle_deg: f64,
+    /// Ordered `(offset, color_token_id)` stops.
+    pub stops: Vec<(f64, String)>,
+}
+
+/// A resolved shadow: an ordered list of layers. Blur is clamped to `>= 0`.
+/// Layer-color existence and type are checked in a second pass over the
+/// fully-resolved token map (exactly like gradient stops).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedShadow {
+    /// Ordered list of resolved layers, in source order.
+    pub layers: Vec<ResolvedShadowLayer>,
+}
+
+/// A single resolved shadow layer: offsets and blur (pixels) plus the id of the
+/// color token this layer renders with.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedShadowLayer {
+    pub dx: f64,
+    pub dy: f64,
+    pub blur: f64,
+    pub color_token: String,
 }
 
 /// A successfully resolved token (type + value pair).
@@ -162,6 +196,111 @@ pub fn resolve_tokens(block: &TokenBlock) -> TokenResolution {
         }
     }
 
+    // ── Step 3: gradient stop-color cross-check ───────────────────────────
+    // Now that every token's resolved value is known, verify that each
+    // gradient stop references a token that exists AND resolved to a Color.
+    // Iterate the resolved map (BTreeMap → deterministic id order) and clone
+    // out the gradient stop lists so we don't borrow `resolved` while reading
+    // other entries from it.
+    let gradient_stops: Vec<(String, Vec<String>)> = resolved
+        .iter()
+        .filter_map(|(id, rt)| match &rt.value {
+            ResolvedValue::Gradient(g) => Some((
+                id.clone(),
+                g.stops
+                    .iter()
+                    .map(|(_, color_id)| color_id.clone())
+                    .collect(),
+            )),
+            _ => None,
+        })
+        .collect();
+
+    for (id, stop_color_ids) in &gradient_stops {
+        // The declaring token's span, looked up via the source index.
+        let span = index.get(id.as_str()).and_then(|t| t.source_span);
+        for color_token_id in stop_color_ids {
+            match resolved.get(color_token_id.as_str()) {
+                None => diagnostics.push(Diagnostic::error(
+                    "gradient.stop_unresolved",
+                    format!(
+                        "gradient '{}' stop references unknown token '{}'",
+                        id, color_token_id
+                    ),
+                    span,
+                    Some(id.clone()),
+                )),
+                Some(rt) if !matches!(rt.value, ResolvedValue::Color(_)) => {
+                    diagnostics.push(Diagnostic::error(
+                        "gradient.stop_wrong_type",
+                        format!(
+                            "gradient '{}' stop references token '{}' of type '{}' \
+                             but a color token is required",
+                            id,
+                            color_token_id,
+                            type_name_of(&rt.token_type),
+                        ),
+                        span,
+                        Some(id.clone()),
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+
+    // ── Step 4: shadow layer-color cross-check ────────────────────────────
+    // Now that every token's resolved value is known, verify that each shadow
+    // layer references a token that exists AND resolved to a Color. Iterate the
+    // resolved map (BTreeMap → deterministic id order) and clone out the layer
+    // color lists so we don't borrow `resolved` while reading other entries.
+    let shadow_layers: Vec<(String, Vec<String>)> = resolved
+        .iter()
+        .filter_map(|(id, rt)| match &rt.value {
+            ResolvedValue::Shadow(s) => Some((
+                id.clone(),
+                s.layers
+                    .iter()
+                    .map(|layer| layer.color_token.clone())
+                    .collect(),
+            )),
+            _ => None,
+        })
+        .collect();
+
+    for (id, layer_color_ids) in &shadow_layers {
+        // The declaring token's span, looked up via the source index.
+        let span = index.get(id.as_str()).and_then(|t| t.source_span);
+        for color_token_id in layer_color_ids {
+            match resolved.get(color_token_id.as_str()) {
+                None => diagnostics.push(Diagnostic::error(
+                    "shadow.layer_unresolved",
+                    format!(
+                        "shadow '{}' layer references unknown token '{}'",
+                        id, color_token_id
+                    ),
+                    span,
+                    Some(id.clone()),
+                )),
+                Some(rt) if !matches!(rt.value, ResolvedValue::Color(_)) => {
+                    diagnostics.push(Diagnostic::error(
+                        "shadow.layer_wrong_type",
+                        format!(
+                            "shadow '{}' layer references token '{}' of type '{}' \
+                             but a color token is required",
+                            id,
+                            color_token_id,
+                            type_name_of(&rt.token_type),
+                        ),
+                        span,
+                        Some(id.clone()),
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+
     TokenResolution {
         resolved,
         diagnostics,
@@ -265,6 +404,8 @@ fn validate_literal(
         TokenType::Number => validate_number(token_id, literal, span, diagnostics),
         TokenType::FontFamily => validate_font_family(token_id, literal, span, diagnostics),
         TokenType::FontWeight => validate_font_weight(token_id, literal, span, diagnostics),
+        TokenType::Gradient => validate_gradient(token_id, literal, span, diagnostics),
+        TokenType::Shadow => validate_shadow(token_id, literal, span, diagnostics),
         TokenType::Unknown(_) => {
             // Already handled upstream; should not reach here.
             None
@@ -486,6 +627,128 @@ fn validate_font_weight(
     }
 }
 
+/// Validate a gradient literal: require ≥2 stops and finite offsets. Offsets are
+/// clamped into `0.0..=1.0`. Stop-color existence/type are NOT checked here —
+/// that requires the full resolved map and runs as a second pass.
+fn validate_gradient(
+    token_id: &str,
+    literal: &TokenLiteral,
+    span: Option<crate::ast::Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<ResolvedValue> {
+    let TokenLiteral::Gradient(GradientLiteral { angle_deg, stops }) = literal else {
+        diagnostics.push(invalid_value(
+            token_id,
+            &format!(
+                "gradient token '{}' must be defined by `stop` child nodes, got {}",
+                token_id,
+                literal_kind_name(literal),
+            ),
+            span,
+        ));
+        return None;
+    };
+
+    if stops.len() < 2 {
+        diagnostics.push(Diagnostic::error(
+            "gradient.too_few_stops",
+            format!(
+                "gradient token '{}' has {} stop(s); at least 2 are required",
+                token_id,
+                stops.len()
+            ),
+            span,
+            Some(token_id.to_owned()),
+        ));
+        return None;
+    }
+
+    let mut resolved_stops: Vec<(f64, String)> = Vec::with_capacity(stops.len());
+    for stop in stops {
+        if !stop.offset.is_finite() {
+            diagnostics.push(invalid_value(
+                token_id,
+                &format!(
+                    "gradient token '{}' has a non-finite stop offset; \
+                     NaN and ±inf are invalid",
+                    token_id
+                ),
+                span,
+            ));
+            return None;
+        }
+        let clamped = stop.offset.clamp(0.0, 1.0);
+        resolved_stops.push((clamped, stop.color_token.clone()));
+    }
+
+    Some(ResolvedValue::Gradient(ResolvedGradient {
+        angle_deg: *angle_deg,
+        stops: resolved_stops,
+    }))
+}
+
+/// Validate a shadow literal: require ≥1 layer, each dx/dy/blur finite, with
+/// blur clamped to `>= 0`. Layer-color existence/type are NOT checked here —
+/// that requires the full resolved map and runs as a second pass.
+fn validate_shadow(
+    token_id: &str,
+    literal: &TokenLiteral,
+    span: Option<crate::ast::Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<ResolvedValue> {
+    let TokenLiteral::Shadow(ShadowLiteral { layers }) = literal else {
+        diagnostics.push(invalid_value(
+            token_id,
+            &format!(
+                "shadow token '{}' must be defined by `layer` child nodes, got {}",
+                token_id,
+                literal_kind_name(literal),
+            ),
+            span,
+        ));
+        return None;
+    };
+
+    if layers.is_empty() {
+        diagnostics.push(Diagnostic::error(
+            "shadow.no_layers",
+            format!(
+                "shadow token '{}' has no layers; at least 1 is required",
+                token_id
+            ),
+            span,
+            Some(token_id.to_owned()),
+        ));
+        return None;
+    }
+
+    let mut resolved_layers: Vec<ResolvedShadowLayer> = Vec::with_capacity(layers.len());
+    for layer in layers {
+        if !layer.dx.is_finite() || !layer.dy.is_finite() || !layer.blur.is_finite() {
+            diagnostics.push(invalid_value(
+                token_id,
+                &format!(
+                    "shadow token '{}' has a non-finite layer dx/dy/blur; \
+                     NaN and ±inf are invalid",
+                    token_id
+                ),
+                span,
+            ));
+            return None;
+        }
+        resolved_layers.push(ResolvedShadowLayer {
+            dx: layer.dx,
+            dy: layer.dy,
+            blur: layer.blur.max(0.0),
+            color_token: layer.color_token.clone(),
+        });
+    }
+
+    Some(ResolvedValue::Shadow(ResolvedShadow {
+        layers: resolved_layers,
+    }))
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn invalid_value(token_id: &str, message: &str, span: Option<crate::ast::Span>) -> Diagnostic {
@@ -502,6 +765,8 @@ fn literal_kind_name(lit: &TokenLiteral) -> &'static str {
         TokenLiteral::String(_) => "a string literal",
         TokenLiteral::Dimension(_) => "a dimension literal",
         TokenLiteral::Number(_) => "a number literal",
+        TokenLiteral::Gradient(_) => "a gradient literal",
+        TokenLiteral::Shadow(_) => "a shadow literal",
     }
 }
 
@@ -512,6 +777,8 @@ fn type_name_of(t: &TokenType) -> &str {
         TokenType::Number => "number",
         TokenType::FontFamily => "fontFamily",
         TokenType::FontWeight => "fontWeight",
+        TokenType::Gradient => "gradient",
+        TokenType::Shadow => "shadow",
         TokenType::Unknown(s) => s.as_str(),
     }
 }
@@ -984,6 +1251,140 @@ mod tests {
 
     // ── Font family empty ─────────────────────────────────────────────────
 
+    // ── Gradient resolution ───────────────────────────────────────────────
+
+    use crate::ast::token::{GradientLiteral, GradientStopRef};
+
+    fn gradient_token(id: &str, angle_deg: f64, stops: Vec<(f64, &str)>) -> Token {
+        Token {
+            id: id.to_owned(),
+            token_type: TokenType::Gradient,
+            value: TokenValue::Literal(TokenLiteral::Gradient(GradientLiteral {
+                angle_deg,
+                stops: stops
+                    .into_iter()
+                    .map(|(offset, color)| GradientStopRef {
+                        offset,
+                        color_token: color.to_owned(),
+                    })
+                    .collect(),
+            })),
+            source_span: None,
+        }
+    }
+
+    #[test]
+    fn resolves_gradient_with_clamped_offsets() {
+        let b = block(vec![
+            literal_token(
+                "color.top",
+                TokenType::Color,
+                TokenLiteral::String("#001122".to_owned()),
+            ),
+            literal_token(
+                "color.bottom",
+                TokenType::Color,
+                TokenLiteral::String("#334455".to_owned()),
+            ),
+            // Offsets out of range get clamped into 0.0..=1.0.
+            gradient_token(
+                "gradient.bg.hero",
+                90.0,
+                vec![(-0.5, "color.top"), (1.5, "color.bottom")],
+            ),
+        ]);
+        let r = resolve_tokens(&b);
+        assert!(
+            r.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            r.diagnostics
+        );
+        match &r.resolved["gradient.bg.hero"].value {
+            ResolvedValue::Gradient(g) => {
+                assert_eq!(g.angle_deg, 90.0);
+                assert_eq!(
+                    g.stops,
+                    vec![
+                        (0.0, "color.top".to_owned()),
+                        (1.0, "color.bottom".to_owned()),
+                    ]
+                );
+            }
+            other => panic!("expected gradient, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gradient_with_one_stop_produces_too_few_stops() {
+        let b = block(vec![
+            literal_token(
+                "color.top",
+                TokenType::Color,
+                TokenLiteral::String("#001122".to_owned()),
+            ),
+            gradient_token("gradient.bad", 90.0, vec![(0.0, "color.top")]),
+        ]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "gradient.too_few_stops"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+        assert!(!r.resolved.contains_key("gradient.bad"));
+    }
+
+    #[test]
+    fn gradient_stop_missing_token_produces_stop_unresolved() {
+        let b = block(vec![
+            literal_token(
+                "color.top",
+                TokenType::Color,
+                TokenLiteral::String("#001122".to_owned()),
+            ),
+            gradient_token(
+                "gradient.bg",
+                90.0,
+                vec![(0.0, "color.top"), (1.0, "color.does.not.exist")],
+            ),
+        ]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "gradient.stop_unresolved"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+    }
+
+    #[test]
+    fn gradient_stop_wrong_type_produces_stop_wrong_type() {
+        let b = block(vec![
+            literal_token(
+                "color.top",
+                TokenType::Color,
+                TokenLiteral::String("#001122".to_owned()),
+            ),
+            literal_token(
+                "size.not-a-color",
+                TokenType::Dimension,
+                TokenLiteral::Dimension(Dimension {
+                    value: 4.0,
+                    unit: Unit::Px,
+                }),
+            ),
+            gradient_token(
+                "gradient.bg",
+                90.0,
+                vec![(0.0, "color.top"), (1.0, "size.not-a-color")],
+            ),
+        ]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "gradient.stop_wrong_type"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+    }
+
     #[test]
     fn empty_font_family_produces_invalid_value() {
         let b = block(vec![literal_token(
@@ -994,6 +1395,109 @@ mod tests {
         let r = resolve_tokens(&b);
         assert!(
             has_code(&r.diagnostics, "token.invalid_value"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+    }
+
+    // ── Shadow resolution ─────────────────────────────────────────────────
+
+    use crate::ast::token::{ShadowLayerRef, ShadowLiteral};
+
+    fn shadow_token(id: &str, layers: Vec<(f64, f64, f64, &str)>) -> Token {
+        Token {
+            id: id.to_owned(),
+            token_type: TokenType::Shadow,
+            value: TokenValue::Literal(TokenLiteral::Shadow(ShadowLiteral {
+                layers: layers
+                    .into_iter()
+                    .map(|(dx, dy, blur, color)| ShadowLayerRef {
+                        dx,
+                        dy,
+                        blur,
+                        color_token: color.to_owned(),
+                    })
+                    .collect(),
+            })),
+            source_span: None,
+        }
+    }
+
+    #[test]
+    fn resolves_shadow_with_clamped_blur() {
+        let b = block(vec![
+            literal_token(
+                "color.shadow.black",
+                TokenType::Color,
+                TokenLiteral::String("#000000".to_owned()),
+            ),
+            // Negative blur is clamped to 0; offsets pass through.
+            shadow_token(
+                "shadow.headline",
+                vec![(8.0, 8.0, -4.0, "color.shadow.black")],
+            ),
+        ]);
+        let r = resolve_tokens(&b);
+        assert!(
+            r.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            r.diagnostics
+        );
+        match &r.resolved["shadow.headline"].value {
+            ResolvedValue::Shadow(s) => {
+                assert_eq!(s.layers.len(), 1);
+                let layer = &s.layers[0];
+                assert_eq!(layer.dx, 8.0);
+                assert_eq!(layer.dy, 8.0);
+                assert_eq!(layer.blur, 0.0);
+                assert_eq!(layer.color_token, "color.shadow.black");
+            }
+            other => panic!("expected shadow, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn empty_shadow_produces_no_layers() {
+        let b = block(vec![shadow_token("shadow.empty", vec![])]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "shadow.no_layers"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+        assert!(!r.resolved.contains_key("shadow.empty"));
+    }
+
+    #[test]
+    fn shadow_layer_missing_token_produces_layer_unresolved() {
+        let b = block(vec![shadow_token(
+            "shadow.bad",
+            vec![(0.0, 0.0, 20.0, "color.does.not.exist")],
+        )]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "shadow.layer_unresolved"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+    }
+
+    #[test]
+    fn shadow_layer_wrong_type_produces_layer_wrong_type() {
+        let b = block(vec![
+            literal_token(
+                "size.not-a-color",
+                TokenType::Dimension,
+                TokenLiteral::Dimension(Dimension {
+                    value: 4.0,
+                    unit: Unit::Px,
+                }),
+            ),
+            shadow_token("shadow.bad", vec![(0.0, 0.0, 20.0, "size.not-a-color")]),
+        ]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "shadow.layer_wrong_type"),
             "codes: {:?}",
             codes(&r.diagnostics)
         );

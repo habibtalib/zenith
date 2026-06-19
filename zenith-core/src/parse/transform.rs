@@ -17,7 +17,10 @@ use crate::ast::{
         UnknownProperty, UnknownValue,
     },
     style::{Style, StyleBlock, UnknownStyleProp},
-    token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue},
+    token::{
+        GradientLiteral, GradientStopRef, ShadowLayerRef, ShadowLiteral, Token, TokenBlock,
+        TokenLiteral, TokenType, TokenValue,
+    },
     value::{Dimension, PropertyValue, Unit},
 };
 use crate::error::{ParseError, ParseErrorCode};
@@ -472,6 +475,33 @@ fn transform_token(node: &KdlNode) -> Result<Token, ParseError> {
     let type_str = required_string_prop(node, "type")?;
     let token_type = TokenType::from_type_name(type_str);
 
+    // Gradient tokens carry no scalar `value=`; they are built from an optional
+    // `angle=(deg)N` prop plus child `stop` nodes. Prefer this child-node form
+    // even if a stray `value=` entry is also present.
+    if token_type == TokenType::Gradient {
+        let token_value = transform_gradient(node);
+        let source_span = node_span(node);
+        return Ok(Token {
+            id,
+            token_type,
+            value: token_value,
+            source_span,
+        });
+    }
+
+    // Shadow tokens carry no scalar `value=`; they are built from child `layer`
+    // nodes. Prefer this child-node form even if a stray `value=` is present.
+    if token_type == TokenType::Shadow {
+        let token_value = transform_shadow(node);
+        let source_span = node_span(node);
+        return Ok(Token {
+            id,
+            token_type,
+            value: token_value,
+            source_span,
+        });
+    }
+
     let value_entry = node.entry("value").ok_or_else(|| {
         ParseError::spanless(
             ParseErrorCode::InvalidPropertyValue,
@@ -534,6 +564,104 @@ fn transform_token(node: &KdlNode) -> Result<Token, ParseError> {
         value: token_value,
         source_span,
     })
+}
+
+/// Default gradient angle (degrees, clockwise from +x) when `angle=` is absent
+/// or cannot be read as a dimension: 90 = top→bottom.
+const DEFAULT_GRADIENT_ANGLE_DEG: f64 = 90.0;
+
+/// Read the `color=(token)"id"` stop entry as a color token id.
+///
+/// Reuses the `(token)` annotation idiom from `entry_to_property_value`: only a
+/// `token`-annotated string entry yields a stop color. Any other shape (missing,
+/// unannotated, non-string) yields `None` so the stop is skipped.
+fn stop_color_token(node: &KdlNode) -> Option<String> {
+    let entry = node.entry("color")?;
+    match (entry_annotation(entry), entry.value()) {
+        (Some("token"), KdlValue::String(s)) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+/// Build a gradient `TokenValue` from a `token` node's `angle` prop and `stop`
+/// children. Infallible: a malformed gradient simply yields fewer/zero stops,
+/// which the resolver later reports via `gradient.too_few_stops`.
+fn transform_gradient(node: &KdlNode) -> TokenValue {
+    // `angle=(deg)N` is read like other `(deg)` dimensions: take the dimension
+    // `.value` directly as degrees (no dim_to_px conversion). Absent or
+    // unparseable → default.
+    let angle_deg = optional_dimension_prop(node, "angle")
+        .map(|d| d.value)
+        .unwrap_or(DEFAULT_GRADIENT_ANGLE_DEG);
+
+    let mut stops: Vec<GradientStopRef> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() != "stop" {
+                continue;
+            }
+            // A stop without a usable color token ref is meaningless; skip it.
+            let Some(color_token) = stop_color_token(child) else {
+                continue;
+            };
+            let offset = optional_f64_prop(child, "offset").unwrap_or(0.0);
+            stops.push(GradientStopRef {
+                offset,
+                color_token,
+            });
+        }
+    }
+
+    TokenValue::Literal(TokenLiteral::Gradient(GradientLiteral { angle_deg, stops }))
+}
+
+/// Read the `color=(token)"id"` layer entry as a color token id.
+///
+/// Mirrors `stop_color_token`: only a `token`-annotated string entry yields a
+/// layer color. Any other shape yields `None` so the layer is skipped.
+fn layer_color_token(node: &KdlNode) -> Option<String> {
+    let entry = node.entry("color")?;
+    match (entry_annotation(entry), entry.value()) {
+        (Some("token"), KdlValue::String(s)) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+/// Build a shadow `TokenValue` from a `token` node's `layer` children. Each
+/// layer reads `dx`/`dy`/`blur` as `(px)` dimensions (pixel value taken
+/// directly; absent → 0) plus a `color=(token)"id"` color token id. Infallible:
+/// a malformed shadow simply yields fewer/zero layers, which the resolver later
+/// reports via `shadow.no_layers`.
+fn transform_shadow(node: &KdlNode) -> TokenValue {
+    let mut layers: Vec<ShadowLayerRef> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() != "layer" {
+                continue;
+            }
+            // A layer without a usable color token ref is meaningless; skip it.
+            let Some(color_token) = layer_color_token(child) else {
+                continue;
+            };
+            let dx = optional_dimension_prop(child, "dx")
+                .map(|d| d.value)
+                .unwrap_or(0.0);
+            let dy = optional_dimension_prop(child, "dy")
+                .map(|d| d.value)
+                .unwrap_or(0.0);
+            let blur = optional_dimension_prop(child, "blur")
+                .map(|d| d.value)
+                .unwrap_or(0.0);
+            layers.push(ShadowLayerRef {
+                dx,
+                dy,
+                blur,
+                color_token,
+            });
+        }
+    }
+
+    TokenValue::Literal(TokenLiteral::Shadow(ShadowLiteral { layers }))
 }
 
 // ---------------------------------------------------------------------------
@@ -754,6 +882,7 @@ const RECT_KNOWN_PROPS: &[&str] = &[
     "stroke_width",
     "stroke-alignment",
     "stroke_alignment",
+    "shadow",
     "opacity",
     "visible",
     "locked",
@@ -785,6 +914,7 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
         stroke: optional_property_value(node, "stroke"),
         stroke_width,
         stroke_alignment,
+        shadow: optional_property_value(node, "shadow"),
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
@@ -808,6 +938,7 @@ const IMAGE_KNOWN_PROPS: &[&str] = &[
     "object_position_x",
     "object-position-y",
     "object_position_y",
+    "shadow",
     "opacity",
     "visible",
     "locked",
@@ -839,6 +970,7 @@ fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
         fit: optional_string_prop(node, "fit").map(str::to_owned),
         object_position_x,
         object_position_y,
+        shadow: optional_property_value(node, "shadow"),
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
@@ -862,6 +994,7 @@ const ELLIPSE_KNOWN_PROPS: &[&str] = &[
     "stroke",
     "stroke-width",
     "stroke_width",
+    "shadow",
     "opacity",
     "visible",
     "locked",
@@ -888,6 +1021,7 @@ fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
         fill: optional_property_value(node, "fill"),
         stroke: optional_property_value(node, "stroke"),
         stroke_width,
+        shadow: optional_property_value(node, "shadow"),
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
@@ -963,6 +1097,7 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "font_size",
     "font-weight",
     "font_weight",
+    "shadow",
     "opacity",
     "visible",
     "locked",
@@ -1003,6 +1138,7 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         font_family,
         font_size,
         font_weight,
+        shadow: optional_property_value(node, "shadow"),
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),

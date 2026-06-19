@@ -18,5 +18,8 @@ pub use node::{
 };
 pub use span::Span;
 pub use style::{Style, StyleBlock, UnknownStyleProp};
-pub use token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue};
+pub use token::{
+    GradientLiteral, GradientStopRef, ShadowLayerRef, ShadowLiteral, Token, TokenBlock,
+    TokenLiteral, TokenType, TokenValue,
+};
 pub use value::{Dimension, PropertyValue, Unit, dim_to_px};

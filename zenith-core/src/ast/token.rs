@@ -11,6 +11,8 @@ pub enum TokenType {
     Number,
     FontFamily,
     FontWeight,
+    Gradient,
+    Shadow,
     /// An unrecognized token type (forward-compat; version-relative).
     Unknown(String),
 }
@@ -25,6 +27,8 @@ impl TokenType {
             "number" => Self::Number,
             "fontFamily" => Self::FontFamily,
             "fontWeight" => Self::FontWeight,
+            "gradient" => Self::Gradient,
+            "shadow" => Self::Shadow,
             other => Self::Unknown(other.to_owned()),
         }
     }
@@ -39,6 +43,56 @@ pub enum TokenLiteral {
     Dimension(Dimension),
     /// An unannotated finite number, e.g. `1.05` or `700`.
     Number(f64),
+    /// A gradient definition built from child `stop` nodes plus an optional
+    /// `angle`. Gradients have no scalar value; they are carried by this
+    /// dedicated literal variant.
+    Gradient(GradientLiteral),
+    /// A shadow definition built from child `layer` nodes. Shadows have no
+    /// scalar value; they are carried by this dedicated literal variant.
+    Shadow(ShadowLiteral),
+}
+
+/// A linear-gradient token literal: an angle (degrees, clockwise from +x) plus
+/// an ordered list of color stops.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GradientLiteral {
+    /// Angle in degrees, clockwise from +x (0 = left→right, 90 = top→bottom).
+    pub angle_deg: f64,
+    /// Ordered list of stop references, in source order.
+    pub stops: Vec<GradientStopRef>,
+}
+
+/// A single gradient stop: an offset in `0..1` and a reference to a color token.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GradientStopRef {
+    /// Position of the stop along the gradient axis, in `0.0..=1.0`.
+    pub offset: f64,
+    /// The id of the color token this stop renders with.
+    pub color_token: String,
+}
+
+/// A shadow token literal: an ordered list of shadow layers (e.g. a drop
+/// shadow plus an outer glow). At least one layer is required (enforced at
+/// resolution).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShadowLiteral {
+    /// Ordered list of layer references, in source order.
+    pub layers: Vec<ShadowLayerRef>,
+}
+
+/// A single shadow layer: x/y offsets and blur radius (pixels) plus a reference
+/// to a color token. A layer with nonzero dx/dy is a drop shadow; a layer with
+/// dx=dy=0 and a blur is an outer glow.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShadowLayerRef {
+    /// Horizontal offset in pixels.
+    pub dx: f64,
+    /// Vertical offset in pixels.
+    pub dy: f64,
+    /// Blur radius in pixels.
+    pub blur: f64,
+    /// The id of the color token this layer renders with.
+    pub color_token: String,
 }
 
 /// The value of a token — either an inline literal or an alias to another token.
