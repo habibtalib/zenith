@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::{Diagnostic, PropertyValue, ResolvedToken, ResolvedValue};
+use zenith_core::{Diagnostic, GradientKind, PropertyValue, ResolvedToken, ResolvedValue};
 
 use crate::color::{parse_color, parse_srgb_hex};
 use crate::ir::{Color, GradientPaint, GradientStop, ShadowSpec};
@@ -155,6 +155,10 @@ pub(super) fn resolve_property_gradient(
     Some(GradientPaint {
         angle_deg: g.angle_deg,
         stops,
+        radial: matches!(g.kind, GradientKind::Radial),
+        center_x: g.center_x,
+        center_y: g.center_y,
+        radius_frac: g.radius,
     })
 }
 

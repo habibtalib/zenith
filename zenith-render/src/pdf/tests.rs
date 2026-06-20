@@ -230,6 +230,10 @@ fn gradient_scene_renders_shading() {
                     color: Color::srgb(0, 0, 255, 255),
                 },
             ],
+            radial: false,
+            center_x: None,
+            center_y: None,
+            radius_frac: None,
         },
     });
     let bytes = render(&scene);

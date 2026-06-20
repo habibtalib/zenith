@@ -289,6 +289,10 @@ fn emit_command(
         }
 
         // ── Gradient fills ────────────────────────────────────────────────
+        //
+        // PDF v0 limitation: radial gradients have no axial-shading equivalent
+        // and are degraded to a solid fill using the gradient's first stop color,
+        // consistent with the v0 shadow-blur and SVG-asset omissions above.
         SceneCommand::FillRectGradient {
             x,
             y,
@@ -299,7 +303,17 @@ fn emit_command(
             if !rect_ok(*x, *y, *w, *h) {
                 return;
             }
-            if let Some(g) = resolve_gradient(*x, *y, *w, *h, gradient) {
+            if gradient.radial {
+                // Radial PDF degrade: solid fill with first stop color.
+                if let Some(first) = gradient.stops.first() {
+                    content.save_state();
+                    apply_alpha(content, res, &first.color);
+                    color::set_fill(content, &first.color);
+                    content.rect(*x as f32, *y as f32, *w as f32, *h as f32);
+                    content.fill_nonzero();
+                    content.restore_state();
+                }
+            } else if let Some(g) = resolve_gradient(*x, *y, *w, *h, gradient) {
                 let id = push_gradient(res, g);
                 content.save_state();
                 content.rect(*x as f32, *y as f32, *w as f32, *h as f32);
@@ -323,7 +337,17 @@ fn emit_command(
                 return;
             }
             let corner_radii = radii.unwrap_or([*radius; 4]);
-            if let Some(g) = resolve_gradient(*x, *y, *w, *h, gradient) {
+            if gradient.radial {
+                // Radial PDF degrade: solid fill with first stop color.
+                if let Some(first) = gradient.stops.first() {
+                    content.save_state();
+                    apply_alpha(content, res, &first.color);
+                    color::set_fill(content, &first.color);
+                    rounded_rect_path(content, *x, *y, *w, *h, corner_radii);
+                    content.fill_nonzero();
+                    content.restore_state();
+                }
+            } else if let Some(g) = resolve_gradient(*x, *y, *w, *h, gradient) {
                 let id = push_gradient(res, g);
                 content.save_state();
                 rounded_rect_path(content, *x, *y, *w, *h, corner_radii);
@@ -346,7 +370,17 @@ fn emit_command(
             if !rect_ok(*x, *y, *w, *h) {
                 return;
             }
-            if let Some(g) = resolve_gradient(*x, *y, *w, *h, gradient) {
+            if gradient.radial {
+                // Radial PDF degrade: solid fill with first stop color.
+                if let Some(first) = gradient.stops.first() {
+                    content.save_state();
+                    apply_alpha(content, res, &first.color);
+                    color::set_fill(content, &first.color);
+                    ellipse_path(content, *x, *y, *w, *h, *rx, *ry);
+                    content.fill_nonzero();
+                    content.restore_state();
+                }
+            } else if let Some(g) = resolve_gradient(*x, *y, *w, *h, gradient) {
                 let id = push_gradient(res, g);
                 content.save_state();
                 ellipse_path(content, *x, *y, *w, *h, *rx, *ry);

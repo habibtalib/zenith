@@ -148,6 +148,85 @@ fn test_font_size_min_round_trips() {
     );
 }
 
+/// **Radial gradient round-trip**: a `radial=#true` gradient token with
+/// `center-x`, `center-y`, and `radius` params must survive parse → format →
+/// parse with `kind == GradientKind::Radial` and the same params.
+#[test]
+fn test_radial_gradient_round_trips() {
+    use crate::ast::{GradientKind, TokenLiteral, TokenValue};
+
+    let src = r##"zenith version=1 {
+  project id="proj.rgt" name="RGT"
+  tokens format="zenith-token-v1" {
+    token id="color.a" type="color" value="#ffffff"
+    token id="color.b" type="color" value="#000000"
+    token id="grad.r" type="gradient" radial=#true center-x=0.5 center-y=0.5 radius=0.7 {
+      stop offset=0.0 color=(token)"color.a"
+      stop offset=1.0 color=(token)"color.b"
+    }
+  }
+  styles {
+  }
+  document id="doc.rgt" title="RGT" {
+    page id="page.rgt" w=(px)100 h=(px)100 {
+      rect id="r" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fill=(token)"grad.r"
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    let formatted = format_document(&doc).expect("format");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("utf8");
+
+    // Formatted output must contain radial marker and geometry params.
+    assert!(
+        formatted_str.contains("radial=#true"),
+        "formatted output must contain radial=#true; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("center-x=0.5"),
+        "formatted output must contain center-x; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("center-y=0.5"),
+        "formatted output must contain center-y; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("radius=0.7"),
+        "formatted output must contain radius; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse after format");
+    let reparsed2 = adapter
+        .parse(&format_document(&reparsed).expect("format 2"))
+        .expect("re-parse 2");
+
+    // Find the gradient token in the reparsed doc.
+    let grad_token = reparsed2
+        .tokens
+        .tokens
+        .iter()
+        .find(|t| t.id == "grad.r")
+        .expect("grad.r token must survive round-trip");
+    let TokenValue::Literal(TokenLiteral::Gradient(g)) = &grad_token.value else {
+        panic!(
+            "grad.r must be a gradient literal, got {:?}",
+            grad_token.value
+        );
+    };
+    assert_eq!(
+        g.kind,
+        GradientKind::Radial,
+        "kind must be Radial after round-trip"
+    );
+    assert_eq!(g.center_x, Some(0.5));
+    assert_eq!(g.center_y, Some(0.5));
+    assert_eq!(g.radius, Some(0.7));
+    assert_eq!(g.stops.len(), 2);
+}
+
 /// A `.zen` document with a `code` node whose content stresses every escape
 /// path: leading spaces, a blank line, a tab, an embedded quote, and a
 /// literal backslash.

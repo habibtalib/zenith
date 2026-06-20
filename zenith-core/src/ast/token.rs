@@ -52,12 +52,35 @@ pub enum TokenLiteral {
     Shadow(ShadowLiteral),
 }
 
-/// A linear-gradient token literal: an angle (degrees, clockwise from +x) plus
-/// an ordered list of color stops.
+/// Whether a gradient token is linear or radial.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum GradientKind {
+    /// A linear gradient (default). An `angle_deg` controls the gradient line.
+    #[default]
+    Linear,
+    /// A radial gradient. `center_x`, `center_y`, and `radius` control the
+    /// origin and extent, each as a fraction of the bounding box.
+    Radial,
+}
+
+/// A gradient token literal: either linear (angle + stops) or radial
+/// (center + radius + stops).
 #[derive(Debug, Clone, PartialEq)]
 pub struct GradientLiteral {
+    /// Whether the gradient is linear or radial.
+    pub kind: GradientKind,
     /// Angle in degrees, clockwise from +x (0 = left→right, 90 = top→bottom).
+    /// Relevant only for `kind == Linear`; ignored for radial.
     pub angle_deg: f64,
+    /// Radial gradient center X as a fraction of the bounding-box width (0..1).
+    /// `None` defaults to `0.5` (center). Ignored for linear.
+    pub center_x: Option<f64>,
+    /// Radial gradient center Y as a fraction of the bounding-box height (0..1).
+    /// `None` defaults to `0.5` (center). Ignored for linear.
+    pub center_y: Option<f64>,
+    /// Radial gradient radius as a fraction of the box diagonal (`hypot(w,h)/2`).
+    /// `None` defaults to `1.0`. Must be > 0 if specified.
+    pub radius: Option<f64>,
     /// Ordered list of stop references, in source order.
     pub stops: Vec<GradientStopRef>,
 }

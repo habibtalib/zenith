@@ -91,17 +91,37 @@ pub struct GradientStop {
     pub color: Color,
 }
 
-/// A linear gradient fill paint.
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// A gradient fill paint — either linear (default) or radial.
 ///
-/// `angle_deg` is the gradient-line direction in degrees, clockwise from +x
-/// (screen coordinates: +y is downward, so `90` is top-to-bottom). `stops`
-/// holds at least two ordered color stops.
+/// For linear gradients, `angle_deg` controls the gradient line.
+/// For radial gradients, `radial=true` is set and `center_x/center_y/radius_frac`
+/// control the radial geometry (all as fractions of the bounding box).
+///
+/// The `radial` field and the three radial-geometry fields are omitted from
+/// JSON when they hold their zero/none defaults, so existing linear `GradientPaint`
+/// values serialize byte-identically.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GradientPaint {
-    /// Gradient-line angle in degrees, clockwise from +x.
+    /// Gradient-line angle in degrees, clockwise from +x. Ignored for radial.
     pub angle_deg: f64,
     /// Ordered color stops (at least two).
     pub stops: Vec<GradientStop>,
+    /// `true` when this is a radial gradient. Omitted (default false) for linear.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub radial: bool,
+    /// Radial center X as a fraction of bounding-box width. `None` → 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center_x: Option<f64>,
+    /// Radial center Y as a fraction of bounding-box height. `None` → 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center_y: Option<f64>,
+    /// Radial radius as a fraction of `hypot(w, h) / 2`. `None` → 1.0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius_frac: Option<f64>,
 }
 
 // ── Shadow ────────────────────────────────────────────────────────────────────

@@ -21,8 +21,8 @@ use crate::ast::{
     },
     style::{Style, StyleBlock, UnknownStyleProp},
     token::{
-        GradientLiteral, GradientStopRef, ShadowLayerRef, ShadowLiteral, Token, TokenBlock,
-        TokenLiteral, TokenType, TokenValue,
+        GradientKind, GradientLiteral, GradientStopRef, ShadowLayerRef, ShadowLiteral, Token,
+        TokenBlock, TokenLiteral, TokenType, TokenValue,
     },
     value::{Dimension, PropertyValue, Unit},
 };
@@ -703,16 +703,31 @@ fn stop_color_token(node: &KdlNode) -> Option<String> {
     }
 }
 
-/// Build a gradient `TokenValue` from a `token` node's `angle` prop and `stop`
+/// Build a gradient `TokenValue` from a `token` node's props and `stop`
 /// children. Infallible: a malformed gradient simply yields fewer/zero stops,
 /// which the resolver later reports via `gradient.too_few_stops`.
+///
+/// KDL forms:
+/// - Linear: `token … type="gradient" angle=(deg)90 { stop … }`
+/// - Radial:  `token … type="gradient" radial=#true center-x=0.5 center-y=0.5 radius=0.7 { stop … }`
 fn transform_gradient(node: &KdlNode) -> TokenValue {
+    // `radial=#true` → radial gradient; absent or `#false` → linear.
+    let kind = if optional_bool_prop(node, "radial").unwrap_or(false) {
+        GradientKind::Radial
+    } else {
+        GradientKind::Linear
+    };
+
     // `angle=(deg)N` is read like other `(deg)` dimensions: take the dimension
     // `.value` directly as degrees (no dim_to_px conversion). Absent or
     // unparseable → default.
-    let angle_deg = optional_dimension_prop(node, "angle")
-        .map(|d| d.value)
-        .unwrap_or(DEFAULT_GRADIENT_ANGLE_DEG);
+    let angle_deg =
+        optional_dimension_prop(node, "angle").map_or(DEFAULT_GRADIENT_ANGLE_DEG, |d| d.value);
+
+    // Radial-specific geometry params as bare f64 fractions.
+    let center_x = optional_f64_prop(node, "center-x");
+    let center_y = optional_f64_prop(node, "center-y");
+    let radius = optional_f64_prop(node, "radius");
 
     let mut stops: Vec<GradientStopRef> = Vec::new();
     if let Some(children) = node.children() {
@@ -732,7 +747,14 @@ fn transform_gradient(node: &KdlNode) -> TokenValue {
         }
     }
 
-    TokenValue::Literal(TokenLiteral::Gradient(GradientLiteral { angle_deg, stops }))
+    TokenValue::Literal(TokenLiteral::Gradient(GradientLiteral {
+        kind,
+        angle_deg,
+        center_x,
+        center_y,
+        radius,
+        stops,
+    }))
 }
 
 /// Read the `color=(token)"id"` layer entry as a color token id.

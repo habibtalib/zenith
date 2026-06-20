@@ -1462,6 +1462,55 @@ page id="page.g" w=(px)640 h=(px)360 background=(token)"grad.bg" {
     assert!(has_ell_grad, "expected FillEllipseGradient: {cmds:?}");
 }
 
+/// A radial gradient token (`radial=#true`) referenced via `fill=(token)` on
+/// a rect must compile to a `FillRectGradient` with `GradientPaint { radial: true, … }`.
+#[test]
+fn radial_gradient_fill_emits_radial_gradient_paint() {
+    use zenith_scene::ir::GradientPaint;
+    let src = r##"zenith version=1 {
+  project id="proj.rg" name="RG"
+  tokens format="zenith-token-v1" {
+token id="color.inner" type="color" value="#ffffff"
+token id="color.outer" type="color" value="#000000"
+token id="grad.radial" type="gradient" radial=#true center-x=0.5 center-y=0.5 radius=0.8 {
+  stop offset=0.0 color=(token)"color.inner"
+  stop offset=1.0 color=(token)"color.outer"
+}
+  }
+  styles {}
+  document id="doc.rg" title="RG" {
+page id="page.rg" w=(px)100 h=(px)100 {
+  rect id="rect.rg" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fill=(token)"grad.radial"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let cmds = &result.scene.commands;
+    let found = cmds.iter().find_map(|c| {
+        if let SceneCommand::FillRectGradient { gradient, .. } = c {
+            Some(gradient)
+        } else {
+            None
+        }
+    });
+    let grad: &GradientPaint = found.expect("expected FillRectGradient");
+    assert!(grad.radial, "GradientPaint must have radial=true");
+    assert_eq!(grad.center_x, Some(0.5));
+    assert_eq!(grad.center_y, Some(0.5));
+    assert_eq!(grad.radius_frac, Some(0.8));
+    assert_eq!(grad.stops.len(), 2);
+    assert_eq!(grad.stops[0].color.r, 0xff);
+    assert_eq!(grad.stops[1].color.r, 0x00);
+}
+
 /// A SOLID color fill must still emit the plain `FillRect` / `FillEllipse`
 /// (the gradient path must not perturb the solid path).
 #[test]

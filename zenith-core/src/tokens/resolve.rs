@@ -18,7 +18,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::ast::token::{
-    GradientLiteral, ShadowLiteral, Token, TokenBlock, TokenLiteral, TokenType, TokenValue,
+    GradientKind, GradientLiteral, ShadowLiteral, Token, TokenBlock, TokenLiteral, TokenType,
+    TokenValue,
 };
 use crate::ast::value::{Dimension, Unit};
 use crate::diagnostics::Diagnostic;
@@ -71,13 +72,22 @@ impl ResolvedValue {
     }
 }
 
-/// A resolved gradient: an angle plus an ordered list of `(offset, color token
-/// id)` stops. Offsets are clamped into `0.0..=1.0`. Stop-color existence and
-/// type are checked in a second pass over the fully-resolved token map.
+/// A resolved gradient: either linear (angle + stops) or radial
+/// (center + radius + stops). Offsets are clamped into `0.0..=1.0`.
+/// Stop-color existence and type are checked in a second pass over the
+/// fully-resolved token map.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedGradient {
-    /// Angle in degrees, clockwise from +x.
+    /// Whether this is a linear or radial gradient.
+    pub kind: GradientKind,
+    /// Angle in degrees, clockwise from +x. Relevant only for `kind == Linear`.
     pub angle_deg: f64,
+    /// Radial center X fraction of bounding-box width. `None` → 0.5.
+    pub center_x: Option<f64>,
+    /// Radial center Y fraction of bounding-box height. `None` → 0.5.
+    pub center_y: Option<f64>,
+    /// Radial radius fraction of box diagonal (`hypot(w,h)/2`). `None` → 1.0.
+    pub radius: Option<f64>,
     /// Ordered `(offset, color_token_id)` stops.
     pub stops: Vec<(f64, String)>,
 }
@@ -693,7 +703,15 @@ fn validate_gradient(
     span: Option<crate::ast::Span>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<ResolvedValue> {
-    let TokenLiteral::Gradient(GradientLiteral { angle_deg, stops }) = literal else {
+    let TokenLiteral::Gradient(GradientLiteral {
+        kind,
+        angle_deg,
+        center_x,
+        center_y,
+        radius,
+        stops,
+    }) = literal
+    else {
         diagnostics.push(invalid_value(
             token_id,
             &format!(
@@ -720,6 +738,23 @@ fn validate_gradient(
         return None;
     }
 
+    // Validate radial-specific params.
+    if let Some(r) = radius
+        && (!r.is_finite() || *r <= 0.0)
+    {
+        diagnostics.push(Diagnostic::error(
+            "gradient.invalid_radius",
+            format!(
+                "gradient token '{}' has an invalid radius {}; \
+                 radius must be a finite positive number",
+                token_id, r,
+            ),
+            span,
+            Some(token_id.to_owned()),
+        ));
+        return None;
+    }
+
     let mut resolved_stops: Vec<(f64, String)> = Vec::with_capacity(stops.len());
     for stop in stops {
         if !stop.offset.is_finite() {
@@ -739,7 +774,11 @@ fn validate_gradient(
     }
 
     Some(ResolvedValue::Gradient(ResolvedGradient {
+        kind: *kind,
         angle_deg: *angle_deg,
+        center_x: *center_x,
+        center_y: *center_y,
+        radius: *radius,
         stops: resolved_stops,
     }))
 }
@@ -1408,14 +1447,18 @@ mod tests {
 
     // ── Gradient resolution ───────────────────────────────────────────────
 
-    use crate::ast::token::{GradientLiteral, GradientStopRef};
+    use crate::ast::token::{GradientKind, GradientLiteral, GradientStopRef};
 
     fn gradient_token(id: &str, angle_deg: f64, stops: Vec<(f64, &str)>) -> Token {
         Token {
             id: id.to_owned(),
             token_type: TokenType::Gradient,
             value: TokenValue::Literal(TokenLiteral::Gradient(GradientLiteral {
+                kind: GradientKind::Linear,
                 angle_deg,
+                center_x: None,
+                center_y: None,
+                radius: None,
                 stops: stops
                     .into_iter()
                     .map(|(offset, color)| GradientStopRef {
@@ -1538,6 +1581,111 @@ mod tests {
             "codes: {:?}",
             codes(&r.diagnostics)
         );
+    }
+
+    // ── Radial gradient resolution ────────────────────────────────────────
+
+    fn radial_gradient_token(
+        id: &str,
+        center_x: Option<f64>,
+        center_y: Option<f64>,
+        radius: Option<f64>,
+        stops: Vec<(f64, &str)>,
+    ) -> Token {
+        Token {
+            id: id.to_owned(),
+            token_type: TokenType::Gradient,
+            value: TokenValue::Literal(TokenLiteral::Gradient(GradientLiteral {
+                kind: GradientKind::Radial,
+                angle_deg: 90.0,
+                center_x,
+                center_y,
+                radius,
+                stops: stops
+                    .into_iter()
+                    .map(|(offset, color)| GradientStopRef {
+                        offset,
+                        color_token: color.to_owned(),
+                    })
+                    .collect(),
+            })),
+            source_span: None,
+        }
+    }
+
+    #[test]
+    fn resolves_radial_gradient_with_params() {
+        let b = block(vec![
+            literal_token(
+                "color.inner",
+                TokenType::Color,
+                TokenLiteral::String("#ffffff".to_owned()),
+            ),
+            literal_token(
+                "color.outer",
+                TokenType::Color,
+                TokenLiteral::String("#000000".to_owned()),
+            ),
+            radial_gradient_token(
+                "gradient.radial.hero",
+                Some(0.5),
+                Some(0.5),
+                Some(0.8),
+                vec![(0.0, "color.inner"), (1.0, "color.outer")],
+            ),
+        ]);
+        let r = resolve_tokens(&b);
+        assert!(
+            r.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            r.diagnostics
+        );
+        match &r.resolved["gradient.radial.hero"].value {
+            ResolvedValue::Gradient(g) => {
+                assert_eq!(g.kind, GradientKind::Radial);
+                assert_eq!(g.center_x, Some(0.5));
+                assert_eq!(g.center_y, Some(0.5));
+                assert_eq!(g.radius, Some(0.8));
+                assert_eq!(
+                    g.stops,
+                    vec![
+                        (0.0, "color.inner".to_owned()),
+                        (1.0, "color.outer".to_owned()),
+                    ]
+                );
+            }
+            other => panic!("expected gradient, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn radial_gradient_zero_radius_produces_invalid_radius() {
+        let b = block(vec![
+            literal_token(
+                "color.a",
+                TokenType::Color,
+                TokenLiteral::String("#aabbcc".to_owned()),
+            ),
+            literal_token(
+                "color.b",
+                TokenType::Color,
+                TokenLiteral::String("#112233".to_owned()),
+            ),
+            radial_gradient_token(
+                "gradient.bad.radius",
+                None,
+                None,
+                Some(0.0), // zero radius → invalid
+                vec![(0.0, "color.a"), (1.0, "color.b")],
+            ),
+        ]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "gradient.invalid_radius"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+        assert!(!r.resolved.contains_key("gradient.bad.radius"));
     }
 
     #[test]

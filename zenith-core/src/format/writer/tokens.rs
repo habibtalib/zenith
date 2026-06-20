@@ -1,7 +1,7 @@
 //! Token-block writing: the `tokens { … }` block plus per-token emission,
 //! including the gradient/shadow brace-block forms and token-literal values.
 
-use crate::ast::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue};
+use crate::ast::{GradientKind, Token, TokenBlock, TokenLiteral, TokenType, TokenValue};
 
 use super::{fmt_dimension, fmt_f64, indent};
 
@@ -42,11 +42,31 @@ fn write_token(token: &Token, out: &mut String, depth: usize) {
     out.push_str(type_str);
     out.push('"');
 
-    // Gradient tokens have no scalar `value=`; they emit an `angle` prop plus a
-    // brace block of `stop` children. Handle and return before the value path.
+    // Gradient tokens have no scalar `value=`; linear gradients emit an `angle`
+    // prop; radial gradients emit `radial=#true` plus optional geometry params.
+    // Both are followed by a brace block of `stop` children.
     if let TokenValue::Literal(TokenLiteral::Gradient(g)) = &token.value {
-        out.push_str(" angle=(deg)");
-        out.push_str(&fmt_f64(g.angle_deg));
+        match g.kind {
+            GradientKind::Linear => {
+                out.push_str(" angle=(deg)");
+                out.push_str(&fmt_f64(g.angle_deg));
+            }
+            GradientKind::Radial => {
+                out.push_str(" radial=#true");
+                if let Some(cx) = g.center_x {
+                    out.push_str(" center-x=");
+                    out.push_str(&fmt_f64(cx));
+                }
+                if let Some(cy) = g.center_y {
+                    out.push_str(" center-y=");
+                    out.push_str(&fmt_f64(cy));
+                }
+                if let Some(r) = g.radius {
+                    out.push_str(" radius=");
+                    out.push_str(&fmt_f64(r));
+                }
+            }
+        }
         out.push_str(" {\n");
         for stop in &g.stops {
             indent(out, depth + 1);
