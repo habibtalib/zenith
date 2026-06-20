@@ -129,6 +129,11 @@ pub struct RenderArgs {
     #[arg(long, value_name = "DIR")]
     pub all_pages: Option<PathBuf>,
 
+    /// Render two facing pages side by side as a single PNG, e.g. `--spread 10-11`
+    /// (1-based page numbers; A on the left, B on the right). Requires `--png`.
+    #[arg(long, value_name = "A-B")]
+    pub spread: Option<String>,
+
     /// Verify each image asset's bytes against its declared `sha256` and fail on mismatch.
     #[arg(long)]
     pub locked: bool,

@@ -16,7 +16,7 @@ use zenith_core::{
     AssetKind, BytesAssetProvider, BytesFontProvider, Diagnostic, Document, KdlAdapter, KdlSource,
     default_provider, validate,
 };
-use zenith_render::{render_pdf, render_png};
+use zenith_render::{render_pdf, render_png, render_spread_png};
 use zenith_scene::compile_page;
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -230,6 +230,47 @@ pub fn to_png_all_pages(
         artifacts.push(PngArtifact { png, diagnostics });
     }
     Ok(artifacts)
+}
+
+/// Parse `src`, validate it, compile pages `page_a` and `page_b` (both 1-based),
+/// composite them side by side (A on the left, B on the right), and return the
+/// spread PNG bytes plus the merged compile-stage diagnostics.
+///
+/// The output canvas width is `page_a_width + page_b_width`; its height is the
+/// max of the two page heights. Image/SVG/font asset bytes are sourced from
+/// `project_dir` (shared across both pages) exactly like [`to_png_with_dir`].
+///
+/// Returns `Err` when:
+/// - The source fails to parse (exit code 2).
+/// - The document has validation errors (exit code 1).
+/// - Either page is out of range (exit code 2).
+/// - Rendering or compositing fails (exit code 2).
+pub fn to_png_spread(
+    src: &str,
+    project_dir: Option<&Path>,
+    page_a: usize,
+    page_b: usize,
+    locked: bool,
+) -> Result<PngArtifact, RenderCmdErr> {
+    let doc = parse_validate(src)?;
+    let fonts = build_font_provider(&doc, project_dir, locked)?;
+    let index_a = resolve_page_index(&doc, page_a)?;
+    let index_b = resolve_page_index(&doc, page_b)?;
+    let assets = match project_dir {
+        Some(dir) => build_asset_provider(&doc, dir, locked)?,
+        None => BytesAssetProvider::new(),
+    };
+    let compile_a = compile_page(&doc, &fonts, index_a);
+    let compile_b = compile_page(&doc, &fonts, index_b);
+    let png = render_spread_png(&compile_a.scene, &compile_b.scene, &fonts, &assets)
+        .map_err(|e| RenderCmdErr::new(format!("spread render error: {e}"), 2))?;
+    let mut diagnostics = match project_dir {
+        Some(dir) => collect_missing_asset_diagnostics(&doc, dir),
+        None => Vec::new(),
+    };
+    diagnostics.extend(compile_a.diagnostics);
+    diagnostics.extend(compile_b.diagnostics);
+    Ok(PngArtifact { png, diagnostics })
 }
 
 /// Build a [`BytesFontProvider`] preloaded with bundled fonts and any

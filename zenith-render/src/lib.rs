@@ -14,4 +14,4 @@ mod tiny_skia;
 pub use backend::{RasterBackend, RasterImage};
 pub use error::RenderError;
 pub use pdf::render_pdf;
-pub use render::{render_image, render_png};
+pub use render::{composite_spread, render_image, render_png, render_spread_png};

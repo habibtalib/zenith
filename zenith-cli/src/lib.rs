@@ -115,6 +115,66 @@ pub fn run() -> ExitCode {
                 }
             };
 
+            // --spread ────────────────────────────────────────────────────────
+            // When set, parse the "A-B" page pair up front and render a single
+            // composited PNG to the --png target. --spread requires --png; it is
+            // mutually exclusive with --pdf (deferred) and takes over the --png
+            // target (the normal single-page --png render is skipped below).
+            if let Some(spread_spec) = &args.spread {
+                let png_out = match &args.png {
+                    Some(p) => p,
+                    None => {
+                        eprintln!("error: --spread requires --png <OUT>");
+                        return ExitCode::from(2);
+                    }
+                };
+                if args.pdf.is_some() {
+                    eprintln!("error: --spread cannot be combined with --pdf (not supported)");
+                    return ExitCode::from(2);
+                }
+                let (page_a, page_b) = match parse_spread_spec(spread_spec) {
+                    Ok(pair) => pair,
+                    Err(msg) => {
+                        eprintln!("{}", msg);
+                        return ExitCode::from(2);
+                    }
+                };
+                match commands::render::to_png_spread(
+                    &src,
+                    args.path.parent(),
+                    page_a,
+                    page_b,
+                    args.locked,
+                ) {
+                    Ok(artifact) => {
+                        let n_hard = count_hard_diagnostics(&artifact.diagnostics);
+                        if n_hard > 0 {
+                            print_diagnostics_stderr(&artifact.diagnostics);
+                            eprintln!("render blocked by {} hard diagnostic(s)", n_hard);
+                            return ExitCode::from(2);
+                        }
+                        if let Err(e) = write_bytes(png_out, &artifact.png) {
+                            eprintln!("error writing PNG to '{}': {}", png_out.display(), e);
+                            return ExitCode::from(2);
+                        }
+                        if args.json {
+                            let out = RenderOutput {
+                                schema: "zenith-render-v1",
+                                diagnostics: artifact.diagnostics.iter().map(Into::into).collect(),
+                            };
+                            println!("{}", serialize_pretty(&out));
+                        } else {
+                            println!("spread PNG written to '{}'", png_out.display());
+                            print_diagnostics_stderr(&artifact.diagnostics);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{}", e.message);
+                        return ExitCode::from(e.exit_code);
+                    }
+                }
+            }
+
             // --scene ─────────────────────────────────────────────────────────
             if let Some(scene_out) = &args.scene {
                 match commands::render::to_scene_json(&src, args.path.parent(), args.page) {
@@ -149,7 +209,9 @@ pub fn run() -> ExitCode {
             }
 
             // --png ───────────────────────────────────────────────────────────
-            if let Some(png_out) = &args.png {
+            // Skipped when --spread is active: the spread branch above already
+            // wrote the composited image to the --png target.
+            if let (Some(png_out), None) = (&args.png, &args.spread) {
                 // Source image asset bytes relative to the .zen file's parent
                 // directory so `image` nodes render their raster.
                 match commands::render::to_png_with_dir(
@@ -367,6 +429,28 @@ fn count_hard_diagnostics(diagnostics: &[zenith_core::Diagnostic]) -> usize {
         .iter()
         .filter(|d| d.severity == zenith_core::Severity::Error)
         .count()
+}
+
+/// Parse a `--spread` spec of the form `"A-B"` (two 1-based page numbers) into
+/// `(a, b)`.
+///
+/// Returns a human-readable error message (never panics) when the spec is not
+/// exactly two dash-separated positive integers.
+fn parse_spread_spec(spec: &str) -> Result<(usize, usize), String> {
+    let err = || {
+        format!(
+            "error: invalid --spread value {:?} (expected two 1-based page \
+             numbers like \"10-11\")",
+            spec
+        )
+    };
+    let (a_str, b_str) = spec.split_once('-').ok_or_else(err)?;
+    let a: usize = a_str.trim().parse().map_err(|_| err())?;
+    let b: usize = b_str.trim().parse().map_err(|_| err())?;
+    if a == 0 || b == 0 {
+        return Err(err());
+    }
+    Ok((a, b))
 }
 
 // ── I/O helpers ───────────────────────────────────────────────────────────────
