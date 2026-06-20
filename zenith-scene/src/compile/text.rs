@@ -35,6 +35,9 @@ pub(super) struct WordToken {
     pub(super) color: Color,
     pub(super) underline: bool,
     pub(super) strikethrough: bool,
+    /// Super/subscript baseline shift in pixels (negative = up; 0 = baseline).
+    /// Applied per-glyph-run by [`emit_lines`] on top of the line baseline.
+    pub(super) baseline_dy: f64,
 }
 
 /// One packed line: its words plus the summed content width (no trailing space).
@@ -61,6 +64,11 @@ pub(super) struct ResolvedSpan {
     pub(super) strikethrough: bool,
     pub(super) weight: u16,
     pub(super) style: FontStyle,
+    /// The span's OWN font size (reduced for super/subscript). When equal to the
+    /// shared node size, shaping is byte-identical to the size-less form.
+    pub(super) font_size: f32,
+    /// Super/subscript baseline shift in pixels (negative = up; 0 = baseline).
+    pub(super) baseline_dy: f64,
 }
 
 /// Tokenise resolved spans into per-word [`WordToken`]s (one re-shape per word,
@@ -86,13 +94,18 @@ pub(super) fn shape_words(
     let mut have_metrics = false;
 
     for shaped in spans {
+        // A super/subscript span carries its own reduced size; a baseline span
+        // uses the shared node `font_size`. Metrics (ascent/line_height) are
+        // captured ONLY from a full-size word so the line grid stays uniform.
+        let is_vertical_align = shaped.baseline_dy != 0.0;
+        let word_font_size = shaped.font_size;
         for word in shaped.text.split_whitespace() {
             let req = ShapeRequest {
                 text: word,
                 families,
                 weight: shaped.weight,
                 style: shaped.style,
-                font_size,
+                font_size: word_font_size,
             };
             match engine.shape_with_fallback(&req, fonts) {
                 Err(e) => {
@@ -104,7 +117,10 @@ pub(super) fn shape_words(
                     ));
                 }
                 Ok(runs) => {
-                    if !have_metrics && let Some(first) = runs.first() {
+                    if !have_metrics
+                        && !is_vertical_align
+                        && let Some(first) = runs.first()
+                    {
                         metrics.ascent = first.ascent as f64;
                         metrics.line_height = first.line_height as f64;
                         have_metrics = true;
@@ -115,6 +131,7 @@ pub(super) fn shape_words(
                         color: shaped.color,
                         underline: shaped.underline,
                         strikethrough: shaped.strikethrough,
+                        baseline_dy: shaped.baseline_dy,
                         runs,
                     });
                 }
@@ -174,6 +191,12 @@ pub(super) fn pack_lines(tokens: Vec<WordToken>, box_w: f64, space_advance: f64)
 ///
 /// This is the EXACT emit body lifted out of `compile_text`'s wrap path so the
 /// single-box and chain renderers produce byte-identical command streams.
+///
+/// `justify_final_line` controls the LAST line of THIS batch under
+/// `align="justify"`: `false` (the single-box wrap path and the FINAL chain
+/// box) leaves it ragged per paragraph semantics; `true` (a non-final chain box
+/// whose flow continues into the next box) keeps it justified, since the text
+/// does not actually end at this box's last line.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn emit_lines(
     lines: &[Line],
@@ -184,6 +207,7 @@ pub(super) fn emit_lines(
     metrics: WordMetrics,
     font_size: f32,
     deco_thickness: f64,
+    justify_final_line: bool,
     commands: &mut Vec<SceneCommand>,
 ) {
     let ascent = metrics.ascent;
@@ -198,8 +222,16 @@ pub(super) fn emit_lines(
             "center" => (text_x + (box_w - line.content_w) / 2.0, space_advance),
             "end" => (text_x + (box_w - line.content_w), space_advance),
             "justify" => {
-                if i != last_idx && word_count > 1 {
-                    let extra = (box_w - line.content_w) / (word_count as f64 - 1.0);
+                // Justify stretches inter-word gaps so a non-final, multi-word
+                // line fills the box. The final line and single-word lines stay
+                // at the start offset (paragraph semantics). `extra` is clamped
+                // ≥ 0 so an overlong line (content_w > box_w) never SHRINKS gaps
+                // below the normal space; `word_count > 1` guards the divisor.
+                // A continuation chain box (`justify_final_line`) justifies its
+                // own last line too, since the paragraph flows on past it.
+                let is_final_line = i == last_idx && !justify_final_line;
+                if !is_final_line && word_count > 1 {
+                    let extra = (box_w - line.content_w).max(0.0) / (word_count as f64 - 1.0);
                     (text_x, space_advance + extra)
                 } else {
                     (text_x, space_advance)
@@ -261,13 +293,16 @@ pub(super) fn emit_lines(
             }
         }
 
-        // Glyphs.
+        // Glyphs. A super/subscript word carries a non-zero `baseline_dy`,
+        // shifting its runs off the shared line baseline (negative = up); a
+        // baseline word has dy 0 and is byte-identical to before.
         for (wi, word) in line.words.iter().enumerate() {
             let mut run_x = word_x.get(wi).copied().unwrap_or(base_x);
+            let word_baseline_y = baseline_y + word.baseline_dy;
             for run in &word.runs {
                 commands.push(SceneCommand::DrawGlyphRun {
                     x: run_x,
-                    y: baseline_y,
+                    y: word_baseline_y,
                     font_id: run.font_id.clone(),
                     font_size: run.font_size,
                     color: word.color,
@@ -384,6 +419,10 @@ fn render_chain_member(
         assignment.metrics,
         font_size,
         deco_thickness,
+        // Only the FINAL chain member leaves its last line ragged under
+        // justify; a continuation box justifies its last line because the
+        // paragraph flows on into the next box.
+        !assignment.is_last_member,
         commands,
     );
 
@@ -468,6 +507,36 @@ pub(super) fn resolve_family_with_fallback(
         (requested.to_owned(), false)
     } else {
         (default_family.to_owned(), true)
+    }
+}
+
+/// Superscript/subscript font-size scale factor applied to a span's resolved
+/// size (deterministic). A `vertical-align="super"`/`"sub"` span is typeset at
+/// `0.65 ×` the full font size.
+const VALIGN_SCALE: f64 = 0.65;
+/// Superscript baseline shift as a fraction of the FULL font size: the baseline
+/// is raised (negative = up) by `0.34 × full_font_size`.
+const VALIGN_SUPER_SHIFT: f64 = 0.34;
+/// Subscript baseline shift as a fraction of the FULL font size: the baseline is
+/// lowered by `0.16 × full_font_size`.
+const VALIGN_SUB_SHIFT: f64 = 0.16;
+
+/// Resolve a span's `vertical-align` into `(span_font_size, baseline_dy)`.
+///
+/// `node_font_size` is the full (node-resolved) size. For `"super"`/`"sub"` the
+/// span size is reduced by [`VALIGN_SCALE`] and the baseline is shifted by a
+/// fraction of the FULL size ([`VALIGN_SUPER_SHIFT`] up / [`VALIGN_SUB_SHIFT`]
+/// down). Any other / absent value returns the full size and a zero shift, so a
+/// span without vertical-align is byte-identical to before.
+pub(super) fn resolve_vertical_align(
+    vertical_align: Option<&str>,
+    node_font_size: f32,
+) -> (f32, f64) {
+    let full = node_font_size as f64;
+    match vertical_align {
+        Some("super") => ((full * VALIGN_SCALE) as f32, -(full * VALIGN_SUPER_SHIFT)),
+        Some("sub") => ((full * VALIGN_SCALE) as f32, full * VALIGN_SUB_SHIFT),
+        _ => (node_font_size, 0.0),
     }
 }
 
@@ -635,6 +704,13 @@ pub(super) fn compile_text(
     // Per-shaped-span record: (run, color, underline, strikethrough).
     // `text`/`weight`/`style` are retained so the wrap path can re-shape
     // individual words without re-running color/weight/style resolution.
+    //
+    // `font_size` is the span's OWN resolved size (reduced for super/subscript,
+    // equal to the node size otherwise); `baseline_dy` is the super/subscript
+    // baseline shift in pixels (negative = up). `vertical_align` flags a
+    // super/subscript span so the emit path positions it against the SHARED
+    // full-size baseline + `baseline_dy` instead of its own reduced ascent —
+    // keeping plain spans byte-identical to before.
     struct ShapedSpan {
         run: ZenithGlyphRun,
         color: Color,
@@ -643,11 +719,19 @@ pub(super) fn compile_text(
         text: String,
         weight: u16,
         style: FontStyle,
+        font_size: f32,
+        baseline_dy: f64,
+        vertical_align: bool,
     }
 
     // ── Pass 1: shape ────────────────────────────────────────────────
     let mut shaped_spans: Vec<ShapedSpan> = Vec::new();
     let mut total_advance: f64 = 0.0;
+    // Shared FULL-size ascent, captured from the first full-size (non
+    // super/subscript) run. Super/subscript spans position against this shared
+    // baseline + their `baseline_dy` so their reduced ascent does not move them
+    // off the run's baseline. `None` until a full-size span is shaped.
+    let mut node_ascent: Option<f64> = None;
 
     for span in &text.spans {
         if span.text.is_empty() {
@@ -672,12 +756,18 @@ pub(super) fn compile_text(
             FontStyle::Normal
         };
 
+        // Per-span super/subscript: a reduced size + a baseline shift relative
+        // to the node's FULL font size. Absent → full size, zero shift.
+        let (span_font_size, baseline_dy) =
+            resolve_vertical_align(span.vertical_align.as_deref(), font_size);
+        let is_vertical_align = baseline_dy != 0.0;
+
         let req = ShapeRequest {
             text: &span.text,
             families: &families,
             weight,
             style,
-            font_size,
+            font_size: span_font_size,
         };
 
         // Shape with per-glyph font fallback: a span whose characters are all
@@ -699,6 +789,11 @@ pub(super) fn compile_text(
             Ok(runs) => {
                 for (i, run) in runs.into_iter().enumerate() {
                     total_advance += run.advance_width as f64;
+                    // Capture the first FULL-size run's ascent as the shared
+                    // baseline reference for super/subscript spans.
+                    if !is_vertical_align && node_ascent.is_none() {
+                        node_ascent = Some(run.ascent as f64);
+                    }
                     // The WRAP path re-tokenizes whole words and re-shapes them
                     // (with per-glyph fallback) from `text`. A word can straddle
                     // a sub-run boundary, so to keep word boundaries intact the
@@ -718,6 +813,9 @@ pub(super) fn compile_text(
                         text: run_text,
                         weight,
                         style,
+                        font_size: span_font_size,
+                        baseline_dy,
+                        vertical_align: is_vertical_align,
                     });
                 }
             }
@@ -809,18 +907,26 @@ pub(super) fn compile_text(
 
         for shaped in shaped_spans {
             let run_advance = shaped.run.advance_width as f64;
-            let baseline_y = text_y + shaped.run.ascent as f64;
+            // A super/subscript span sits on the SHARED full-size baseline plus
+            // its baseline shift; a plain span keeps its own run ascent (so
+            // documents without vertical-align are byte-identical). When no
+            // full-size span was shaped, fall back to the span's own ascent.
+            let baseline_y = if shaped.vertical_align {
+                text_y + node_ascent.unwrap_or(shaped.run.ascent as f64) + shaped.baseline_dy
+            } else {
+                text_y + shaped.run.ascent as f64
+            };
             let glyphs = run_to_scene_glyphs(&shaped.run);
 
             // Per-span decorations: a thin filled rule in the span's own
             // color, spanning the run's advance. Position/thickness are
-            // derived from the font size (the shaped run does not expose the
-            // font's underline metrics) — a deterministic v0 approximation.
+            // derived from the SPAN's font size (reduced for super/subscript) —
+            // a deterministic v0 approximation.
             // Emitted before the glyphs so the text sits on top of any overlap.
             if shaped.underline {
                 commands.push(SceneCommand::FillRect {
                     x: x_cursor,
-                    y: baseline_y + font_size as f64 * 0.12,
+                    y: baseline_y + shaped.font_size as f64 * 0.12,
                     w: run_advance,
                     h: deco_thickness,
                     color: shaped.color,
@@ -829,7 +935,7 @@ pub(super) fn compile_text(
             if shaped.strikethrough {
                 commands.push(SceneCommand::FillRect {
                     x: x_cursor,
-                    y: baseline_y - font_size as f64 * 0.30,
+                    y: baseline_y - shaped.font_size as f64 * 0.30,
                     w: run_advance,
                     h: deco_thickness,
                     color: shaped.color,
@@ -864,6 +970,8 @@ pub(super) fn compile_text(
                 strikethrough: s.strikethrough,
                 weight: s.weight,
                 style: s.style,
+                font_size: s.font_size,
+                baseline_dy: s.baseline_dy,
             })
             .collect();
 
@@ -893,6 +1001,9 @@ pub(super) fn compile_text(
             metrics,
             font_size,
             deco_thickness,
+            // Single-box wrap: the batch's last line IS the paragraph's last
+            // line → leave it ragged under justify.
+            false,
             commands,
         );
     }

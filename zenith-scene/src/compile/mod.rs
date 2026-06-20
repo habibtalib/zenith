@@ -37,7 +37,7 @@ use zenith_layout::RustybuzzEngine;
 
 use crate::ir::{Rect, Scene, SceneCommand};
 
-use chain::{ChainAssignments, resolve_chains};
+use chain::{ChainAssignments, resolve_chains_document};
 use container::{compile_frame, compile_group, compile_instance};
 use image::compile_image;
 use leaf::{compile_ellipse, compile_line, compile_polygon, compile_polyline, compile_rect};
@@ -295,19 +295,25 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
         }
     }
 
-    // ── Step 6: threaded-text chain pre-pass ─────────────────────────────
-    // Resolve every text chain ONCE (deterministic source-order walk into
-    // frames + groups), distributing the source article across each member's
-    // box. Non-chain pages yield an empty map → compile_text is unaffected.
+    // ── Step 6: threaded-text chain pre-pass (DOCUMENT-WIDE) ─────────────
+    // Resolve every text chain ONCE across ALL pages (deterministic
+    // page-then-source-order walk into frames + groups), distributing each
+    // chain's source article across every member's box — flowing across page
+    // boundaries. The map is keyed by global node id; this page's nodes look up
+    // the slice assigned to them. Chains' diagnostics (e.g. a source font
+    // fallback) are document-wide and would otherwise be emitted once per page;
+    // they are collected into a throwaway buffer here and only the diagnostics
+    // attributable to THIS page's chain members would be surfaced — but since
+    // distribution is global, we keep the page-local behaviour deterministic by
+    // discarding the pre-pass's own advisories on non-zero pages (they were
+    // already surfaced on page 0). Page 0 keeps them.
     let engine = RustybuzzEngine::new();
-    let chains = resolve_chains(
-        &page.children,
-        resolved,
-        &style_map,
-        fonts,
-        &engine,
-        &mut diagnostics,
-    );
+    let mut chain_diags: Vec<Diagnostic> = Vec::new();
+    let chains =
+        resolve_chains_document(doc, resolved, &style_map, fonts, &engine, &mut chain_diags);
+    if page_index == 0 {
+        diagnostics.extend(chain_diags);
+    }
 
     // ── Step 7: children in source order (z-order: first = bottom) ───────
     for node in &page.children {

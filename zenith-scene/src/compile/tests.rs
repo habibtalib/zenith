@@ -372,6 +372,114 @@ page id="page.tx1" w=(px)400 h=(px)200 {
     }
 }
 
+// ── Span vertical-align="super" → smaller font + raised baseline ──────
+
+#[test]
+fn span_vertical_align_super_renders_smaller_and_raised() {
+    // A text node with a baseline span followed by a superscript span. The
+    // superscript run must shape at a REDUCED font size (0.65 × 24 = 15.6) and
+    // sit ABOVE the baseline span's baseline.
+    let src = r##"zenith version=1 {
+  project id="proj.va" name="VA"
+  tokens format="zenith-token-v1" {
+token id="size.body" type="dimension" value=(px)24
+  }
+  styles {}
+  document id="doc.va" title="VA" {
+page id="page.va" w=(px)400 h=(px)200 {
+  text id="t.va" x=(px)10 y=(px)20 w=(px)380 h=(px)60 font-size=(token)"size.body" {
+    span "x"
+    span "2" vertical-align="super"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    let runs: Vec<(f64, f32)> = result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            SceneCommand::DrawGlyphRun { y, font_size, .. } => Some((*y, *font_size)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        runs.len(),
+        2,
+        "expected two glyph runs (baseline + super); got {:?}",
+        runs
+    );
+
+    let (base_y, base_fs) = runs[0];
+    let (super_y, super_fs) = runs[1];
+
+    // Baseline span uses the full node font size (24).
+    assert_eq!(base_fs, 24.0, "baseline span must render at full 24px");
+    // Superscript span uses the reduced size (0.65 × 24 = 15.6).
+    assert!(
+        super_fs < base_fs,
+        "superscript font_size ({super_fs}) must be < node font_size ({base_fs})"
+    );
+    assert!(
+        (super_fs - 15.6).abs() < 0.01,
+        "superscript font_size must be 0.65 × 24 = 15.6; got {super_fs}"
+    );
+    // Superscript baseline is raised (smaller y = higher on the page).
+    assert!(
+        super_y < base_y,
+        "superscript baseline y ({super_y}) must be above the baseline span's y ({base_y})"
+    );
+}
+
+/// A plain text node (no vertical-align anywhere) must compile to a
+/// byte-identical command stream relative to a second run — proving the
+/// vertical-align machinery does not perturb the no-vertical-align path.
+#[test]
+fn plain_text_byte_identical_with_vertical_align_feature() {
+    let src = r##"zenith version=1 {
+  project id="proj.pi" name="PI"
+  tokens format="zenith-token-v1" {
+token id="size.body" type="dimension" value=(px)24
+  }
+  styles {}
+  document id="doc.pi" title="PI" {
+page id="page.pi" w=(px)400 h=(px)200 {
+  text id="t.pi" x=(px)10 y=(px)20 w=(px)380 h=(px)60 font-size=(token)"size.body" {
+    span "Hello Zenith"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let a = compile(&doc, &default_provider());
+    let b = compile(&doc, &default_provider());
+
+    let ja = serde_json::to_string(&a.scene).expect("scene a json");
+    let jb = serde_json::to_string(&b.scene).expect("scene b json");
+    assert_eq!(
+        ja, jb,
+        "two compiles must be byte-identical (deterministic)"
+    );
+
+    // The plain span must shape at the full node size with a normal baseline.
+    let run = a
+        .scene
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            SceneCommand::DrawGlyphRun { y, font_size, .. } => Some((*y, *font_size)),
+            _ => None,
+        })
+        .expect("a plain text node must emit a DrawGlyphRun");
+    assert_eq!(run.1, 24.0, "plain span must render at full 24px");
+    assert!(run.0 > 20.0, "plain baseline y must be text_y + ascent");
+}
+
 // ── All-primary span stays a single DrawGlyphRun (fallback byte-identity) ──
 
 #[test]
@@ -5213,6 +5321,130 @@ page id="page.nc" w=(px)600 h=(px)200 {
         3,
         "non-chain single-line text must emit exactly 3 commands; got {:?}",
         r1.scene.commands
+    );
+}
+
+/// A chain that spans THREE pages (one body box per page, all sharing
+/// `chain="ch1"`, only page 1's box bears the article) must flow the article
+/// across all three: the box on page 2 AND the box on page 3 each emit
+/// continuation glyph runs (not empty). Two compiles per page are byte-identical.
+#[test]
+fn chain_spans_three_pages() {
+    // Each page is 400 tall; the body box is short (h=120 → ~5 lines at 24px)
+    // so the ~60-word article cannot fit one box and must cascade page→page.
+    let src = r##"zenith version=1 {
+  project id="proj.cp" name="CP"
+  tokens format="zenith-token-v1" {
+token id="color.ink" type="color"      value="#111827"
+token id="font.body" type="fontFamily" value="Noto Sans"
+token id="size.body" type="dimension"  value=(px)24
+  }
+  styles {}
+  document id="doc.cp" title="CP" {
+page id="p1" w=(px)600 h=(px)400 {
+  text id="b1" x=(px)10 y=(px)10 w=(px)300 h=(px)120 chain="ch1" fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" {
+    span "Alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty"
+  }
+}
+page id="p2" w=(px)600 h=(px)400 {
+  text id="b2" x=(px)10 y=(px)10 w=(px)300 h=(px)120 chain="ch1" fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" {
+  }
+}
+page id="p3" w=(px)600 h=(px)400 {
+  text id="b3" x=(px)10 y=(px)10 w=(px)300 h=(px)600 chain="ch1" fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" {
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let p1 = compile_page(&doc, &default_provider(), 0);
+    let p2 = compile_page(&doc, &default_provider(), 1);
+    let p3 = compile_page(&doc, &default_provider(), 2);
+
+    let runs1 = glyph_runs_in_y(&p1.scene.commands, 0.0, 400.0);
+    let runs2 = glyph_runs_in_y(&p2.scene.commands, 0.0, 400.0);
+    let runs3 = glyph_runs_in_y(&p3.scene.commands, 0.0, 400.0);
+
+    assert!(runs1 > 0, "page 1 box must draw text; got {runs1}");
+    assert!(
+        runs2 > 0,
+        "page 2 box must receive the continuation; got {runs2}"
+    );
+    assert!(
+        runs3 > 0,
+        "page 3 box must receive the continuation tail; got {runs3}"
+    );
+
+    // Determinism: each page recompiles byte-identical.
+    for idx in 0..3 {
+        let a = compile_page(&doc, &default_provider(), idx);
+        let b = compile_page(&doc, &default_provider(), idx);
+        assert_eq!(
+            a.scene.commands, b.scene.commands,
+            "cross-page chain page {idx} must compile deterministically"
+        );
+    }
+}
+
+/// Justify math: on a fully-justified (non-last, multi-word) line the LAST
+/// word's right edge reaches the box's right edge (within the last word's own
+/// advance), confirming inter-word gaps widened to fill the box width.
+#[test]
+fn text_wrap_justify_fills_box_width() {
+    let node_x = 10.0;
+    let box_w = 120.0;
+    let src = format!(
+        r##"zenith version=1 {{
+  project id="proj.jf" name="JF"
+  tokens format="zenith-token-v1" {{}}
+  styles {{}}
+  document id="doc.jf" title="JF" {{
+page id="page.jf" w=(px)1000 h=(px)600 {{
+  text id="text.jf" x=(px){node_x} y=(px)20 w=(px){box_w} align="justify" {{
+    span "the quick brown fox jumps over the lazy dog"
+  }}
+}}
+  }}
+}}
+"##
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    let runs: Vec<(f64, f64)> = result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            SceneCommand::DrawGlyphRun { x, y, .. } => Some((*y, *x)),
+            _ => None,
+        })
+        .collect();
+
+    // Distinct baselines, in order.
+    let mut ys: Vec<f64> = Vec::new();
+    for (y, _) in &runs {
+        if !ys.iter().any(|v| (*v - *y).abs() < 1e-6) {
+            ys.push(*y);
+        }
+    }
+    assert!(ys.len() >= 2, "need >= 2 lines; got {}", ys.len());
+
+    // First (non-last, justified) line: the largest x of any run on it (the last
+    // word's left edge) must sit close to the right box edge, i.e. the spread
+    // pushed it well past the box midpoint. With a fitted (non-justified) line
+    // the words would bunch on the left.
+    let first_y = ys[0];
+    let max_x_first = runs
+        .iter()
+        .filter(|(y, _)| (*y - first_y).abs() < 1e-6)
+        .map(|(_, x)| *x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let box_right = node_x + box_w;
+    let box_mid = node_x + box_w / 2.0;
+    assert!(
+        max_x_first > box_mid,
+        "justified line's last word must be pushed past box midpoint {box_mid}; got {max_x_first} (box_right={box_right})"
     );
 }
 

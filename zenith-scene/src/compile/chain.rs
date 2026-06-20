@@ -6,11 +6,16 @@
 //! remainder continues in the next box. This enables tri-fold leaflet panels
 //! where one article spans three text boxes.
 //!
-//! This module runs ONCE per page, BEFORE the main compile walk, producing a
-//! [`ChainAssignments`] map keyed by node id. [`super::text::compile_text`]
-//! consults that map: a chain member renders its ASSIGNED lines (via the shared
-//! [`super::text::emit_lines`]) instead of wrapping its own spans; a non-chain
-//! node is wholly unaffected (byte-identical).
+//! This module runs ONCE per document (across ALL pages), BEFORE the main
+//! compile walk, producing a single [`ChainAssignments`] map keyed by global
+//! node id. A chain may span boxes on DIFFERENT pages: members are collected in
+//! (page-order, then source-order) and the source content is poured greedily
+//! across every member — box 1 fills, the remainder flows to box 2, … across
+//! page boundaries. [`super::text::compile_text`] consults that map: a chain
+//! member renders its ASSIGNED lines (via the shared [`super::text::emit_lines`])
+//! instead of wrapping its own spans; a non-chain node is wholly unaffected
+//! (byte-identical). The same document-wide map is threaded into every
+//! `compile_page` call so a node on page 3 renders the slice it was assigned.
 //!
 //! ## v0 design choices (documented)
 //!
@@ -53,7 +58,7 @@ use super::paint::resolve_property_color;
 use super::style_prop;
 use super::text::{
     Line, ResolvedSpan, WordMetrics, pack_lines, resolve_family_with_fallback, resolve_font_weight,
-    shape_words,
+    resolve_vertical_align, shape_words,
 };
 use super::util::resolve_property_dimension_px;
 
@@ -62,6 +67,10 @@ use super::util::resolve_property_dimension_px;
 pub(crate) struct ChainAssignment {
     pub(super) lines: Vec<Line>,
     pub(super) metrics: WordMetrics,
+    /// `true` only for the LAST member of the chain (document-wide). Drives the
+    /// justify last-line policy: the final member leaves its last line ragged;
+    /// a continuation member justifies its last line (the paragraph flows on).
+    pub(super) is_last_member: bool,
 }
 
 /// Map from node id → its assigned chain lines. Empty when the page has no
@@ -204,6 +213,10 @@ fn resolve_chain_style(
         } else {
             FontStyle::Normal
         };
+        // Super/subscript: reduced size + baseline shift, shared with the
+        // single-box wrap path so a chained article honors vertical-align too.
+        let (span_font_size, baseline_dy) =
+            resolve_vertical_align(span.vertical_align.as_deref(), font_size);
         spans.push(ResolvedSpan {
             text: span.text.clone(),
             color,
@@ -211,31 +224,70 @@ fn resolve_chain_style(
             strikethrough: span.strikethrough == Some(true),
             weight,
             style,
+            font_size: span_font_size,
+            baseline_dy,
         });
     }
 
     (families, font_size, base_weight, spans)
 }
 
-/// Build the chain-assignment map for a page's node tree.
+/// Build the DOCUMENT-WIDE chain-assignment map across every page.
+///
+/// Chains thread across boxes on DIFFERENT pages: members are collected in
+/// (page-order, then source-order) over `doc.body.pages`, each carrying its OWN
+/// page's box geometry, and a chain's source content is poured greedily across
+/// all members in that global order — box 1 fills, the remainder flows into
+/// box 2, … across page boundaries. The returned map is keyed by global node id,
+/// so `compile_page` for any page looks up the slice assigned to a box on that
+/// page.
 ///
 /// Returns an empty map when no `chain` members are present, in which case
 /// `compile_text` behaves exactly as before for every node.
-pub(super) fn resolve_chains(
-    nodes: &[Node],
+pub(super) fn resolve_chains_document<'a>(
+    doc: &'a zenith_core::Document,
     resolved: &BTreeMap<String, ResolvedToken>,
     style_map: &BTreeMap<&str, &Style>,
     fonts: &dyn FontProvider,
     engine: &RustybuzzEngine,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> ChainAssignments {
+    // Collect members + content sources across ALL pages in page-then-source
+    // order. A `BTreeMap` per-chain member list preserves the push order, which
+    // is exactly the document-wide flow order.
     let mut members: BTreeMap<String, Vec<Member>> = BTreeMap::new();
-    let mut source: BTreeMap<String, &TextNode> = BTreeMap::new();
-    collect_chains(nodes, &mut members, &mut source);
+    let mut source: BTreeMap<String, &'a TextNode> = BTreeMap::new();
+    for page in &doc.body.pages {
+        collect_chains(&page.children, &mut members, &mut source);
+    }
 
+    distribute_chains(
+        &members,
+        &source,
+        resolved,
+        style_map,
+        fonts,
+        engine,
+        diagnostics,
+    )
+}
+
+/// Shared distributor: shape each chain's source once and pour its words greedily
+/// across the chain's ordered members. Used by [`resolve_chains_document`]; kept
+/// scope-agnostic so the collection scope (one page vs. the whole document) is
+/// the ONLY thing that differs between call sites.
+fn distribute_chains(
+    members: &BTreeMap<String, Vec<Member>>,
+    source: &BTreeMap<String, &TextNode>,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
+    fonts: &dyn FontProvider,
+    engine: &RustybuzzEngine,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> ChainAssignments {
     let mut assignments: ChainAssignments = BTreeMap::new();
 
-    for (chain_id, chain_members) in &members {
+    for (chain_id, chain_members) in members {
         // A chain with no span-bearing source emits nothing.
         let Some(src) = source.get(chain_id) else {
             continue;
@@ -267,7 +319,14 @@ pub(super) fn resolve_chains(
                 // Last box: keep everything that remains (it may overflow; the
                 // member's own overflow handling rides in compile_text). The
                 // `remaining` queue is not read again after this iteration.
-                assignments.insert(member.id.clone(), ChainAssignment { lines, metrics });
+                assignments.insert(
+                    member.id.clone(),
+                    ChainAssignment {
+                        lines,
+                        metrics,
+                        is_last_member: true,
+                    },
+                );
                 break;
             }
 
@@ -288,7 +347,14 @@ pub(super) fn resolve_chains(
             }
             remaining = next_tokens;
 
-            assignments.insert(member.id.clone(), ChainAssignment { lines, metrics });
+            assignments.insert(
+                member.id.clone(),
+                ChainAssignment {
+                    lines,
+                    metrics,
+                    is_last_member: false,
+                },
+            );
         }
     }
 
