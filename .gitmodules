@@ -1,0 +1,3 @@
+[submodule "zenith-showcase"]
+	path = zenith-showcase
+	url = https://github.com/farhan-syah/zenith-showcase.git
