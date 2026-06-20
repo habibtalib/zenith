@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use crate::ast::{
     CodeNode, DocumentBody, EllipseNode, FieldNode, Fold, FootnoteNode, FrameNode, GroupNode,
     ImageNode, InstanceNode, LineNode, Node, Override, Page, Point, PolygonNode, PolylineNode,
-    RectNode, SafeZone, SafeZoneType, TextNode, TextSpan,
+    RectNode, SafeZone, SafeZoneType, TextNode, TextSpan, TocNode,
 };
 
 use super::{
@@ -163,6 +163,7 @@ fn write_node(node: &Node, out: &mut String, depth: usize) {
         Node::Polyline(p) => write_polyline(p, out, depth),
         Node::Instance(i) => write_instance(i, out, depth),
         Node::Field(f) => write_field(f, out, depth),
+        Node::Toc(t) => write_toc(t, out, depth),
         Node::Footnote(f) => write_footnote(f, out, depth),
         Node::Unknown(u) => write_unknown_node(u, out, depth),
     }
@@ -200,6 +201,46 @@ fn write_field(f: &FieldNode, out: &mut String, depth: usize) {
 
     // Unknown properties in sorted key order.
     for (key, prop) in &f.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_value(&prop.value));
+    }
+
+    out.push('\n');
+}
+
+fn write_toc(t: &TocNode, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("toc");
+
+    // Canonical property order: id, name, role, match-role, match-style,
+    // leader, folio-style, x, y, w, h, fill, font-family, font-size, opacity,
+    // visible, locked, style, then unknown props (sorted). A toc is a leaf —
+    // no child block.
+    out.push_str(" id=\"");
+    out.push_str(&t.id);
+    out.push('"');
+    write_opt_str(out, "name", &t.name);
+    write_opt_str(out, "role", &t.role);
+    write_opt_str(out, "match-role", &t.match_role);
+    write_opt_str(out, "match-style", &t.match_style);
+    write_opt_str(out, "leader", &t.leader);
+    write_opt_str(out, "folio-style", &t.folio_style);
+    write_opt_dimension(out, "x", &t.x);
+    write_opt_dimension(out, "y", &t.y);
+    write_opt_dimension(out, "w", &t.w);
+    write_opt_dimension(out, "h", &t.h);
+    write_opt_property_value(out, "fill", &t.fill);
+    write_opt_property_value(out, "font-family", &t.font_family);
+    write_opt_property_value(out, "font-size", &t.font_size);
+    write_opt_f64(out, "opacity", &t.opacity);
+    write_opt_bool(out, "visible", &t.visible);
+    write_opt_bool(out, "locked", &t.locked);
+    write_opt_str(out, "style", &t.style);
+
+    // Unknown properties in sorted key order.
+    for (key, prop) in &t.unknown_props {
         out.push(' ');
         out.push_str(key);
         out.push('=');

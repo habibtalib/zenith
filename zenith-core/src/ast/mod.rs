@@ -17,7 +17,7 @@ pub use document::{
 pub use node::{
     CodeNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode, ImageNode, InstanceNode,
     LineNode, Node, ObjectPosition, Override, Point, PolygonNode, PolylineNode, RectNode, TextNode,
-    TextSpan, UnknownNode, UnknownProperty, UnknownValue,
+    TextSpan, TocNode, UnknownNode, UnknownProperty, UnknownValue,
 };
 pub use span::Span;
 pub use style::{

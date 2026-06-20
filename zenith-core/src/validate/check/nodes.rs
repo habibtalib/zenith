@@ -4,7 +4,9 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use crate::ast::node::{FieldNode, FootnoteNode, InstanceNode, Node, PolygonNode, PolylineNode};
+use crate::ast::node::{
+    FieldNode, FootnoteNode, InstanceNode, Node, PolygonNode, PolylineNode, TocNode,
+};
 use crate::ast::value::{Dimension, PropertyValue, Unit, dim_to_px};
 use crate::diagnostics::Diagnostic;
 use crate::tokens::ResolvedToken;
@@ -1451,6 +1453,17 @@ pub(super) fn walk_node(
             );
         }
 
+        Node::Toc(toc) => {
+            check_toc(
+                toc,
+                seen_ids,
+                referenced_token_ids,
+                resolved_tokens,
+                declared_style_ids,
+                diagnostics,
+            );
+        }
+
         Node::Footnote(footnote) => {
             check_footnote(
                 footnote,
@@ -1584,9 +1597,11 @@ pub(super) fn node_bbox(node: &Node, page_w: f64, page_h: f64) -> Option<(f64, f
         // expanded subtree (a translated group) is the renderable geometry. A
         // field's box defaults to the page live area at compile time (x/w may be
         // omitted), so there is no authored bbox to check against the page here.
+        // A toc likewise defaults to the live area; no authored bbox check.
         Node::Group(_)
         | Node::Instance(_)
         | Node::Field(_)
+        | Node::Toc(_)
         | Node::Footnote(_)
         | Node::Unknown(_) => None,
     }
@@ -1651,6 +1666,7 @@ fn node_rotate_deg(node: &Node) -> Option<f64> {
         Node::Line(_)
         | Node::Instance(_)
         | Node::Field(_)
+        | Node::Toc(_)
         | Node::Footnote(_)
         | Node::Unknown(_) => None,
     }?;
@@ -1676,6 +1692,7 @@ pub(super) fn node_role(node: &Node) -> Option<&str> {
         Node::Polyline(n) => n.role.as_deref(),
         Node::Instance(n) => n.role.as_deref(),
         Node::Field(n) => n.role.as_deref(),
+        Node::Toc(n) => n.role.as_deref(),
         Node::Footnote(n) => n.role.as_deref(),
         Node::Unknown(_) => None,
     }
@@ -1696,6 +1713,7 @@ pub(super) fn node_id_and_span(node: &Node) -> (&str, Option<crate::ast::Span>) 
         Node::Polyline(n) => (&n.id, n.source_span),
         Node::Instance(n) => (&n.id, n.source_span),
         Node::Field(n) => (&n.id, n.source_span),
+        Node::Toc(n) => (&n.id, n.source_span),
         Node::Footnote(n) => (&n.id, n.source_span),
         Node::Unknown(n) => (&n.kind, n.source_span),
     }
@@ -2148,6 +2166,83 @@ fn check_field(
             ),
             field.source_span,
             Some(field.id.clone()),
+        ));
+    }
+}
+
+/// Validate a [`TocNode`]: id uniqueness, style ref, visual properties, and
+/// the `toc.no_selector` advisory when both `match_role` and `match_style` are
+/// absent (the toc would collect no entries at compile time).
+fn check_toc(
+    toc: &TocNode,
+    seen_ids: &mut HashSet<String>,
+    referenced_token_ids: &mut HashSet<String>,
+    resolved_tokens: &BTreeMap<String, ResolvedToken>,
+    declared_style_ids: &HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    register_id(&toc.id, seen_ids, diagnostics);
+    check_style_ref(
+        &toc.id,
+        toc.style.as_deref(),
+        declared_style_ids,
+        toc.source_span,
+        diagnostics,
+    );
+
+    // Warn when neither selector is set: the toc will collect no entries.
+    if toc.match_role.is_none() && toc.match_style.is_none() {
+        diagnostics.push(Diagnostic::warning(
+            "toc.no_selector",
+            format!(
+                "toc '{}' has neither match-role nor match-style; it will collect no entries",
+                toc.id
+            ),
+            toc.source_span,
+            Some(toc.id.clone()),
+        ));
+    }
+
+    // Visual properties (mirror the field-node checks).
+    check_visual_prop(
+        &toc.id,
+        "fill",
+        toc.fill.as_ref(),
+        VisualExpect::Color,
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
+    check_visual_prop(
+        &toc.id,
+        "font-family",
+        toc.font_family.as_ref(),
+        VisualExpect::FontFamily,
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
+    check_visual_prop(
+        &toc.id,
+        "font-size",
+        toc.font_size.as_ref(),
+        VisualExpect::Dimension,
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
+
+    // Unknown properties on the toc node.
+    for prop_name in toc.unknown_props.keys() {
+        diagnostics.push(Diagnostic::warning(
+            "node.unknown_property",
+            format!(
+                "toc '{}': unknown property '{}' (version-relative; \
+                 may be valid in a later schema version)",
+                toc.id, prop_name
+            ),
+            toc.source_span,
+            Some(toc.id.clone()),
         ));
     }
 }

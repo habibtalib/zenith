@@ -14,7 +14,7 @@ use crate::ast::document::{
 use crate::ast::node::ImageNode;
 use crate::ast::node::{
     CodeNode, EllipseNode, FieldNode, FrameNode, GroupNode, LineNode, Node, RectNode, TextNode,
-    UnknownNode,
+    TocNode, UnknownNode,
 };
 use crate::ast::style::StyleBlock;
 use crate::ast::token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue};
@@ -4982,6 +4982,70 @@ fn spread_gutter_absent_no_warning() {
     assert!(
         !has_code(&report, "document.invalid_spread_gutter"),
         "absent spread-gutter must not warn; got {:?}",
+        codes(&report)
+    );
+}
+
+// ── Toc node validation ───────────────────────────────────────────────────────
+
+/// Build a minimal `toc` node (no geometry, no styling).
+fn toc_node_bare(id: &str, match_role: Option<&str>, match_style: Option<&str>) -> TocNode {
+    TocNode {
+        id: id.to_owned(),
+        name: None,
+        role: None,
+        match_role: match_role.map(str::to_owned),
+        match_style: match_style.map(str::to_owned),
+        leader: None,
+        folio_style: None,
+        x: Some(px(50.0)),
+        y: Some(px(100.0)),
+        w: Some(px(400.0)),
+        h: Some(px(200.0)),
+        style: None,
+        fill: None,
+        font_family: None,
+        font_size: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    }
+}
+
+#[test]
+fn toc_with_match_role_does_not_warn_no_selector() {
+    let toc = Node::Toc(toc_node_bare("toc.1", Some("heading"), None));
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![toc])]);
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "toc.no_selector"),
+        "toc with match-role must not emit toc.no_selector; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn toc_with_match_style_does_not_warn_no_selector() {
+    let toc = Node::Toc(toc_node_bare("toc.2", None, Some("Heading 1")));
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![toc])]);
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "toc.no_selector"),
+        "toc with match-style must not emit toc.no_selector; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn toc_with_no_selector_warns() {
+    let toc = Node::Toc(toc_node_bare("toc.3", None, None));
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![toc])]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "toc.no_selector"),
+        "toc without selector must warn toc.no_selector; got {:?}",
         codes(&report)
     );
 }

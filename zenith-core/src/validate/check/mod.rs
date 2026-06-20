@@ -706,6 +706,9 @@ pub(super) fn collect_local_ids(children: &[crate::ast::node::Node], out: &mut H
             Node::Field(n) => {
                 out.insert(n.id.clone());
             }
+            Node::Toc(n) => {
+                out.insert(n.id.clone());
+            }
             Node::Footnote(n) => {
                 out.insert(n.id.clone());
             }

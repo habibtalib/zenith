@@ -484,6 +484,10 @@ fn node_set_id(node: &mut Node, new_id: String) -> bool {
             f.id = new_id;
             true
         }
+        Node::Toc(t) => {
+            t.id = new_id;
+            true
+        }
         Node::Footnote(f) => {
             f.id = new_id;
             true
@@ -648,6 +652,7 @@ fn node_set_id_any(node: &mut Node, new_id: String) {
         | Node::Polygon(_)
         | Node::Polyline(_)
         | Node::Field(_)
+        | Node::Toc(_)
         | Node::Footnote(_) => {
             node_set_id(node, new_id);
         }

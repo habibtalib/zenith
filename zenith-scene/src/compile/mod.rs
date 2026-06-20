@@ -24,6 +24,7 @@ mod image;
 mod leaf;
 mod paint;
 mod text;
+mod toc;
 mod util;
 
 use std::collections::BTreeMap;
@@ -46,6 +47,7 @@ use image::compile_image;
 use leaf::{compile_ellipse, compile_line, compile_polygon, compile_polyline, compile_rect};
 use paint::{resolve_property_color, resolve_property_gradient};
 use text::{compile_code, compile_text};
+use toc::resolve_toc_to_text;
 
 /// Compile-time lookup of component definitions by id. Threaded through the
 /// node-compilation dispatch so [`Node::Instance`] can expand its referenced
@@ -408,6 +410,7 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
         footnote_markers: &footnote_markers,
         node_boxes: &node_boxes,
         total_pages: doc.body.pages.len(),
+        pages: &doc.body.pages,
         section_page_index: section_assign.map(|a| a.page_index_in_section),
         section_page_count: section_assign.map(|a| a.page_count),
         section_folio_start: section_assign.map(|a| a.folio_start),
@@ -552,6 +555,7 @@ pub(super) fn node_role(node: &Node) -> Option<&str> {
         Node::Polyline(n) => n.role.as_deref(),
         Node::Instance(n) => n.role.as_deref(),
         Node::Field(n) => n.role.as_deref(),
+        Node::Toc(n) => n.role.as_deref(),
         Node::Footnote(n) => n.role.as_deref(),
         Node::Unknown(_) => None,
     }
@@ -667,6 +671,30 @@ pub(super) fn compile_node(
             // field (absent running-head side, unknown type, unresolved
             // page-ref) yields nothing.
             if let Some(text_node) = resolve_field_to_text(field, field_ctx) {
+                compile_text(
+                    &text_node,
+                    resolved,
+                    style_map,
+                    fonts,
+                    engine,
+                    commands,
+                    diagnostics,
+                    chains,
+                    field_ctx.footnote_markers,
+                    field_ctx.node_boxes,
+                    ctx,
+                );
+            }
+            0.0
+        }
+        Node::Toc(toc) => {
+            // Resolve the toc against the full document into a multi-line
+            // tab-leader text block and compile it via the normal text path.
+            // A toc with no matching headings, no selector, or visible=false
+            // yields nothing.
+            if let Some(text_node) =
+                resolve_toc_to_text(toc, field_ctx.pages, field_ctx.page_index_by_node_id)
+            {
                 compile_text(
                     &text_node,
                     resolved,

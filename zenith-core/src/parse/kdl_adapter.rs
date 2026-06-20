@@ -529,4 +529,59 @@ mod tests {
             Some(PropertyValue::TokenRef("shadow.headline".to_owned()))
         );
     }
+
+    // ── Toc node parse / round-trip ───────────────────────────────────────────
+
+    #[test]
+    fn toc_node_parses_fields_correctly() {
+        let src = r##"zenith version=1 {
+  project id="proj.toc" name="Toc"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="d" {
+    page id="p1" w=(px)595 h=(px)842 {
+      toc id="contents" match-role="heading" leader="." folio-style="decimal" \
+        x=(px)50 y=(px)100 w=(px)400 h=(px)300 style="body"
+    }
+  }
+}"##;
+        let doc = KdlAdapter
+            .parse(src.as_bytes())
+            .expect("parse must succeed");
+        let page = &doc.body.pages[0];
+        assert_eq!(page.children.len(), 1);
+        match &page.children[0] {
+            crate::ast::Node::Toc(t) => {
+                assert_eq!(t.id, "contents");
+                assert_eq!(t.match_role.as_deref(), Some("heading"));
+                assert_eq!(t.match_style, None);
+                assert_eq!(t.leader.as_deref(), Some("."));
+                assert_eq!(t.folio_style.as_deref(), Some("decimal"));
+                assert_eq!(t.x.as_ref().map(|d| d.value), Some(50.0));
+                assert_eq!(t.y.as_ref().map(|d| d.value), Some(100.0));
+                assert_eq!(t.w.as_ref().map(|d| d.value), Some(400.0));
+                assert_eq!(t.h.as_ref().map(|d| d.value), Some(300.0));
+                assert_eq!(t.style.as_deref(), Some("body"));
+            }
+            other => panic!("expected Toc, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn toc_node_round_trips_through_writer() {
+        let src = "zenith version=1 {\n  project id=\"proj.t\" name=\"T\"\n  tokens format=\"zenith-token-v1\" {\n  }\n  styles {\n  }\n  document id=\"d\" {\n    page id=\"p1\" w=(px)595 h=(px)842 {\n      toc id=\"toc.1\" match-role=\"heading\"\n    }\n  }\n}";
+        let doc = KdlAdapter.parse(src.as_bytes()).expect("first parse");
+        let formatted = format_document(&doc).expect("format");
+        let doc2 = KdlAdapter.parse(&formatted).expect("second parse");
+        // After round-trip, the toc node must still exist and have the same id.
+        match &doc2.body.pages[0].children[0] {
+            crate::ast::Node::Toc(t) => {
+                assert_eq!(t.id, "toc.1");
+                assert_eq!(t.match_role.as_deref(), Some("heading"));
+            }
+            other => panic!("expected Toc after round-trip, got {other:?}"),
+        }
+    }
 }

@@ -55,6 +55,8 @@ fn node_geometry_mut(node: &mut Node) -> Option<GeometryMut<'_>> {
         // A field carries a real x/y/w/h box (the resolved single-line text box),
         // so set_geometry applies to it like any other bbox node.
         Node::Field(f) => Some((&mut f.x, &mut f.y, &mut f.w, &mut f.h)),
+        // A toc likewise carries a real x/y/w/h box.
+        Node::Toc(t) => Some((&mut t.x, &mut t.y, &mut t.w, &mut t.h)),
         // `Instance` is excluded: it carries only an x/y origin, no w/h box, so
         // the four-slot bbox setter does not apply. A set_geometry on an instance
         // honestly surfaces tx.unsupported_property rather than silently dropping
@@ -105,11 +107,13 @@ fn node_rotate_mut(node: &mut Node) -> Option<&mut Option<Dimension>> {
         // Line has no rotate field.
         // Instance has no rotate field.
         // Field has no rotate field.
+        // Toc has no rotate field.
         // Footnote has no rotate field.
         // Unknown has no rotate field.
         Node::Line(_)
         | Node::Instance(_)
         | Node::Field(_)
+        | Node::Toc(_)
         | Node::Footnote(_)
         | Node::Unknown(_) => None,
     }

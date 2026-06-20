@@ -17,7 +17,7 @@ use crate::ast::{
     node::{
         CodeNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode, ImageNode,
         InstanceNode, LineNode, Node, ObjectPosition, Override, Point, PolygonNode, PolylineNode,
-        RectNode, TextNode, TextSpan, UnknownNode, UnknownProperty, UnknownValue,
+        RectNode, TextNode, TextSpan, TocNode, UnknownNode, UnknownProperty, UnknownValue,
     },
     style::{Style, StyleBlock, UnknownStyleProp, canonicalize_style_key},
     token::{
@@ -1197,6 +1197,7 @@ fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
         "polyline" => transform_polyline(node).map(Node::Polyline),
         "instance" => transform_instance(node).map(Node::Instance),
         "field" => transform_field(node).map(Node::Field),
+        "toc" => transform_toc(node).map(Node::Toc),
         "footnote" => transform_footnote(node).map(Node::Footnote),
         _ => Ok(Node::Unknown(UnknownNode {
             kind: node.name().value().to_owned(),
@@ -2154,6 +2155,79 @@ fn transform_field(node: &KdlNode) -> Result<FieldNode, ParseError> {
         target: optional_string_prop(node, "target").map(str::to_owned),
         folio_style,
         suppress_first,
+        x: optional_dimension_prop(node, "x"),
+        y: optional_dimension_prop(node, "y"),
+        w: optional_dimension_prop(node, "w"),
+        h: optional_dimension_prop(node, "h"),
+        style: optional_string_prop(node, "style").map(str::to_owned),
+        fill: optional_property_value(node, "fill"),
+        font_family,
+        font_size,
+        opacity: optional_f64_prop(node, "opacity"),
+        visible: optional_bool_prop(node, "visible"),
+        locked: optional_bool_prop(node, "locked"),
+        source_span: node_span(node),
+        unknown_props,
+    })
+}
+
+const TOC_KNOWN_PROPS: &[&str] = &[
+    "id",
+    "name",
+    "role",
+    "match-role",
+    "match_role",
+    "match-style",
+    "match_style",
+    "leader",
+    "folio-style",
+    "folio_style",
+    "x",
+    "y",
+    "w",
+    "h",
+    "style",
+    "fill",
+    "font-family",
+    "font_family",
+    "font-size",
+    "font_size",
+    "opacity",
+    "visible",
+    "locked",
+];
+
+/// Transform a `toc` node into a [`TocNode`].
+///
+/// Reads required `id`; optional selector props (`match-role`, `match-style`);
+/// optional `leader` and `folio-style` strings; optional `x`/`y`/`w`/`h`
+/// geometry; and visual props (`style`/`fill`/`font-family`/`font-size`).
+/// The `match-role`/`match-style` values are preserved verbatim for the
+/// compiler; the validator warns when both are absent. The folio style is
+/// preserved verbatim (validated at compile time).
+fn transform_toc(node: &KdlNode) -> Result<TocNode, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+
+    let match_role =
+        optional_string_prop_aliased(node, "match-role", "match_role").map(str::to_owned);
+    let match_style =
+        optional_string_prop_aliased(node, "match-style", "match_style").map(str::to_owned);
+    let leader = optional_string_prop(node, "leader").map(str::to_owned);
+    let folio_style =
+        optional_string_prop_aliased(node, "folio-style", "folio_style").map(str::to_owned);
+    let font_family = optional_property_value_aliased(node, "font-family", "font_family");
+    let font_size = optional_property_value_aliased(node, "font-size", "font_size");
+
+    let unknown_props = collect_unknown_props(node, TOC_KNOWN_PROPS);
+
+    Ok(TocNode {
+        id,
+        name: optional_string_prop(node, "name").map(str::to_owned),
+        role: optional_string_prop(node, "role").map(str::to_owned),
+        match_role,
+        match_style,
+        leader,
+        folio_style,
         x: optional_dimension_prop(node, "x"),
         y: optional_dimension_prop(node, "y"),
         w: optional_dimension_prop(node, "w"),

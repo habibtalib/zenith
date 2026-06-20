@@ -24,9 +24,9 @@ pub use ast::{
     GradientStopRef, GroupNode, ImageNode, InstanceNode, LineNode, MasterDef, Node, ObjectPosition,
     Override, Page, Point, PolygonNode, PolylineNode, Project, PropertyValue, RectNode,
     STYLE_RECOGNIZED_KEYS, SafeZone, SafeZoneType, SectionDef, ShadowLayerRef, ShadowLiteral, Span,
-    Style, StyleBlock, TextNode, TextSpan, Token, TokenBlock, TokenLiteral, TokenType, TokenValue,
-    Unit, UnknownNode, UnknownProperty, UnknownStyleProp, UnknownValue, canonicalize_style_key,
-    dim_to_px,
+    Style, StyleBlock, TextNode, TextSpan, TocNode, Token, TokenBlock, TokenLiteral, TokenType,
+    TokenValue, Unit, UnknownNode, UnknownProperty, UnknownStyleProp, UnknownValue,
+    canonicalize_style_key, dim_to_px,
 };
 pub use color::{
     Cmyk, cmyk_to_hex, cmyk_to_srgb, contrast_ratio, parse_cmyk, parse_rgb, relative_luminance,

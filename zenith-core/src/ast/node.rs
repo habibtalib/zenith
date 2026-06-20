@@ -843,6 +843,53 @@ pub struct FootnoteNode {
     pub unknown_props: BTreeMap<String, UnknownProperty>,
 }
 
+/// A `toc` node — a compile-time table-of-contents placeholder.
+///
+/// A `toc` is a LEAF that, at compile time, resolves to a multi-line
+/// tab-leader text block by collecting all heading nodes across the whole
+/// document that match its selector (`match-role` and/or `match-style`).
+/// Each row in the output is formatted as:
+/// `{heading text}\t{page number}`, joined by newlines.
+///
+/// The synthesised [`TextNode`] uses `tab-leader` mode so the text engine
+/// fills the gap between heading text and page number with the leader glyph
+/// (default `"."`), and right-aligns the page number.
+///
+/// At least one of `match_role` or `match_style` must be set; when both are
+/// absent the toc collects nothing and an advisory `toc.no_selector` is
+/// emitted by the validator.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TocNode {
+    pub id: String,
+    pub name: Option<String>,
+    pub role: Option<String>,
+    /// Select heading nodes whose `role` equals this. `None` = no role filter.
+    pub match_role: Option<String>,
+    /// Select heading nodes whose `style` equals this. `None` = no style filter.
+    pub match_style: Option<String>,
+    /// Leader glyph for the dotted fill between title and page number
+    /// (default `"."` when omitted).
+    pub leader: Option<String>,
+    /// Folio numbering style for the page numbers
+    /// (`"decimal"` / `"lower-roman"` / `"upper-roman"`).
+    pub folio_style: Option<String>,
+    pub x: Option<Dimension>,
+    pub y: Option<Dimension>,
+    pub w: Option<Dimension>,
+    pub h: Option<Dimension>,
+    pub style: Option<String>,
+    pub fill: Option<PropertyValue>,
+    pub font_family: Option<PropertyValue>,
+    pub font_size: Option<PropertyValue>,
+    pub opacity: Option<f64>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+}
+
 /// A renderable content node within a page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
@@ -865,5 +912,8 @@ pub enum Node {
     Instance(InstanceNode),
     Field(FieldNode),
     Footnote(FootnoteNode),
+    /// A compile-time table-of-contents placeholder; resolved to a
+    /// tab-leader text block by the scene compiler.
+    Toc(TocNode),
     Unknown(UnknownNode),
 }

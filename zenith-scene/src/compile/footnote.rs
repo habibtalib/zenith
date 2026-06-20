@@ -357,6 +357,7 @@ fn node_bottom_box(node: &Node) -> Option<(f64, f64, f64, f64, String)> {
         | Node::Group(_)
         | Node::Instance(_)
         | Node::Field(_)
+        | Node::Toc(_)
         | Node::Footnote(_)
         | Node::Unknown(_) => return None,
     };

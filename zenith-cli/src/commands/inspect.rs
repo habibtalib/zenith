@@ -299,6 +299,16 @@ fn build_node_entry(node: &Node) -> NodeEntry {
             locked: n.locked,
             children: vec![],
         },
+        Node::Toc(n) => NodeEntry {
+            id: n.id.clone(),
+            kind: "toc".into(),
+            // A toc carries a real x/y/w/h box (it must declare its own
+            // geometry for correct positioning).
+            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            visible: n.visible,
+            locked: n.locked,
+            children: vec![],
+        },
         Node::Footnote(n) => NodeEntry {
             id: n.id.clone(),
             kind: "footnote".into(),
@@ -365,6 +375,7 @@ fn node_id_str(node: &Node) -> &str {
         Node::Polyline(n) => &n.id,
         Node::Instance(n) => &n.id,
         Node::Field(n) => &n.id,
+        Node::Toc(n) => &n.id,
         Node::Footnote(n) => &n.id,
         Node::Unknown(_) => "",
     }

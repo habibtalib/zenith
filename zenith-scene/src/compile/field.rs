@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::{Document, FieldNode, Node, TextNode, TextSpan};
+use zenith_core::{Document, FieldNode, Node, Page, TextNode, TextSpan};
 
 use super::util::px;
 
@@ -49,6 +49,10 @@ pub(crate) struct FieldCtx<'a> {
     /// A `page-count` field resolves to this value as a decimal string (the "M"
     /// in a "Slide N of M" footer, where `page-number` supplies N).
     pub(super) total_pages: usize,
+    /// All document pages, for document-wide `toc` heading collection (a `toc`
+    /// node scans every page). Borrowed from `doc.body.pages`; `compile_node`
+    /// only has the `FieldCtx`, so the page list is carried here.
+    pub(super) pages: &'a [Page],
     /// 0-based index of THIS page within its section (page 1 of the section → 0).
     /// `None` when the page belongs to no declared section.
     pub(super) section_page_index: Option<usize>,
@@ -326,6 +330,7 @@ fn index_nodes(children: &[Node], page_index_1based: usize, map: &mut BTreeMap<S
             | Node::Polyline(_)
             | Node::Instance(_)
             | Node::Field(_)
+            | Node::Toc(_)
             | Node::Footnote(_)
             | Node::Unknown(_) => {}
         }
@@ -389,6 +394,7 @@ fn collect_node_boxes(
             | Node::Polyline(_)
             | Node::Instance(_)
             | Node::Field(_)
+            | Node::Toc(_)
             | Node::Footnote(_)
             | Node::Unknown(_) => {}
         }
@@ -421,6 +427,7 @@ fn node_rect(node: &Node) -> Option<(f64, f64, f64, f64)> {
         Node::Group(n) => rect(&n.x, &n.y, &n.w, &n.h),
         Node::Image(n) => rect(&n.x, &n.y, &n.w, &n.h),
         Node::Field(n) => rect(&n.x, &n.y, &n.w, &n.h),
+        Node::Toc(n) => rect(&n.x, &n.y, &n.w, &n.h),
         // An `instance` has no intrinsic w/h (its box is the expanded subtree),
         // and line/polygon/polyline have no rectangular box — none can serve as a
         // rectangular exclusion, so they are skipped.
@@ -448,6 +455,7 @@ fn node_id(node: &Node) -> Option<&str> {
         Node::Polyline(n) => Some(&n.id),
         Node::Instance(n) => Some(&n.id),
         Node::Field(n) => Some(&n.id),
+        Node::Toc(n) => Some(&n.id),
         Node::Footnote(n) => Some(&n.id),
         Node::Unknown(_) => None,
     }
@@ -515,7 +523,7 @@ pub(super) fn compute_live_area(
 /// `"lower-roman"` → standard subtractive lower-case Roman numerals.
 /// `"upper-roman"` → same, upper-cased.
 /// `"decimal"`, `None`, or any unrecognised value → decimal string.
-fn format_folio(n: usize, style: Option<&str>) -> String {
+pub(super) fn format_folio(n: usize, style: Option<&str>) -> String {
     match style {
         Some("lower-roman") => to_roman(n, false),
         Some("upper-roman") => to_roman(n, true),
@@ -646,6 +654,7 @@ mod tests {
             is_recto: false,
             live_area: None,
             page_index_by_node_id: &by_id,
+            pages: &[],
             footnote_markers: &markers,
             node_boxes: &boxes,
             total_pages: 5,
@@ -883,6 +892,7 @@ mod tests {
             is_recto: page % 2 == 1,
             live_area: None,
             page_index_by_node_id: by_id,
+            pages: &[],
             footnote_markers: markers,
             node_boxes: boxes,
             total_pages: total,
@@ -1200,6 +1210,7 @@ mod tests {
             is_recto: page_1based % 2 == 1,
             live_area: None,
             page_index_by_node_id: by_id,
+            pages: &[],
             footnote_markers: markers,
             node_boxes: boxes,
             total_pages: total,

@@ -363,6 +363,7 @@ fn strip_node_span(node: &mut crate::ast::Node) {
             }
         }
         Node::Field(f) => f.source_span = None,
+        Node::Toc(t) => t.source_span = None,
         Node::Footnote(f) => f.source_span = None,
         Node::Unknown(u) => u.source_span = None,
     }

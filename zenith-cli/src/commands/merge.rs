@@ -142,6 +142,9 @@ fn collect_data_nodes(
             zenith_core::Node::Field(n) => {
                 reject_data_role_on_non_text(n.role.as_deref(), &n.id)?;
             }
+            zenith_core::Node::Toc(n) => {
+                reject_data_role_on_non_text(n.role.as_deref(), &n.id)?;
+            }
             zenith_core::Node::Footnote(n) => {
                 reject_data_role_on_non_text(n.role.as_deref(), &n.id)?;
             }
