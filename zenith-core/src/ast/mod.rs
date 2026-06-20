@@ -11,11 +11,11 @@ pub mod value;
 // Flat re-exports used throughout the crate.
 pub use asset::{AssetBlock, AssetDecl, AssetKind};
 pub use document::{
-    ComponentDef, Document, DocumentBody, Fold, Page, Project, SafeZone, SafeZoneType,
+    ComponentDef, Document, DocumentBody, Fold, MasterDef, Page, Project, SafeZone, SafeZoneType,
 };
 pub use node::{
-    CodeNode, EllipseNode, FrameNode, GroupNode, ImageNode, InstanceNode, LineNode, Node,
-    ObjectPosition, Override, Point, PolygonNode, PolylineNode, RectNode, TextNode, TextSpan,
+    CodeNode, EllipseNode, FieldNode, FrameNode, GroupNode, ImageNode, InstanceNode, LineNode,
+    Node, ObjectPosition, Override, Point, PolygonNode, PolylineNode, RectNode, TextNode, TextSpan,
     UnknownNode, UnknownProperty, UnknownValue,
 };
 pub use span::Span;

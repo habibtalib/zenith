@@ -159,6 +159,24 @@ pub fn validate(doc: &Document) -> ValidationReport {
         component_local_ids.entry(comp.id.clone()).or_insert(local);
     }
 
+    // Declared master ids, collected once so the page walk can validate that
+    // every `page master="..."` references a declared master.
+    let declared_master_ids: HashSet<String> = doc.masters.iter().map(|m| m.id.clone()).collect();
+
+    // Document-wide set of every node id (across pages, masters, and components),
+    // used to resolve a `page-ref` field's `target`. Ordered iteration is not
+    // required (membership only); collected once before the walk.
+    let mut all_node_ids: HashSet<String> = HashSet::new();
+    for page in &doc.body.pages {
+        collect_local_ids(&page.children, &mut all_node_ids);
+    }
+    for master in &doc.masters {
+        collect_local_ids(&master.children, &mut all_node_ids);
+    }
+    for comp in &doc.components {
+        collect_local_ids(&comp.children, &mut all_node_ids);
+    }
+
     // Style lookup by id, so the contrast check can resolve a text node's
     // style-inherited fill / font-size / font-weight. Ordered for determinism.
     let style_map: BTreeMap<&str, &Style> = doc
@@ -214,6 +232,37 @@ pub fn validate(doc: &Document) -> ValidationReport {
                 &declared_style_ids,
                 &declared_component_ids,
                 &component_local_ids,
+                &all_node_ids,
+                None,
+                false,
+                None,
+                &mut diagnostics,
+            );
+        }
+    }
+
+    // ── Master definitions ────────────────────────────────────────────────
+    // Mirrors the component-definition validation: the master id participates
+    // in the GLOBAL uniqueness set, and each master's CHILD ids are validated
+    // for uniqueness within a LOCAL scope (a fresh seen-id set per master) so
+    // the same local id may appear in two masters without colliding. Token/
+    // asset/style refs and field types inside a master are validated ONCE here
+    // at the definition by walking its children exactly like page children.
+    for master in &doc.masters {
+        register_id(&master.id, &mut seen_ids, &mut diagnostics);
+
+        let mut local_seen: HashSet<String> = HashSet::new();
+        for child in &master.children {
+            walk_node(
+                child,
+                &mut local_seen,
+                &mut referenced_token_ids,
+                resolved_tokens,
+                &declared_asset_ids,
+                &declared_style_ids,
+                &declared_component_ids,
+                &component_local_ids,
+                &all_node_ids,
                 None,
                 false,
                 None,
@@ -232,6 +281,22 @@ pub fn validate(doc: &Document) -> ValidationReport {
     for (page_idx0, page) in doc.body.pages.iter().enumerate() {
         let page_index_1based = page_idx0 + 1;
         register_id(&page.id, &mut seen_ids, &mut diagnostics);
+
+        // ── Master reference must resolve to a declared master ────────────
+        if let Some(master_id) = &page.master
+            && !declared_master_ids.contains(master_id)
+        {
+            diagnostics.push(Diagnostic::error(
+                "master.unknown_reference",
+                format!(
+                    "page '{}': references master '{}' which is not declared in the \
+                     masters block",
+                    page.id, master_id
+                ),
+                page.source_span,
+                Some(page.id.clone()),
+            ));
+        }
 
         // ── Check page geometry (unit must be known) ──────────────────────
         if matches!(page.width.unit, Unit::Unknown(_)) {
@@ -345,6 +410,7 @@ pub fn validate(doc: &Document) -> ValidationReport {
                 &declared_style_ids,
                 &declared_component_ids,
                 &component_local_ids,
+                &all_node_ids,
                 page_px_bounds,
                 false,
                 None,
@@ -449,6 +515,9 @@ pub(super) fn collect_local_ids(children: &[crate::ast::node::Node], out: &mut H
                 collect_local_ids(&n.children, out);
             }
             Node::Instance(n) => {
+                out.insert(n.id.clone());
+            }
+            Node::Field(n) => {
                 out.insert(n.id.clone());
             }
             Node::Unknown(_) => {}

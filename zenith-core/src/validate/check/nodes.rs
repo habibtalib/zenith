@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use crate::ast::node::{InstanceNode, Node, PolygonNode, PolylineNode};
+use crate::ast::node::{FieldNode, InstanceNode, Node, PolygonNode, PolylineNode};
 use crate::ast::value::{Dimension, Unit, dim_to_px};
 use crate::diagnostics::Diagnostic;
 use crate::tokens::ResolvedToken;
@@ -35,6 +35,7 @@ pub(super) fn walk_node(
     declared_style_ids: &HashSet<String>,
     declared_component_ids: &HashSet<String>,
     component_local_ids: &BTreeMap<String, HashSet<String>>,
+    all_node_ids: &HashSet<String>,
     page_px_bounds: Option<(f64, f64)>,
     in_flow_parent: bool,
     enclosing_frame: Option<(f64, f64, f64, f64)>,
@@ -667,6 +668,7 @@ pub(super) fn walk_node(
                     declared_style_ids,
                     declared_component_ids,
                     component_local_ids,
+                    all_node_ids,
                     page_px_bounds,
                     children_in_flow,
                     frame_box,
@@ -717,6 +719,7 @@ pub(super) fn walk_node(
                     declared_style_ids,
                     declared_component_ids,
                     component_local_ids,
+                    all_node_ids,
                     page_px_bounds,
                     false,
                     enclosing_frame,
@@ -871,6 +874,18 @@ pub(super) fn walk_node(
             );
         }
 
+        Node::Field(field) => {
+            check_field(
+                field,
+                seen_ids,
+                referenced_token_ids,
+                resolved_tokens,
+                declared_style_ids,
+                all_node_ids,
+                diagnostics,
+            );
+        }
+
         Node::Unknown(u) => {
             diagnostics.push(Diagnostic::warning(
                 "node.unknown_kind",
@@ -970,8 +985,10 @@ pub(super) fn node_bbox(node: &Node, page_w: f64, page_h: f64) -> Option<(f64, f
         Node::Polyline(n) => points_bbox(&n.points, page_w, page_h),
         // Groups have no authoritative bbox in v0 — children are checked
         // individually. An instance likewise has no authoritative bbox: its
-        // expanded subtree (a translated group) is the renderable geometry.
-        Node::Group(_) | Node::Instance(_) | Node::Unknown(_) => None,
+        // expanded subtree (a translated group) is the renderable geometry. A
+        // field's box defaults to the page live area at compile time (x/w may be
+        // omitted), so there is no authored bbox to check against the page here.
+        Node::Group(_) | Node::Instance(_) | Node::Field(_) | Node::Unknown(_) => None,
     }
 }
 
@@ -1027,6 +1044,7 @@ pub(super) fn node_role(node: &Node) -> Option<&str> {
         Node::Polygon(n) => n.role.as_deref(),
         Node::Polyline(n) => n.role.as_deref(),
         Node::Instance(n) => n.role.as_deref(),
+        Node::Field(n) => n.role.as_deref(),
         Node::Unknown(_) => None,
     }
 }
@@ -1045,6 +1063,7 @@ pub(super) fn node_id_and_span(node: &Node) -> (&str, Option<crate::ast::Span>) 
         Node::Polygon(n) => (&n.id, n.source_span),
         Node::Polyline(n) => (&n.id, n.source_span),
         Node::Instance(n) => (&n.id, n.source_span),
+        Node::Field(n) => (&n.id, n.source_span),
         Node::Unknown(n) => (&n.kind, n.source_span),
     }
 }
@@ -1375,6 +1394,127 @@ fn check_instance(
             ),
             inst.source_span,
             Some(inst.id.clone()),
+        ));
+    }
+}
+
+// ── field validation ──────────────────────────────────────────────────────────
+
+/// The known v0 field types.
+const KNOWN_FIELD_TYPES: &[&str] = &["running-head", "page-number", "page-ref"];
+
+/// Validate a `field` node:
+/// - its own `id` participates in GLOBAL uniqueness;
+/// - `type` must be one of the known field types → else `field.unknown_type`
+///   (Warning);
+/// - a `page-ref` field whose `target` matches no node id anywhere in the
+///   document → `field.unresolved_ref` (Warning);
+/// - `style`/`fill`/`font-family`/`font-size` are validated like a text node's,
+///   and any token refs are registered so they are not flagged unused.
+///
+/// A field is a leaf — it does not recurse. Geometry is optional (an absent
+/// x/w defaults to the page live area at compile time), so no missing-geometry
+/// error is raised here.
+fn check_field(
+    field: &FieldNode,
+    seen_ids: &mut HashSet<String>,
+    referenced_token_ids: &mut HashSet<String>,
+    resolved_tokens: &BTreeMap<String, ResolvedToken>,
+    declared_style_ids: &HashSet<String>,
+    all_node_ids: &HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    register_id(&field.id, seen_ids, diagnostics);
+    check_style_ref(
+        &field.id,
+        field.style.as_deref(),
+        declared_style_ids,
+        field.source_span,
+        diagnostics,
+    );
+
+    // Unknown field type → Warning (never a hard error; the field simply renders
+    // nothing at compile time).
+    if !KNOWN_FIELD_TYPES.contains(&field.field_type.as_str()) {
+        diagnostics.push(Diagnostic::warning(
+            "field.unknown_type",
+            format!(
+                "field '{}': unknown type '{}'; expected one of {}",
+                field.id,
+                field.field_type,
+                KNOWN_FIELD_TYPES.join(", ")
+            ),
+            field.source_span,
+            Some(field.id.clone()),
+        ));
+    }
+
+    // A page-ref field with an unresolvable target → Warning. A page-ref with no
+    // target at all is also unresolved (nothing to point at).
+    if field.field_type == "page-ref" {
+        let resolved = field
+            .target
+            .as_ref()
+            .map(|t| all_node_ids.contains(t))
+            .unwrap_or(false);
+        if !resolved {
+            diagnostics.push(Diagnostic::warning(
+                "field.unresolved_ref",
+                format!(
+                    "field '{}': page-ref target {} matches no node id in the document",
+                    field.id,
+                    field
+                        .target
+                        .as_deref()
+                        .map(|t| format!("'{t}'"))
+                        .unwrap_or_else(|| "(absent)".to_owned())
+                ),
+                field.source_span,
+                Some(field.id.clone()),
+            ));
+        }
+    }
+
+    // Visual properties (mirror the text-node checks).
+    check_visual_prop(
+        &field.id,
+        "fill",
+        field.fill.as_ref(),
+        VisualExpect::Color,
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
+    check_visual_prop(
+        &field.id,
+        "font-family",
+        field.font_family.as_ref(),
+        VisualExpect::FontFamily,
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
+    check_visual_prop(
+        &field.id,
+        "font-size",
+        field.font_size.as_ref(),
+        VisualExpect::Dimension,
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
+
+    // Unknown properties on the field node.
+    for prop_name in field.unknown_props.keys() {
+        diagnostics.push(Diagnostic::warning(
+            "node.unknown_property",
+            format!(
+                "field '{}': unknown property '{}' (version-relative; \
+                 may be valid in a later schema version)",
+                field.id, prop_name
+            ),
+            field.source_span,
+            Some(field.id.clone()),
         ));
     }
 }

@@ -8,10 +8,11 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::ast::asset::{AssetBlock, AssetDecl, AssetKind};
-use crate::ast::document::{Document, DocumentBody, Fold, Page, SafeZone, SafeZoneType};
+use crate::ast::document::{Document, DocumentBody, Fold, MasterDef, Page, SafeZone, SafeZoneType};
 use crate::ast::node::ImageNode;
 use crate::ast::node::{
-    CodeNode, EllipseNode, FrameNode, GroupNode, LineNode, Node, RectNode, TextNode, UnknownNode,
+    CodeNode, EllipseNode, FieldNode, FrameNode, GroupNode, LineNode, Node, RectNode, TextNode,
+    UnknownNode,
 };
 use crate::ast::style::StyleBlock;
 use crate::ast::token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue};
@@ -179,6 +180,7 @@ fn minimal_page(id: &str, children: Vec<Node>) -> Page {
         margin_outer: None,
         margin_top: None,
         margin_bottom: None,
+        master: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
         children,
@@ -200,6 +202,7 @@ fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
         },
         styles: StyleBlock::default(),
         components: Vec::new(),
+        masters: Vec::new(),
         body: DocumentBody {
             id: "doc.main".to_owned(),
             title: None,
@@ -520,6 +523,7 @@ fn page_unknown_unit_produces_invalid_geometry() {
             margin_outer: None,
             margin_top: None,
             margin_bottom: None,
+            master: None,
             safe_zones: Vec::new(),
             folds: Vec::new(),
             children: vec![],
@@ -1479,6 +1483,7 @@ fn doc_with_assets(assets: Vec<AssetDecl>) -> Document {
         },
         styles: StyleBlock::default(),
         components: Vec::new(),
+        masters: Vec::new(),
         body: DocumentBody {
             id: "doc.asset-test".to_owned(),
             title: None,
@@ -2117,6 +2122,7 @@ fn doc_with_styles(tokens: Vec<Token>, styles: Vec<Style>, pages: Vec<Page>) -> 
             source_span: None,
         },
         components: Vec::new(),
+        masters: Vec::new(),
         body: DocumentBody {
             id: "doc.main".to_owned(),
             title: None,
@@ -2383,6 +2389,7 @@ fn bounded_page(id: &str, w: f64, h: f64, children: Vec<Node>) -> Page {
         margin_outer: None,
         margin_top: None,
         margin_bottom: None,
+        master: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
         children,
@@ -2562,6 +2569,7 @@ fn page_with_bg(id: &str, bg_token_id: &str, children: Vec<Node>) -> Page {
         margin_outer: None,
         margin_top: None,
         margin_bottom: None,
+        master: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
         children,
@@ -2793,6 +2801,7 @@ fn page_with_zones(
         margin_outer: None,
         margin_top: None,
         margin_bottom: None,
+        master: None,
         safe_zones,
         folds: Vec::new(),
         children,
@@ -3034,6 +3043,7 @@ fn page_with_folds(id: &str, w: f64, h: f64, folds: Vec<Fold>, children: Vec<Nod
         margin_outer: None,
         margin_top: None,
         margin_bottom: None,
+        master: None,
         safe_zones: Vec::new(),
         folds,
         children,
@@ -3560,5 +3570,194 @@ fn page_progression_invalid_warns() {
     assert!(
         !report.has_errors(),
         "page-progression warning must not be a hard error"
+    );
+}
+
+// ── Master-page + field validation ────────────────────────────────────────
+
+/// Build a `field` node with the given id and type; all other props default.
+fn field_node(id: &str, field_type: &str) -> FieldNode {
+    FieldNode {
+        id: id.to_owned(),
+        name: None,
+        role: None,
+        field_type: field_type.to_owned(),
+        recto: None,
+        verso: None,
+        target: None,
+        x: None,
+        y: Some(px(80.0)),
+        h: Some(px(40.0)),
+        w: None,
+        style: None,
+        fill: None,
+        font_family: None,
+        font_size: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    }
+}
+
+/// `doc_with` plus a masters block.
+fn doc_with_masters(tokens: Vec<Token>, masters: Vec<MasterDef>, pages: Vec<Page>) -> Document {
+    let mut doc = doc_with(tokens, pages);
+    doc.masters = masters;
+    doc
+}
+
+#[test]
+fn unknown_master_reference_is_error() {
+    let mut page = minimal_page("p1", vec![]);
+    page.master = Some("m.missing".to_owned());
+    let doc = doc_with(vec![], vec![page]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "master.unknown_reference"),
+        "an unknown master reference must be a hard error; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn declared_master_reference_is_accepted() {
+    let master = MasterDef {
+        id: "m.body".to_owned(),
+        children: vec![],
+        source_span: None,
+    };
+    let mut page = minimal_page("p1", vec![]);
+    page.master = Some("m.body".to_owned());
+    let doc = doc_with_masters(vec![], vec![master], vec![page]);
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "master.unknown_reference"),
+        "a declared master reference must validate cleanly; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn unknown_field_type_is_warning() {
+    let field = Node::Field(field_node("f.bad", "marquee"));
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![field])]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "field.unknown_type"),
+        "an unknown field type must be a warning; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn known_field_types_have_no_unknown_type_warning() {
+    for ty in ["running-head", "page-number", "page-ref"] {
+        let mut f = field_node("f", ty);
+        if ty == "page-ref" {
+            // give it a resolvable target so we isolate the type check
+            f.target = Some("p1".to_owned());
+        }
+        let doc = doc_with(vec![], vec![minimal_page("p1", vec![Node::Field(f)])]);
+        let report = validate(&doc);
+        assert!(
+            !has_code(&report, "field.unknown_type"),
+            "{ty} is a known field type; got {:?}",
+            codes(&report)
+        );
+    }
+}
+
+#[test]
+fn unresolved_page_ref_target_is_warning() {
+    let mut f = field_node("f.ref", "page-ref");
+    f.target = Some("nowhere".to_owned());
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![Node::Field(f)])]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "field.unresolved_ref"),
+        "a page-ref to a missing target must warn; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn resolved_page_ref_target_does_not_warn() {
+    // The page contains a node with id "anchor"; a page-ref to it resolves.
+    let anchor = Node::Rect(RectNode {
+        id: "anchor".to_owned(),
+        name: None,
+        role: None,
+        x: Some(px(0.0)),
+        y: Some(px(0.0)),
+        w: Some(px(10.0)),
+        h: Some(px(10.0)),
+        radius: None,
+        style: None,
+        fill: None,
+        stroke: None,
+        stroke_width: None,
+        stroke_alignment: None,
+        shadow: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        rotate: None,
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    });
+    let mut f = field_node("f.ref", "page-ref");
+    f.target = Some("anchor".to_owned());
+    let doc = doc_with(
+        vec![],
+        vec![minimal_page("p1", vec![anchor, Node::Field(f)])],
+    );
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "field.unresolved_ref"),
+        "a page-ref to a present target must not warn; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn master_id_participates_in_global_uniqueness() {
+    // A master id colliding with a page id is a duplicate-id error.
+    let master = MasterDef {
+        id: "dup".to_owned(),
+        children: vec![],
+        source_span: None,
+    };
+    let mut page = minimal_page("dup", vec![]);
+    page.master = Some("dup".to_owned());
+    let doc = doc_with_masters(vec![], vec![master], vec![page]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "id.duplicate"),
+        "a master id colliding with a page id must be a duplicate; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn master_local_ids_are_scoped_per_master() {
+    // The same local id may appear in two different masters without colliding.
+    let m1 = MasterDef {
+        id: "m1".to_owned(),
+        children: vec![Node::Field(field_node("shared", "page-number"))],
+        source_span: None,
+    };
+    let m2 = MasterDef {
+        id: "m2".to_owned(),
+        children: vec![Node::Field(field_node("shared", "page-number"))],
+        source_span: None,
+    };
+    let doc = doc_with_masters(vec![], vec![m1, m2], vec![minimal_page("p1", vec![])]);
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "id.duplicate"),
+        "the same local id in two masters must not collide; got {:?}",
+        codes(&report)
     );
 }

@@ -24,6 +24,7 @@ fn node_visible_mut(node: &mut Node) -> Option<&mut Option<bool>> {
         Node::Polygon(n) => Some(&mut n.visible),
         Node::Polyline(n) => Some(&mut n.visible),
         Node::Instance(n) => Some(&mut n.visible),
+        Node::Field(n) => Some(&mut n.visible),
         Node::Unknown(_) => None,
     }
 }
@@ -43,6 +44,7 @@ fn node_locked_mut(node: &mut Node) -> Option<&mut Option<bool>> {
         Node::Polygon(n) => Some(&mut n.locked),
         Node::Polyline(n) => Some(&mut n.locked),
         Node::Instance(n) => Some(&mut n.locked),
+        Node::Field(n) => Some(&mut n.locked),
         Node::Unknown(_) => None,
     }
 }

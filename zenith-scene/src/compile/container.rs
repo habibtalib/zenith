@@ -13,6 +13,7 @@ use zenith_layout::RustybuzzEngine;
 use crate::ir::SceneCommand;
 
 use super::chain::ChainAssignments;
+use super::field::FieldCtx;
 use super::util::{resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag};
 use super::{ComponentMap, RenderCtx, compile_node, node_role, style_prop};
 
@@ -29,6 +30,7 @@ pub(super) fn compile_frame(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) {
     // Entire subtree excluded when visible=false (no PushClip emitted).
@@ -135,6 +137,7 @@ pub(super) fn compile_frame(
             commands,
             diagnostics,
             chains,
+            field_ctx,
             child_ctx,
         );
     } else {
@@ -150,6 +153,7 @@ pub(super) fn compile_frame(
                 commands,
                 diagnostics,
                 chains,
+                field_ctx,
                 child_ctx,
             );
         }
@@ -186,6 +190,7 @@ fn compile_frame_flow(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    field_ctx: &FieldCtx,
     child_ctx: RenderCtx,
 ) {
     // Resolve padding / gap from the frame's style (token → px); 0.0 default.
@@ -238,6 +243,7 @@ fn compile_frame_flow(
             commands,
             diagnostics,
             chains,
+            field_ctx,
             child_ctx,
         );
 
@@ -272,6 +278,7 @@ fn node_visible(node: &Node) -> Option<bool> {
         Node::Polygon(n) => n.visible,
         Node::Polyline(n) => n.visible,
         Node::Instance(n) => n.visible,
+        Node::Field(n) => n.visible,
         Node::Unknown(_) => None,
     }
 }
@@ -288,6 +295,7 @@ fn node_declared_w(node: &Node) -> Option<f64> {
         Node::Frame(n) => n.w.as_ref(),
         Node::Group(n) => n.w.as_ref(),
         Node::Image(n) => n.w.as_ref(),
+        Node::Field(n) => n.w.as_ref(),
         Node::Line(_)
         | Node::Polygon(_)
         | Node::Polyline(_)
@@ -308,6 +316,7 @@ fn node_declared_h(node: &Node) -> Option<f64> {
         Node::Frame(n) => n.h.as_ref(),
         Node::Group(n) => n.h.as_ref(),
         Node::Image(n) => n.h.as_ref(),
+        Node::Field(n) => n.h.as_ref(),
         Node::Line(_)
         | Node::Polygon(_)
         | Node::Polyline(_)
@@ -378,6 +387,12 @@ fn with_flow_box(node: &Node, x: f64, y: f64, w: f64, h: Option<f64>) -> Node {
             n.w = px(w);
             n.h = h_dim;
         }
+        Node::Field(n) => {
+            n.x = px(x);
+            n.y = px(y);
+            n.w = px(w);
+            n.h = h_dim;
+        }
         // Geometry-less kinds: no x/y/w/h box to inject. (An instance carries
         // only an x/y origin, no w/h box, so flow layout does not reposition it
         // — it renders at its authored origin and advances the cursor by 0.)
@@ -404,6 +419,7 @@ pub(super) fn compile_group(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) {
     // Entire subtree excluded when visible=false.
@@ -488,6 +504,7 @@ pub(super) fn compile_group(
             commands,
             diagnostics,
             chains,
+            field_ctx,
             child_ctx,
         );
     }
@@ -524,6 +541,7 @@ pub(super) fn compile_instance(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) {
     // Entire expansion excluded when visible=false (mirror group/frame).
@@ -585,6 +603,7 @@ pub(super) fn compile_instance(
         commands,
         diagnostics,
         chains,
+        field_ctx,
         ctx,
     );
 }
@@ -645,6 +664,7 @@ fn set_node_fill(node: &mut Node, fill: PropertyValue) {
         Node::Code(n) => n.fill = Some(fill),
         Node::Polygon(n) => n.fill = Some(fill),
         Node::Polyline(n) => n.fill = Some(fill),
+        Node::Field(n) => n.fill = Some(fill),
         Node::Line(_)
         | Node::Frame(_)
         | Node::Group(_)
@@ -668,6 +688,7 @@ fn set_node_visible(node: &mut Node, v: bool) {
         Node::Polygon(n) => n.visible = Some(v),
         Node::Polyline(n) => n.visible = Some(v),
         Node::Instance(n) => n.visible = Some(v),
+        Node::Field(n) => n.visible = Some(v),
         Node::Unknown(_) => {}
     }
 }
@@ -686,6 +707,7 @@ fn node_local_id(node: &Node) -> Option<&str> {
         Node::Polygon(n) => Some(&n.id),
         Node::Polyline(n) => Some(&n.id),
         Node::Instance(n) => Some(&n.id),
+        Node::Field(n) => Some(&n.id),
         Node::Unknown(_) => None,
     }
 }
@@ -695,7 +717,7 @@ fn node_local_id(node: &Node) -> Option<&str> {
 /// instance ids too). Mirrors the suffix walk used by `duplicate_page` in
 /// zenith-tx (an in-order recursion, deterministic, no HashMap), but applied as
 /// a PREFIX with the instance id so two instances of one component never collide.
-fn prefix_ids_in_children(children: &mut [Node], prefix: &str) {
+pub(super) fn prefix_ids_in_children(children: &mut [Node], prefix: &str) {
     for child in children.iter_mut() {
         prefix_node_id(child, prefix);
         match child {
@@ -725,6 +747,7 @@ fn prefix_node_id(node: &mut Node, prefix: &str) {
         Node::Polygon(n) => pre!(n.id),
         Node::Polyline(n) => pre!(n.id),
         Node::Instance(n) => pre!(n.id),
+        Node::Field(n) => pre!(n.id),
         Node::Unknown(_) => {}
     }
 }
@@ -919,8 +942,9 @@ fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Optio
                 expand!(base_dx + x, base_dy + y, w, h);
             }
             // Instances have no authoritative bbox (their expanded subtree is
-            // the geometry) and unknown nodes have no geometry — skip both.
-            Node::Instance(_) | Node::Unknown(_) => {}
+            // the geometry); a field's box is resolved at projection time, not
+            // here; unknown nodes have no geometry — skip all three.
+            Node::Instance(_) | Node::Field(_) | Node::Unknown(_) => {}
         }
     }
 

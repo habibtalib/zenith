@@ -289,6 +289,16 @@ fn build_node_entry(node: &Node) -> NodeEntry {
             locked: n.locked,
             children: vec![],
         },
+        Node::Field(n) => NodeEntry {
+            id: n.id.clone(),
+            kind: "field".into(),
+            // A field carries an x/y/w/h box (any of which may be omitted, in
+            // which case it defaults to the page live area at compile time).
+            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            visible: n.visible,
+            locked: n.locked,
+            children: vec![],
+        },
         Node::Unknown(n) => NodeEntry {
             id: String::new(),
             kind: n.kind.clone(),
@@ -344,6 +354,7 @@ fn node_id_str(node: &Node) -> &str {
         Node::Polygon(n) => &n.id,
         Node::Polyline(n) => &n.id,
         Node::Instance(n) => &n.id,
+        Node::Field(n) => &n.id,
         Node::Unknown(_) => "",
     }
 }

@@ -62,6 +62,13 @@ pub struct Page {
     /// print). These are non-printing page metadata, not rendering nodes; the
     /// validator advises when content crosses a fold line.
     pub folds: Vec<Fold>,
+    /// Optional master-page reference. When `Some(id)` names a declared
+    /// [`MasterDef`], the master's nodes (running heads, folios, TOC refs) are
+    /// projected UNDER this page's own children at compile time — the master's
+    /// [`Field`](super::node::Node::Field) nodes are resolved against this page's
+    /// index/parity. An unknown reference is a hard `master.unknown_reference`
+    /// validation error. `None` → the page has no master (renders as before).
+    pub master: Option<String>,
     /// Child content nodes in z-order (first = bottommost, last = topmost).
     pub children: Vec<Node>,
     /// Source declaration span, when available.
@@ -139,6 +146,28 @@ pub struct ComponentDef {
     pub source_span: Option<Span>,
 }
 
+/// A reusable master-page definition: a named child-node subtree declared once
+/// (in the document-level `masters` block) and projected onto every [`Page`]
+/// whose `master` attribute names it.
+///
+/// Declared as `master id="m.body" { <any child nodes, incl. field nodes> }`.
+/// Structurally mirrors [`ComponentDef`]: the master's child node ids are LOCAL
+/// to the master (validated for uniqueness only WITHIN the master) and are
+/// prefixed with the page id when the master is projected at compile time. The
+/// `master` id itself participates in the global id-uniqueness set.
+///
+/// Unlike a component, a master is not instanced explicitly: a page opts in via
+/// `page ... master="m.body"`, and the master's [`Field`](super::node::Node::Field)
+/// nodes are resolved against that page's index/parity/live-area at compile time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MasterDef {
+    pub id: String,
+    /// The master's child nodes in source order (the projected subtree).
+    pub children: Vec<super::node::Node>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+}
+
 /// The root `zenith` node — the complete parsed `.zen` document.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
@@ -172,5 +201,8 @@ pub struct Document {
     /// Reusable component definitions; empty when the `components` block is
     /// absent. Instanced via [`Node::Instance`](super::node::Node::Instance).
     pub components: Vec<ComponentDef>,
+    /// Reusable master-page definitions; empty when the `masters` block is
+    /// absent. Projected onto pages via [`Page::master`].
+    pub masters: Vec<MasterDef>,
     pub body: DocumentBody,
 }

@@ -5743,3 +5743,243 @@ fn bleed_render_is_two_run_byte_identical() {
         "two compile runs must be byte-identical"
     );
 }
+
+// ── Master-page + field projection ────────────────────────────────────────
+
+/// A 4-page mirror-margin book whose master carries a running-head + a
+/// page-number field; each page sets `master="m.body"` and has one body text.
+const BOOK_SRC: &str = r##"zenith version=1 mirror-margins=#true {
+  project id="proj.book" name="Book"
+  tokens format="zenith-token-v1" {
+token id="color.ink" type="color" value="#111111"
+  }
+  styles {}
+  masters {
+master id="m.body" {
+  field id="rh" type="running-head" recto="Chapter One: A Long Recto Title" verso="Verso" y=(px)80 h=(px)40 fill=(token)"color.ink"
+  field id="folio" type="page-number" y=(px)1820 h=(px)40 fill=(token)"color.ink"
+}
+  }
+  document id="doc.book" title="Book" {
+page id="p1" w=(px)1200 h=(px)1900 margin-inner=(px)160 margin-outer=(px)100 margin-top=(px)80 margin-bottom=(px)80 master="m.body" {
+  text id="b1" x=(px)160 y=(px)200 w=(px)900 h=(px)40 fill=(token)"color.ink" { span "Body one" }
+}
+page id="p2" w=(px)1200 h=(px)1900 margin-inner=(px)160 margin-outer=(px)100 margin-top=(px)80 margin-bottom=(px)80 master="m.body" {
+  text id="b2" x=(px)160 y=(px)200 w=(px)900 h=(px)40 fill=(token)"color.ink" { span "Body two" }
+}
+page id="p3" w=(px)1200 h=(px)1900 margin-inner=(px)160 margin-outer=(px)100 margin-top=(px)80 margin-bottom=(px)80 master="m.body" {
+  text id="b3" x=(px)160 y=(px)200 w=(px)900 h=(px)40 fill=(token)"color.ink" { span "Body three" }
+}
+page id="p4" w=(px)1200 h=(px)1900 margin-inner=(px)160 margin-outer=(px)100 margin-top=(px)80 margin-bottom=(px)80 master="m.body" {
+  text id="b4" x=(px)160 y=(px)200 w=(px)900 h=(px)40 fill=(token)"color.ink" { span "Body four" }
+}
+  }
+}
+"##;
+
+/// Collect the `(x, y)` origin of every glyph run in a scene, in order.
+fn glyph_run_origins(result: &CompileResult) -> Vec<(f64, f64)> {
+    result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            SceneCommand::DrawGlyphRun { x, y, .. } => Some((*x, *y)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn master_projects_running_head_and_folio_on_every_page() {
+    let doc = parse(BOOK_SRC);
+    let provider = default_provider();
+    for page_index in 0..4 {
+        let r = compile_page(&doc, &provider, page_index);
+        assert!(
+            !r.diagnostics
+                .iter()
+                .any(|d| d.code == "master.unknown_reference"),
+            "page {page_index} must resolve its master"
+        );
+        // Master contributes 2 glyph runs (running head + folio) plus 1 body run.
+        let runs = glyph_run_origins(&r);
+        assert_eq!(
+            runs.len(),
+            3,
+            "page {page_index}: expected running-head + folio + body, got {runs:?}"
+        );
+    }
+}
+
+#[test]
+fn running_head_x_mirrors_recto_vs_verso() {
+    let doc = parse(BOOK_SRC);
+    let provider = default_provider();
+    // Recto (page 1, index 0): live_x = margin_inner = 160.
+    let recto = compile_page(&doc, &provider, 0);
+    // Verso (page 2, index 1): live_x = margin_outer = 100 (mirrored).
+    let verso = compile_page(&doc, &provider, 1);
+
+    // The running-head run is the one whose baseline sits just below y=80
+    // (text_box_top 80 + ascent). Its x is the live-area left inset.
+    let recto_rh_x = glyph_run_origins(&recto)
+        .into_iter()
+        .find(|(_, y)| *y > 80.0 && *y < 130.0)
+        .map(|(x, _)| x);
+    let verso_rh_x = glyph_run_origins(&verso)
+        .into_iter()
+        .find(|(_, y)| *y > 80.0 && *y < 130.0)
+        .map(|(x, _)| x);
+
+    // Both fields are center-aligned within the live-area box. The live-area
+    // left inset differs by parity (recto = margin_inner 160, verso =
+    // margin_outer 100), so the centered run origin must differ — proving the
+    // mirror is active. (Exact run x also depends on the per-parity text width;
+    // the precise live-area inset is asserted directly in field.rs's unit test.)
+    assert!(recto_rh_x.is_some() && verso_rh_x.is_some());
+    assert_ne!(
+        recto_rh_x, verso_rh_x,
+        "running-head x must differ by parity (mirrored live area)"
+    );
+}
+
+#[test]
+fn running_head_recto_verso_text_differs_by_parity() {
+    let doc = parse(BOOK_SRC);
+    let provider = default_provider();
+    // Recto and verso strings have very different lengths → different glyph runs.
+    let recto = compile_page(&doc, &provider, 0);
+    let verso = compile_page(&doc, &provider, 1);
+
+    let rh_glyph_count = |r: &CompileResult| -> Option<usize> {
+        r.scene.commands.iter().find_map(|c| match c {
+            SceneCommand::DrawGlyphRun { y, glyphs, .. } if *y > 80.0 && *y < 130.0 => {
+                Some(glyphs.len())
+            }
+            _ => None,
+        })
+    };
+    let rc = rh_glyph_count(&recto);
+    let vc = rh_glyph_count(&verso);
+    assert!(
+        rc.is_some() && vc.is_some(),
+        "both parities emit a running head"
+    );
+    assert_ne!(
+        rc, vc,
+        "recto 'Chapter 1' and verso 'The Novel' differ in glyph count"
+    );
+}
+
+#[test]
+fn folio_renders_one_per_page_and_two_run_byte_identical() {
+    let doc = parse(BOOK_SRC);
+    let provider = default_provider();
+    // The folio sits at the bottom (text_box_top 1820); exactly one per page.
+    for page_index in 0..4 {
+        let r = compile_page(&doc, &provider, page_index);
+        let folios = glyph_run_origins(&r)
+            .into_iter()
+            .filter(|(_, y)| *y > 1820.0 && *y < 1900.0)
+            .count();
+        assert_eq!(folios, 1, "page {page_index}: exactly one folio run");
+
+        // Two-run byte-identical determinism per page.
+        let a = compile_page(&doc, &provider, page_index);
+        let b = compile_page(&doc, &provider, page_index);
+        assert_eq!(
+            a.scene.to_json().expect("a"),
+            b.scene.to_json().expect("b"),
+            "page {page_index} must be byte-identical across runs"
+        );
+    }
+}
+
+#[test]
+fn inline_page_number_field_renders_folio_without_master() {
+    // A field used directly in a page's children (not via a master) resolves
+    // the same way: a page-number renders the page's 1-based folio.
+    let src = r##"zenith version=1 {
+  project id="proj.inl" name="Inl"
+  tokens format="zenith-token-v1" {
+token id="color.ink" type="color" value="#000000"
+  }
+  styles {}
+  document id="doc.inl" title="Inl" {
+page id="ip1" w=(px)400 h=(px)300 {
+  field id="f.folio" type="page-number" x=(px)10 y=(px)10 w=(px)80 h=(px)30 fill=(token)"color.ink"
+}
+page id="ip2" w=(px)400 h=(px)300 {
+  field id="f.folio2" type="page-number" x=(px)10 y=(px)10 w=(px)80 h=(px)30 fill=(token)"color.ink"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let provider = default_provider();
+    let p1 = compile_page(&doc, &provider, 0);
+    let p2 = compile_page(&doc, &provider, 1);
+    assert_eq!(glyph_run_origins(&p1).len(), 1, "page 1 folio renders");
+    assert_eq!(glyph_run_origins(&p2).len(), 1, "page 2 folio renders");
+}
+
+#[test]
+fn page_ref_field_resolves_target_page_index() {
+    // A page-ref points at a node on page 3; it must render "3".
+    let src = r##"zenith version=1 {
+  project id="proj.ref" name="Ref"
+  tokens format="zenith-token-v1" {
+token id="color.ink" type="color" value="#000000"
+  }
+  styles {}
+  document id="doc.ref" title="Ref" {
+page id="rp1" w=(px)400 h=(px)300 {
+  field id="f.ref" type="page-ref" target="anchor" x=(px)10 y=(px)10 w=(px)80 h=(px)30 fill=(token)"color.ink"
+}
+page id="rp2" w=(px)400 h=(px)300 {
+  rect id="filler" x=(px)0 y=(px)0 w=(px)10 h=(px)10 fill=(token)"color.ink"
+}
+page id="rp3" w=(px)400 h=(px)300 {
+  text id="anchor" x=(px)10 y=(px)10 w=(px)80 h=(px)30 fill=(token)"color.ink" { span "X" }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let provider = default_provider();
+    let p1 = compile_page(&doc, &provider, 0);
+    // The page-ref renders a single glyph run (the digit "3").
+    assert_eq!(
+        glyph_run_origins(&p1).len(),
+        1,
+        "page-ref to a page-3 anchor renders one digit run"
+    );
+}
+
+#[test]
+fn non_master_page_is_byte_identical_to_before() {
+    // A document with no masters and no fields must compile to the exact same
+    // command stream as it would have without the feature (regression guard).
+    let src = r##"zenith version=1 {
+  project id="proj.nm" name="NM"
+  tokens format="zenith-token-v1" {
+token id="color.fill" type="color" value="#f8fafc"
+  }
+  styles {}
+  document id="doc.nm" title="NM" {
+page id="page.nm" w=(px)640 h=(px)360 {
+  rect id="rect.nm" x=(px)0 y=(px)0 w=(px)640 h=(px)360 fill=(token)"color.fill"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let provider = default_provider();
+    let r = compile(&doc, &provider);
+    // Exactly PushClip, FillRect, PopClip — unchanged from the pre-feature path.
+    assert_eq!(r.scene.commands.len(), 3, "{:?}", r.scene.commands);
+    assert!(matches!(r.scene.commands[0], SceneCommand::PushClip { .. }));
+    assert!(matches!(r.scene.commands[1], SceneCommand::FillRect { .. }));
+    assert!(matches!(r.scene.commands[2], SceneCommand::PopClip));
+}

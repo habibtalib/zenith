@@ -5,9 +5,9 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    CodeNode, DocumentBody, EllipseNode, Fold, FrameNode, GroupNode, ImageNode, InstanceNode,
-    LineNode, Node, Override, Page, Point, PolygonNode, PolylineNode, RectNode, SafeZone,
-    SafeZoneType, TextNode, TextSpan,
+    CodeNode, DocumentBody, EllipseNode, FieldNode, Fold, FrameNode, GroupNode, ImageNode,
+    InstanceNode, LineNode, Node, Override, Page, Point, PolygonNode, PolylineNode, RectNode,
+    SafeZone, SafeZoneType, TextNode, TextSpan,
 };
 
 use super::{
@@ -58,6 +58,7 @@ fn write_page(page: &Page, out: &mut String, depth: usize) {
     write_opt_dimension(out, "margin-outer", &page.margin_outer);
     write_opt_dimension(out, "margin-top", &page.margin_top);
     write_opt_dimension(out, "margin-bottom", &page.margin_bottom);
+    write_opt_str(out, "master", &page.master);
 
     out.push_str(" {\n");
     // Safe-zones and folds are page metadata, emitted before the renderable
@@ -159,8 +160,50 @@ fn write_node(node: &Node, out: &mut String, depth: usize) {
         Node::Polygon(p) => write_polygon(p, out, depth),
         Node::Polyline(p) => write_polyline(p, out, depth),
         Node::Instance(i) => write_instance(i, out, depth),
+        Node::Field(f) => write_field(f, out, depth),
         Node::Unknown(u) => write_unknown_node(u, out, depth),
     }
+}
+
+fn write_field(f: &FieldNode, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("field");
+
+    // Canonical property order: id, name, role, type, recto, verso, target,
+    // x, y, w, h, fill, font-family, font-size, opacity, visible, locked, style,
+    // then unknown props (sorted). A field is a leaf — no child block.
+    out.push_str(" id=\"");
+    out.push_str(&f.id);
+    out.push('"');
+    write_opt_str(out, "name", &f.name);
+    write_opt_str(out, "role", &f.role);
+    out.push_str(" type=\"");
+    out.push_str(&f.field_type);
+    out.push('"');
+    write_opt_str(out, "recto", &f.recto);
+    write_opt_str(out, "verso", &f.verso);
+    write_opt_str(out, "target", &f.target);
+    write_opt_dimension(out, "x", &f.x);
+    write_opt_dimension(out, "y", &f.y);
+    write_opt_dimension(out, "w", &f.w);
+    write_opt_dimension(out, "h", &f.h);
+    write_opt_property_value(out, "fill", &f.fill);
+    write_opt_property_value(out, "font-family", &f.font_family);
+    write_opt_property_value(out, "font-size", &f.font_size);
+    write_opt_f64(out, "opacity", &f.opacity);
+    write_opt_bool(out, "visible", &f.visible);
+    write_opt_bool(out, "locked", &f.locked);
+    write_opt_str(out, "style", &f.style);
+
+    // Unknown properties in sorted key order.
+    for (key, prop) in &f.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_value(&prop.value));
+    }
+
+    out.push('\n');
 }
 
 fn write_instance(i: &InstanceNode, out: &mut String, depth: usize) {

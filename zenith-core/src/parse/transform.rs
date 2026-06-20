@@ -10,11 +10,14 @@ use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
 use crate::ast::{
     Span,
     asset::{AssetBlock, AssetDecl, AssetKind},
-    document::{ComponentDef, Document, DocumentBody, Fold, Page, Project, SafeZone, SafeZoneType},
+    document::{
+        ComponentDef, Document, DocumentBody, Fold, MasterDef, Page, Project, SafeZone,
+        SafeZoneType,
+    },
     node::{
-        CodeNode, EllipseNode, FrameNode, GroupNode, ImageNode, InstanceNode, LineNode, Node,
-        ObjectPosition, Override, Point, PolygonNode, PolylineNode, RectNode, TextNode, TextSpan,
-        UnknownNode, UnknownProperty, UnknownValue,
+        CodeNode, EllipseNode, FieldNode, FrameNode, GroupNode, ImageNode, InstanceNode, LineNode,
+        Node, ObjectPosition, Override, Point, PolygonNode, PolylineNode, RectNode, TextNode,
+        TextSpan, UnknownNode, UnknownProperty, UnknownValue,
     },
     style::{Style, StyleBlock, UnknownStyleProp},
     token::{
@@ -355,6 +358,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     let mut tokens = TokenBlock::default();
     let mut styles = StyleBlock::default();
     let mut components: Vec<ComponentDef> = Vec::new();
+    let mut masters: Vec<MasterDef> = Vec::new();
     let mut body: Option<DocumentBody> = None;
 
     for child in children_doc.nodes() {
@@ -373,6 +377,9 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
             }
             "components" => {
                 components = transform_components(child)?;
+            }
+            "masters" => {
+                masters = transform_masters(child)?;
             }
             "document" => {
                 body = Some(transform_document_body(child)?);
@@ -400,7 +407,39 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
         tokens,
         styles,
         components,
+        masters,
         body,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Masters
+// ---------------------------------------------------------------------------
+
+/// Transform the document-level `masters { … }` block into a list of
+/// [`MasterDef`]. Each `master id="..." { <child nodes> }` becomes one
+/// definition whose children are parsed exactly like page/group children (via
+/// [`transform_node`]). Non-`master` children inside the block are silently
+/// ignored (forward-compat). Mirrors [`transform_components`].
+fn transform_masters(node: &KdlNode) -> Result<Vec<MasterDef>, ParseError> {
+    let mut defs: Vec<MasterDef> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "master" {
+                defs.push(transform_master_def(child)?);
+            }
+        }
+    }
+    Ok(defs)
+}
+
+fn transform_master_def(node: &KdlNode) -> Result<MasterDef, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+    let children = transform_children(node)?;
+    Ok(MasterDef {
+        id,
+        children,
+        source_span: node_span(node),
     })
 }
 
@@ -885,6 +924,10 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
     let margin_bottom = optional_dimension_prop(node, "margin-bottom")
         .or_else(|| optional_dimension_prop(node, "margin_bottom"));
 
+    // Optional master-page reference (`master="m.body"`). Existence is checked by
+    // the validator (master.unknown_reference), never the parser.
+    let master = optional_string_prop(node, "master").map(str::to_owned);
+
     let source_span = node_span(node);
 
     // A page's children block mixes `safe-zone` and `fold` declarations (page
@@ -915,6 +958,7 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
         margin_outer,
         margin_top,
         margin_bottom,
+        master,
         safe_zones,
         folds,
         children,
@@ -1049,6 +1093,7 @@ fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
         "polygon" => transform_polygon(node).map(Node::Polygon),
         "polyline" => transform_polyline(node).map(Node::Polyline),
         "instance" => transform_instance(node).map(Node::Instance),
+        "field" => transform_field(node).map(Node::Field),
         _ => Ok(Node::Unknown(UnknownNode {
             kind: node.name().value().to_owned(),
             source_span: node_span(node),
@@ -1697,6 +1742,69 @@ fn transform_override(node: &KdlNode) -> Result<Override, ParseError> {
         fill: optional_property_value(node, "fill"),
         visible: optional_bool_prop(node, "visible"),
         source_span: node_span(node),
+    })
+}
+
+const FIELD_KNOWN_PROPS: &[&str] = &[
+    "id",
+    "name",
+    "role",
+    "type",
+    "recto",
+    "verso",
+    "target",
+    "x",
+    "y",
+    "w",
+    "h",
+    "style",
+    "fill",
+    "font-family",
+    "font_family",
+    "font-size",
+    "font_size",
+    "opacity",
+    "visible",
+    "locked",
+];
+
+/// Transform a `field` node into a [`FieldNode`].
+///
+/// Reads required `id` and `type`; optional `recto`/`verso`/`target` strings;
+/// optional `x`/`y`/`w`/`h` geometry; and visual props (`style`/`fill`/
+/// `font-family`/`font-size`). The `type` value is preserved verbatim (the
+/// validator warns on an unknown type), as is `target` (the compiler resolves
+/// the page-ref and the validator warns on an unresolved one).
+fn transform_field(node: &KdlNode) -> Result<FieldNode, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+    let field_type = required_string_prop(node, "type")?.to_owned();
+
+    let font_family = optional_property_value_aliased(node, "font-family", "font_family");
+    let font_size = optional_property_value_aliased(node, "font-size", "font_size");
+
+    let unknown_props = collect_unknown_props(node, FIELD_KNOWN_PROPS);
+
+    Ok(FieldNode {
+        id,
+        name: optional_string_prop(node, "name").map(str::to_owned),
+        role: optional_string_prop(node, "role").map(str::to_owned),
+        field_type,
+        recto: optional_string_prop(node, "recto").map(str::to_owned),
+        verso: optional_string_prop(node, "verso").map(str::to_owned),
+        target: optional_string_prop(node, "target").map(str::to_owned),
+        x: optional_dimension_prop(node, "x"),
+        y: optional_dimension_prop(node, "y"),
+        w: optional_dimension_prop(node, "w"),
+        h: optional_dimension_prop(node, "h"),
+        style: optional_string_prop(node, "style").map(str::to_owned),
+        fill: optional_property_value(node, "fill"),
+        font_family,
+        font_size,
+        opacity: optional_f64_prop(node, "opacity"),
+        visible: optional_bool_prop(node, "visible"),
+        locked: optional_bool_prop(node, "locked"),
+        source_span: node_span(node),
+        unknown_props,
     })
 }
 

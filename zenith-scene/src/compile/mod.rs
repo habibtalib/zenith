@@ -18,6 +18,7 @@
 mod chain;
 mod container;
 mod crop;
+mod field;
 mod image;
 mod leaf;
 mod paint;
@@ -30,8 +31,8 @@ mod tests;
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    ComponentDef, Diagnostic, Document, FontProvider, Node, PropertyValue, ResolvedToken, Style,
-    dim_to_px, resolve_tokens,
+    ComponentDef, Diagnostic, Document, FontProvider, MasterDef, Node, PropertyValue,
+    ResolvedToken, Style, dim_to_px, resolve_tokens,
 };
 use zenith_layout::RustybuzzEngine;
 
@@ -39,6 +40,7 @@ use crate::ir::{Rect, Scene, SceneCommand};
 
 use chain::{ChainAssignments, resolve_chains_document};
 use container::{compile_frame, compile_group, compile_instance};
+use field::{FieldCtx, build_page_index_map, compute_live_area, resolve_field_to_text};
 use image::compile_image;
 use leaf::{compile_ellipse, compile_line, compile_polygon, compile_polyline, compile_rect};
 use paint::{resolve_property_color, resolve_property_gradient};
@@ -48,6 +50,11 @@ use text::{compile_code, compile_text};
 /// node-compilation dispatch so [`Node::Instance`] can expand its referenced
 /// component subtree. Ordered (`BTreeMap`) for deterministic iteration.
 pub(super) type ComponentMap<'a> = BTreeMap<&'a str, &'a ComponentDef>;
+
+/// Compile-time lookup of master-page definitions by id. A page with a `master`
+/// attribute projects the named master's nodes (with fields resolved against
+/// that page) UNDER its own children. Ordered (`BTreeMap`) for determinism.
+pub(super) type MasterMap<'a> = BTreeMap<&'a str, &'a MasterDef>;
 
 // ── Render context ────────────────────────────────────────────────────────────
 
@@ -173,6 +180,17 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
     for comp in &doc.components {
         component_map.entry(comp.id.as_str()).or_insert(comp);
     }
+
+    // ── Step 1d: build master lookup map + page-ref index ────────────────
+    // A page's `master` attribute projects the named master's nodes (fields
+    // resolved against that page) under the page's own children. The page-ref
+    // index maps every node id to the 1-based page that contains it, for
+    // `page-ref` field resolution. Both are document-wide and order-stable.
+    let mut master_map: MasterMap = BTreeMap::new();
+    for master in &doc.masters {
+        master_map.entry(master.id.as_str()).or_insert(master);
+    }
+    let page_index_by_node_id = build_page_index_map(doc);
 
     // ── Step 2: select the requested page ────────────────────────────────
     let Some(page) = doc.body.pages.get(page_index) else {
@@ -315,7 +333,60 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
         diagnostics.extend(chain_diags);
     }
 
-    // ── Step 7: children in source order (z-order: first = bottom) ───────
+    // ── Step 7: build the per-page field context ─────────────────────────
+    // The 1-based page index drives the folio + parity (recto = odd, verso =
+    // even). The live area mirrors the validator's margin formula so an omitted
+    // field x/w auto-mirrors recto/verso via the page margins.
+    let page_index_1based = page_index + 1;
+    let is_recto = page_index_1based % 2 == 1;
+    let mirror_margins = doc.mirror_margins.unwrap_or(false);
+    let live_area = compute_live_area(page, page_w, page_h, is_recto, mirror_margins);
+    let field_ctx = FieldCtx {
+        page_index_1based,
+        is_recto,
+        live_area,
+        page_index_by_node_id: &page_index_by_node_id,
+    };
+
+    let root_ctx = if bleed > 0.0 {
+        // Shift authored coordinates into the trim box. With bleed = 0 this is
+        // the identity root context (byte-identical to before).
+        RenderCtx::root_offset(bleed, bleed)
+    } else {
+        RenderCtx::root()
+    };
+
+    // ── Step 7a: project the page's master (UNDER its own children) ──────
+    // When `page.master` names a declared master, clone the master's children,
+    // prefix every projected id with the page id (avoid cross-page collisions),
+    // and compile them BEFORE the page's own children so running heads / folios
+    // sit behind body text. Fields inside the master resolve against THIS page.
+    // An unknown master reference is a hard validation error; here it is simply
+    // skipped (the compiler never panics on bad references).
+    if let Some(master_id) = &page.master
+        && let Some(master) = master_map.get(master_id.as_str())
+    {
+        let mut projected = master.children.clone();
+        let prefix = format!("{}/", page.id);
+        container::prefix_ids_in_children(&mut projected, &prefix);
+        for node in &projected {
+            compile_node(
+                node,
+                resolved,
+                &style_map,
+                &component_map,
+                fonts,
+                &engine,
+                &mut scene.commands,
+                &mut diagnostics,
+                &chains,
+                &field_ctx,
+                root_ctx,
+            );
+        }
+    }
+
+    // ── Step 7b: page children in source order (z-order: first = bottom) ─
     for node in &page.children {
         compile_node(
             node,
@@ -327,13 +398,8 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
             &mut scene.commands,
             &mut diagnostics,
             &chains,
-            // Shift authored coordinates into the trim box. With bleed = 0 this
-            // is the identity root context (byte-identical to before).
-            if bleed > 0.0 {
-                RenderCtx::root_offset(bleed, bleed)
-            } else {
-                RenderCtx::root()
-            },
+            &field_ctx,
+            root_ctx,
         );
     }
 
@@ -382,6 +448,7 @@ pub(super) fn node_role(node: &Node) -> Option<&str> {
         Node::Polygon(n) => n.role.as_deref(),
         Node::Polyline(n) => n.role.as_deref(),
         Node::Instance(n) => n.role.as_deref(),
+        Node::Field(n) => n.role.as_deref(),
         Node::Unknown(_) => None,
     }
 }
@@ -407,6 +474,7 @@ pub(super) fn compile_node(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) -> f64 {
     // Non-printing guide nodes (`role="guide"`) are excluded from render output
@@ -450,6 +518,7 @@ pub(super) fn compile_node(
                 commands,
                 diagnostics,
                 chains,
+                field_ctx,
                 ctx,
             );
             0.0
@@ -465,6 +534,7 @@ pub(super) fn compile_node(
                 commands,
                 diagnostics,
                 chains,
+                field_ctx,
                 ctx,
             );
             0.0
@@ -480,8 +550,29 @@ pub(super) fn compile_node(
                 commands,
                 diagnostics,
                 chains,
+                field_ctx,
                 ctx,
             );
+            0.0
+        }
+        Node::Field(field) => {
+            // Resolve the field against this page into a concrete single-line
+            // text node and compile it via the normal text path. An unresolved
+            // field (absent running-head side, unknown type, unresolved
+            // page-ref) yields nothing.
+            if let Some(text_node) = resolve_field_to_text(field, field_ctx) {
+                compile_text(
+                    &text_node,
+                    resolved,
+                    style_map,
+                    fonts,
+                    engine,
+                    commands,
+                    diagnostics,
+                    chains,
+                    ctx,
+                );
+            }
             0.0
         }
         Node::Image(image) => {

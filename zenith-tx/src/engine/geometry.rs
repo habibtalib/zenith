@@ -56,6 +56,9 @@ fn node_geometry_mut(node: &mut Node) -> Option<GeometryMut<'_>> {
         Node::Text(t) => Some((&mut t.x, &mut t.y, &mut t.w, &mut t.h)),
         Node::Code(c) => Some((&mut c.x, &mut c.y, &mut c.w, &mut c.h)),
         Node::Group(g) => Some((&mut g.x, &mut g.y, &mut g.w, &mut g.h)),
+        // A field carries a real x/y/w/h box (the resolved single-line text box),
+        // so set_geometry applies to it like any other bbox node.
+        Node::Field(f) => Some((&mut f.x, &mut f.y, &mut f.w, &mut f.h)),
         // `Instance` is excluded: it carries only an x/y origin, no w/h box, so
         // the four-slot bbox setter does not apply. A set_geometry on an instance
         // honestly surfaces tx.unsupported_property rather than silently dropping

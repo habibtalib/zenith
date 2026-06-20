@@ -147,6 +147,13 @@ fn strip_spans(mut doc: crate::ast::Document) -> crate::ast::Document {
             strip_node_span(node);
         }
     }
+    // Masters
+    for master in &mut doc.masters {
+        master.source_span = None;
+        for node in &mut master.children {
+            strip_node_span(node);
+        }
+    }
     // Pages and nodes
     for page in &mut doc.body.pages {
         page.source_span = None;
@@ -193,6 +200,7 @@ fn strip_node_span(node: &mut crate::ast::Node) {
                 ov.source_span = None;
             }
         }
+        Node::Field(f) => f.source_span = None,
         Node::Unknown(u) => u.source_span = None,
     }
 }
@@ -1872,5 +1880,85 @@ fn test_span_vertical_align_round_trip() {
         strip_spans(doc),
         strip_spans(reparsed),
         "span vertical-align must survive parse → format → parse"
+    );
+}
+
+/// A `.zen` document exercising the masters block, a page `master` attribute,
+/// and all three field types (running-head, page-number, page-ref) — both via a
+/// master and inline in a page.
+const MASTER_FIELD_DOC: &str = r##"zenith version=1 mirror-margins=#true {
+  project id="proj.mf" name="MF"
+  tokens format="zenith-token-v1" {
+    token id="color.ink" type="color" value="#111111"
+  }
+  styles {
+  }
+  masters {
+    master id="m.body" {
+      field id="rh" type="running-head" recto="Recto Title" verso="Verso Title" y=(px)80 h=(px)40 fill=(token)"color.ink"
+      field id="folio" type="page-number" y=(px)1820 h=(px)40 fill=(token)"color.ink"
+    }
+  }
+  document id="doc.mf" title="MF" {
+    page id="p1" w=(px)1200 h=(px)1900 margin-inner=(px)160 margin-outer=(px)100 margin-top=(px)80 margin-bottom=(px)80 master="m.body" {
+      field id="xref" type="page-ref" target="anchor" x=(px)10 y=(px)10 w=(px)80 h=(px)30 fill=(token)"color.ink"
+    }
+    page id="p2" w=(px)1200 h=(px)1900 margin-inner=(px)160 margin-outer=(px)100 margin-top=(px)80 margin-bottom=(px)80 master="m.body" {
+      text id="anchor" x=(px)160 y=(px)200 w=(px)900 h=(px)40 fill=(token)"color.ink" {
+        span "Body"
+      }
+    }
+  }
+}
+"##;
+
+/// **Masters + field round-trip**: the masters block, the page `master`
+/// attribute, and every field node must survive parse → format → parse with an
+/// identical AST (spans excluded), and the formatter must be idempotent.
+#[test]
+fn test_master_field_round_trip() {
+    let adapter = KdlAdapter;
+    let doc_orig = adapter
+        .parse(MASTER_FIELD_DOC.as_bytes())
+        .expect("original parse");
+    let formatted = format_document(&doc_orig).expect("format");
+    let text = String::from_utf8(formatted.clone()).expect("utf8");
+
+    // The masters block emits after components / before document, and a field
+    // node carries the canonical attribute order.
+    assert!(text.contains("masters {"), "masters block missing:\n{text}");
+    assert!(
+        text.contains("master id=\"m.body\""),
+        "master decl missing:\n{text}"
+    );
+    assert!(
+        text.contains(
+            "field id=\"rh\" type=\"running-head\" recto=\"Recto Title\" verso=\"Verso Title\""
+        ),
+        "running-head field line missing/incorrect:\n{text}"
+    );
+    assert!(
+        text.contains("master=\"m.body\""),
+        "page master attribute missing:\n{text}"
+    );
+    assert!(
+        text.contains("field id=\"xref\" type=\"page-ref\" target=\"anchor\""),
+        "page-ref field line missing/incorrect:\n{text}"
+    );
+
+    let doc_reparsed = adapter.parse(&formatted).expect("re-parse after format");
+
+    // Idempotency (format the re-parsed doc before it is consumed by strip).
+    let s2 = format_document(&doc_reparsed).expect("format 2");
+    assert_eq!(
+        text,
+        String::from_utf8(s2).expect("utf8 2"),
+        "format must be idempotent for masters + fields"
+    );
+
+    assert_eq!(
+        strip_spans(doc_orig),
+        strip_spans(doc_reparsed),
+        "masters + field must survive a format round-trip (spans excluded)"
     );
 }

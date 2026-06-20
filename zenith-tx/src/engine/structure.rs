@@ -480,6 +480,10 @@ fn node_set_id(node: &mut Node, new_id: String) -> bool {
             p.id = new_id;
             true
         }
+        Node::Field(f) => {
+            f.id = new_id;
+            true
+        }
         // Containers (and the container-ish instance) are handled by the v0
         // guard in apply_duplicate_node; Unknown nodes have no id field and are
         // never reached here.
@@ -638,7 +642,8 @@ fn node_set_id_any(node: &mut Node, new_id: String) {
         | Node::Code(_)
         | Node::Image(_)
         | Node::Polygon(_)
-        | Node::Polyline(_) => {
+        | Node::Polyline(_)
+        | Node::Field(_) => {
             node_set_id(node, new_id);
         }
         Node::Unknown(_) => {}
@@ -828,6 +833,7 @@ pub(super) fn apply_add_page(
         margin_outer: None,
         margin_top: None,
         margin_bottom: None,
+        master: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
         children: Vec::new(),

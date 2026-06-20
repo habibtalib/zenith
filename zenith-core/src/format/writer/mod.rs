@@ -29,7 +29,7 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    AssetBlock, AssetDecl, ComponentDef, Dimension, Document, ObjectPosition, Project,
+    AssetBlock, AssetDecl, ComponentDef, Dimension, Document, MasterDef, ObjectPosition, Project,
     PropertyValue, Unit, UnknownValue,
 };
 use crate::error::FormatError;
@@ -248,9 +248,39 @@ fn write_document(doc: &Document, out: &mut String) {
     write_token_block(&doc.tokens, out, 1);
     write_style_block(&doc.styles, out, 1);
     write_component_block(&doc.components, out, 1);
+    write_master_block(&doc.masters, out, 1);
     write_document_body(&doc.body, out, 1);
 
     out.push('}');
+}
+
+// ---------------------------------------------------------------------------
+// Masters
+// ---------------------------------------------------------------------------
+
+/// Emit the `masters { … }` block.
+///
+/// Stable position: after `components`, before `document`. Emitted ONLY when at
+/// least one master is declared, so documents without masters keep their
+/// existing canonical form (and round-trip) unchanged. Each master emits
+/// `master id="…" { <child nodes> }`. Mirrors [`write_component_block`].
+fn write_master_block(masters: &[MasterDef], out: &mut String, depth: usize) {
+    if masters.is_empty() {
+        return;
+    }
+    indent(out, depth);
+    out.push_str("masters {\n");
+    for def in masters {
+        indent(out, depth + 1);
+        out.push_str("master id=\"");
+        out.push_str(&def.id);
+        out.push_str("\" {\n");
+        write_component_children(&def.children, out, depth + 1);
+        indent(out, depth + 1);
+        out.push_str("}\n");
+    }
+    indent(out, depth);
+    out.push_str("}\n");
 }
 
 // ---------------------------------------------------------------------------

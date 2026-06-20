@@ -523,6 +523,59 @@ pub struct InstanceNode {
     pub unknown_props: BTreeMap<String, UnknownProperty>,
 }
 
+/// A `field` node — an auto-resolved text placeholder for book interiors.
+///
+/// A field is a LEAF that, at compile time, resolves to a single-line text run
+/// against the page it is projected onto. It is the building block of the
+/// master-page / running-head / folio system: a master declares a field once
+/// (e.g. a running head or a page-number) and every page that uses the master
+/// gets the field resolved against that page's index and parity.
+///
+/// Field types (v0):
+/// - `"running-head"` → renders [`FieldNode::recto`] on odd (recto) pages and
+///   [`FieldNode::verso`] on even (verso) pages; an absent side renders nothing.
+/// - `"page-number"` → renders the page's folio (its 1-based index in
+///   `doc.body.pages`) as a decimal string.
+/// - `"page-ref"` → renders the 1-based page index of the page that CONTAINS the
+///   node whose id equals [`FieldNode::target`] (document-wide search). A missing
+///   target produces an advisory `field.unresolved_ref` and renders nothing.
+///
+/// Geometry: when `x`/`w` are omitted the field defaults to the page's live
+/// area (so a running head auto-mirrors recto/verso x via the page margins).
+/// `y`/`h` default to the live area's top/height when omitted. The resolved run
+/// is shaped like a single-line text node: `running-head` / `page-number`
+/// default to `align="center"`, `page-ref` to `align="start"`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldNode {
+    pub id: String,
+    pub name: Option<String>,
+    pub role: Option<String>,
+    /// The field kind string (`"running-head"`/`"page-number"`/`"page-ref"`).
+    /// Validated, not enum-typed, so unknown values survive for forward-compat.
+    pub field_type: String,
+    /// Recto-side text for a `running-head` field (odd, 1-based pages).
+    pub recto: Option<String>,
+    /// Verso-side text for a `running-head` field (even pages).
+    pub verso: Option<String>,
+    /// Target node id for a `page-ref` field.
+    pub target: Option<String>,
+    pub x: Option<Dimension>,
+    pub y: Option<Dimension>,
+    pub w: Option<Dimension>,
+    pub h: Option<Dimension>,
+    pub style: Option<String>,
+    pub fill: Option<PropertyValue>,
+    pub font_family: Option<PropertyValue>,
+    pub font_size: Option<PropertyValue>,
+    pub opacity: Option<f64>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+}
+
 /// A renderable content node within a page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
@@ -537,5 +590,6 @@ pub enum Node {
     Polygon(PolygonNode),
     Polyline(PolylineNode),
     Instance(InstanceNode),
+    Field(FieldNode),
     Unknown(UnknownNode),
 }
