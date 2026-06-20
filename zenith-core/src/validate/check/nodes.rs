@@ -2052,7 +2052,15 @@ fn check_instance(
 // ── field validation ──────────────────────────────────────────────────────────
 
 /// The known v0 field types.
-const KNOWN_FIELD_TYPES: &[&str] = &["running-head", "page-number", "page-ref", "page-count"];
+const KNOWN_FIELD_TYPES: &[&str] = &[
+    "running-head",
+    "page-number",
+    "page-ref",
+    "page-count",
+    "section-page-number",
+    "section-page-count",
+    "section-name",
+];
 
 /// Validate a `field` node:
 /// - its own `id` participates in GLOBAL uniqueness;
