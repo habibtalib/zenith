@@ -14,7 +14,8 @@ use resvg::usvg;
 use resvg::usvg::TreeParsing;
 use resvg::usvg::TreeTextToPath;
 use tiny_skia::{
-    FillRule, FilterQuality, Mask, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform,
+    FillRule, FilterQuality, IntRect, Mask, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke,
+    Transform,
 };
 use zenith_core::{AssetKind, AssetProvider, FontProvider};
 use zenith_scene::{FitMode, ImageClip, Scene, SceneCommand, ShadowSpec};
@@ -544,6 +545,7 @@ impl RasterBackend for TinySkiaBackend {
                     pos_y,
                     opacity,
                     clip_shape,
+                    src_rect,
                 } => {
                     // ── a. Resolve bytes; only raster images are drawn ────────
                     let Some(asset) = assets.by_id(asset_id) else {
@@ -552,10 +554,37 @@ impl RasterBackend for TinySkiaBackend {
                     // ── b. Produce a raster Pixmap from Image (PNG) or Svg ────
                     let src: Pixmap = match asset.kind {
                         AssetKind::Image => {
-                            let Some(p) = decode_raster_image(&asset.bytes) else {
+                            let Some(decoded) = decode_raster_image(&asset.bytes) else {
                                 continue; // unsupported/malformed raster image: skip
                             };
-                            p
+                            // Apply src-rect crop when present, before fit math.
+                            // SVG assets skip this block (src_rect ignored for SVG).
+                            if let Some(sr) = src_rect.as_ref() {
+                                let (rx, ry, rw, rh) = (sr.x, sr.y, sr.w, sr.h);
+                                let src_w = decoded.width() as f64;
+                                let src_h = decoded.height() as f64;
+                                // Clamp crop region to source image bounds.
+                                let cx = rx.max(0.0).min(src_w) as i32;
+                                let cy = ry.max(0.0).min(src_h) as i32;
+                                let cx2 = (rx + rw).max(0.0).min(src_w) as i32;
+                                let cy2 = (ry + rh).max(0.0).min(src_h) as i32;
+                                let cw = (cx2 - cx).max(0) as u32;
+                                let ch = (cy2 - cy).max(0) as u32;
+                                if cw == 0 || ch == 0 {
+                                    continue; // degenerate crop after clamping: skip draw
+                                }
+                                if let Some(rect) = IntRect::from_xywh(cx, cy, cw, ch) {
+                                    if let Some(cropped) = decoded.as_ref().clone_rect(rect) {
+                                        cropped
+                                    } else {
+                                        continue; // clone_rect returned None: degenerate
+                                    }
+                                } else {
+                                    continue; // IntRect construction failed: degenerate
+                                }
+                            } else {
+                                decoded
+                            }
                         }
                         AssetKind::Svg => {
                             // Build the fontdb at most once per render, only when

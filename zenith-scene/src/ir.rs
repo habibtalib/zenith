@@ -127,6 +127,30 @@ pub enum FitMode {
     None,
 }
 
+// ── Image source rect ─────────────────────────────────────────────────────────
+
+/// A sub-rectangle within the source image used as the effective source for a
+/// [`SceneCommand::DrawImage`] command.
+///
+/// All four coordinates are in source-image pixels (top-left origin). The rect
+/// is clamped to the source image bounds at render time; a degenerate rect (zero
+/// width or height after clamping) causes the draw to be skipped.
+///
+/// Applies to raster `kind="image"` assets only; ignored for SVG assets (vector
+/// assets are resolution-independent and src-rect is a raster concept). This is
+/// a documented v0 limitation.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SrcRect {
+    /// Left edge of the crop in source pixels.
+    pub x: f64,
+    /// Top edge of the crop in source pixels.
+    pub y: f64,
+    /// Width of the crop in source pixels (> 0).
+    pub w: f64,
+    /// Height of the crop in source pixels (> 0).
+    pub h: f64,
+}
+
 // ── Image clip shape ──────────────────────────────────────────────────────────
 
 /// A non-rectangular clip shape applied to a [`SceneCommand::DrawImage`].
@@ -293,6 +317,12 @@ pub enum SceneCommand {
         /// the default rectangular box-clip (existing behavior, unchanged).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         clip_shape: Option<ImageClip>,
+        /// Optional source sub-rectangle selecting a crop of the source image
+        /// before the fit/object-position math is applied. `None` = use the
+        /// full source image (byte-identical to scenes without `src_rect`).
+        /// Applies to raster assets only; ignored for SVG.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        src_rect: Option<SrcRect>,
     },
     /// Draw a pre-resolved SVG asset.
     DrawSvgAsset {

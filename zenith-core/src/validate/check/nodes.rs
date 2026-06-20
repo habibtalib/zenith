@@ -863,6 +863,87 @@ pub(super) fn walk_node(
                 diagnostics,
             );
 
+            // src-rect: all-four-or-none rule.
+            let src_present_count = [
+                img.src_x.as_ref(),
+                img.src_y.as_ref(),
+                img.src_w.as_ref(),
+                img.src_h.as_ref(),
+            ]
+            .iter()
+            .filter(|d| d.is_some())
+            .count();
+            if src_present_count > 0 && src_present_count < 4 {
+                diagnostics.push(Diagnostic::error(
+                    "image.partial_src_rect",
+                    format!(
+                        "image '{}': src-x/src-y/src-w/src-h must all be present together; \
+                         found {src_present_count} of 4",
+                        img.id
+                    ),
+                    img.source_span,
+                    Some(img.id.clone()),
+                ));
+            }
+
+            // src-w/src-h must be > 0 when present (and unit is resolvable to px).
+            if let Some(sw) = &img.src_w
+                && let Some(sw_px) = dim_to_px(sw.value, &sw.unit)
+                && sw_px <= 0.0
+            {
+                diagnostics.push(Diagnostic::error(
+                    "image.invalid_src_rect",
+                    format!("image '{}': src-w must be > 0 (got {})", img.id, sw.value,),
+                    img.source_span,
+                    Some(img.id.clone()),
+                ));
+            }
+            if let Some(sh) = &img.src_h
+                && let Some(sh_px) = dim_to_px(sh.value, &sh.unit)
+                && sh_px <= 0.0
+            {
+                diagnostics.push(Diagnostic::error(
+                    "image.invalid_src_rect",
+                    format!("image '{}': src-h must be > 0 (got {})", img.id, sh.value,),
+                    img.source_span,
+                    Some(img.id.clone()),
+                ));
+            }
+
+            // Unit validation for each src-* field (required=false: partial is already caught above).
+            check_optional_dim(
+                &img.id,
+                "src-x",
+                img.src_x.as_ref(),
+                false,
+                img.source_span,
+                diagnostics,
+            );
+            check_optional_dim(
+                &img.id,
+                "src-y",
+                img.src_y.as_ref(),
+                false,
+                img.source_span,
+                diagnostics,
+            );
+            check_optional_dim(
+                &img.id,
+                "src-w",
+                img.src_w.as_ref(),
+                false,
+                img.source_span,
+                diagnostics,
+            );
+            check_optional_dim(
+                &img.id,
+                "src-h",
+                img.src_h.as_ref(),
+                false,
+                img.source_span,
+                diagnostics,
+            );
+
             // The referenced asset must exist in the document's assets block.
             if !declared_asset_ids.contains(&img.asset) {
                 diagnostics.push(Diagnostic::error(

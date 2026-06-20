@@ -93,6 +93,16 @@ pub struct ImageNode {
     pub y: Option<Dimension>,
     pub w: Option<Dimension>,
     pub h: Option<Dimension>,
+    /// Optional source-sub-rectangle: left edge within the source image (pixels).
+    /// All four src-* fields must be present together; partial presence is a hard
+    /// error (`image.partial_src_rect`). Absent ⇒ the full source image is used.
+    pub src_x: Option<Dimension>,
+    /// Source-sub-rectangle: top edge within the source image (pixels).
+    pub src_y: Option<Dimension>,
+    /// Source-sub-rectangle: width within the source image (pixels, must be > 0).
+    pub src_w: Option<Dimension>,
+    /// Source-sub-rectangle: height within the source image (pixels, must be > 0).
+    pub src_h: Option<Dimension>,
     /// Fit mode string (`contain`/`cover`/`stretch`/`none`); validated, not
     /// enum-typed in the AST so unknown values survive for forward-compat.
     pub fit: Option<String>,

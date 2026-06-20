@@ -10,7 +10,7 @@ use zenith_core::{AssetKind, BytesAssetProvider, FontStyle, default_provider};
 use zenith_layout::{RustybuzzEngine, ShapeRequest, TextDirection, TextLayoutEngine};
 use zenith_scene::{
     Color, FitMode, GradientPaint, GradientStop, ImageClip, Scene, SceneCommand, SceneGlyph,
-    ShadowSpec,
+    ShadowSpec, SrcRect,
 };
 
 use crate::backend::RasterBackend;
@@ -379,6 +379,7 @@ fn swatch_scene() -> Scene {
         pos_y: 50.0,
         opacity: 1.0,
         clip_shape: None,
+        src_rect: None,
     });
     scene.commands.push(SceneCommand::PopClip);
     scene.commands.push(SceneCommand::PopClip);
@@ -448,6 +449,7 @@ fn swatch_ellipse_scene() -> Scene {
         pos_y: 50.0,
         opacity: 1.0,
         clip_shape: Some(ImageClip::Ellipse),
+        src_rect: None,
     });
     scene.commands.push(SceneCommand::PopClip);
     scene.commands.push(SceneCommand::PopClip);
@@ -659,6 +661,7 @@ fn draw_image_missing_asset_is_skipped() {
         pos_y: 50.0,
         opacity: 1.0,
         clip_shape: None,
+        src_rect: None,
     });
     scene.commands.push(SceneCommand::PopClip);
 
@@ -1033,6 +1036,7 @@ fn draw_image_svg_asset_renders_red_pixels() {
         pos_y: 50.0,
         opacity: 1.0,
         clip_shape: None,
+        src_rect: None,
     });
     scene.commands.push(SceneCommand::PopClip);
 
@@ -1085,6 +1089,7 @@ fn draw_image_svg_text_renders_red_pixels() {
         pos_y: 50.0,
         opacity: 1.0,
         clip_shape: None,
+        src_rect: None,
     });
     scene.commands.push(SceneCommand::PopClip);
 
@@ -1335,4 +1340,94 @@ fn shadow_blurs_and_bleeds_outward_deterministically() {
     // (iv) Far outside the blur range stays transparent.
     let (_, _, _, far_a) = pixel(&img1.rgba, img1.width, 0, 0);
     assert_eq!(far_a, 0, "corner far from the shadow must stay transparent");
+}
+
+// ── src-rect raster crop ──────────────────────────────────────────────────
+
+/// Build a 3×3 PNG whose columns are pure RED (x=0), GREEN (x=1), BLUE (x=2).
+///
+/// Uses tiny-skia to compose the image rather than pulling in the `image`
+/// crate or embedding a hand-crafted PNG byte string.
+fn three_column_rgb_png() -> Arc<[u8]> {
+    use tiny_skia::{Pixmap, PremultipliedColorU8};
+
+    let mut pm = Pixmap::new(3, 3).expect("3x3 pixmap");
+    // Fill each pixel using PremultipliedColorU8 (alpha=255 → premult == straight).
+    let pixels = pm.pixels_mut();
+    for row in 0..3_usize {
+        for col in 0..3_usize {
+            let idx = row * 3 + col;
+            pixels[idx] = match col {
+                0 => PremultipliedColorU8::from_rgba(255, 0, 0, 255).expect("red"),
+                1 => PremultipliedColorU8::from_rgba(0, 255, 0, 255).expect("green"),
+                _ => PremultipliedColorU8::from_rgba(0, 0, 255, 255).expect("blue"),
+            };
+        }
+    }
+    let png = pm.encode_png().expect("PNG encode must succeed");
+    Arc::from(png.as_slice())
+}
+
+/// A DrawImage with `src_rect=Some(SrcRect{x:2,y:0,w:1,h:3})` selecting the
+/// BLUE column of a red/green/blue 3×3 image, stretched into a 4×4 box, must
+/// render entirely blue pixels (the crop replaces the source).
+#[test]
+fn draw_image_src_rect_crops_to_blue_column() {
+    let png = three_column_rgb_png();
+    let mut assets = BytesAssetProvider::new();
+    assets.register("asset.cols", AssetKind::Image, png);
+
+    // 4×4 canvas; the image fills the entire page.
+    let mut scene = Scene::new(4.0, 4.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 4.0,
+        h: 4.0,
+    });
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 4.0,
+        h: 4.0,
+    });
+    scene.commands.push(SceneCommand::DrawImage {
+        x: 0.0,
+        y: 0.0,
+        w: 4.0,
+        h: 4.0,
+        asset_id: "asset.cols".to_string(),
+        fit: FitMode::Stretch,
+        pos_x: 50.0,
+        pos_y: 50.0,
+        opacity: 1.0,
+        clip_shape: None,
+        // Crop to the blue column (x=2, w=1, full height).
+        src_rect: Some(SrcRect {
+            x: 2.0,
+            y: 0.0,
+            w: 1.0,
+            h: 3.0,
+        }),
+    });
+    scene.commands.push(SceneCommand::PopClip);
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let fonts = default_provider();
+    let img = backend
+        .rasterize(&scene, &fonts, &assets)
+        .expect("rasterize must succeed");
+
+    // Every pixel in the 4×4 output must be blue-dominant and opaque.
+    for py in 0..img.height {
+        for px_x in 0..img.width {
+            let (r, g, b, a) = pixel(&img.rgba, img.width, px_x, py);
+            assert!(a > 0, "pixel ({px_x},{py}) must be opaque (alpha={a})");
+            assert!(
+                b > r && b > g,
+                "pixel ({px_x},{py}) must be blue-dominant after src-rect crop; got r={r} g={g} b={b}"
+            );
+        }
+    }
 }

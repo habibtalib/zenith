@@ -2646,3 +2646,92 @@ fn test_bullet_round_trip() {
         "bullet + bullet-gap must round-trip identically"
     );
 }
+
+/// **src-rect round-trip**: an image node with `src-x`/`src-y`/`src-w`/`src-h`
+/// must parse → format → re-parse byte-identically (all four src-* fields
+/// survive the round-trip).
+#[test]
+fn test_image_src_rect_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.srcrt" name="SrcRt"
+  assets {
+    asset id="asset.photo" kind="image" src="assets/photo.png"
+  }
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.srcrt" title="SrcRt" {
+    page id="page.srcrt" w=(px)400 h=(px)300 {
+      image id="img.srcrt" asset="asset.photo" x=(px)0 y=(px)0 w=(px)200 h=(px)100 src-x=(px)10 src-y=(px)20 src-w=(px)50 src-h=(px)60 fit="stretch"
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let image_node = match &doc.body.pages[0].children[0] {
+        Node::Image(i) => i,
+        other => panic!("expected Image node, got {other:?}"),
+    };
+
+    use crate::ast::{Dimension, Unit};
+    assert_eq!(
+        image_node.src_x,
+        Some(Dimension {
+            value: 10.0,
+            unit: Unit::Px
+        }),
+        "src-x must parse to (px)10"
+    );
+    assert_eq!(
+        image_node.src_y,
+        Some(Dimension {
+            value: 20.0,
+            unit: Unit::Px
+        }),
+        "src-y must parse to (px)20"
+    );
+    assert_eq!(
+        image_node.src_w,
+        Some(Dimension {
+            value: 50.0,
+            unit: Unit::Px
+        }),
+        "src-w must parse to (px)50"
+    );
+    assert_eq!(
+        image_node.src_h,
+        Some(Dimension {
+            value: 60.0,
+            unit: Unit::Px
+        }),
+        "src-h must parse to (px)60"
+    );
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("formatted must be utf8");
+    assert!(
+        formatted_str.contains("src-x=(px)10"),
+        "formatter must emit src-x=(px)10; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("src-y=(px)20"),
+        "formatter must emit src-y=(px)20; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("src-w=(px)50"),
+        "formatter must emit src-w=(px)50; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("src-h=(px)60"),
+        "formatter must emit src-h=(px)60; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse after format");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "src-rect image must round-trip identically"
+    );
+}

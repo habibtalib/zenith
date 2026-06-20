@@ -1209,6 +1209,14 @@ const IMAGE_KNOWN_PROPS: &[&str] = &[
     "y",
     "w",
     "h",
+    "src-x",
+    "src_x",
+    "src-y",
+    "src_y",
+    "src-w",
+    "src_w",
+    "src-h",
+    "src_h",
     "fit",
     "clip",
     "clip-radius",
@@ -1235,6 +1243,16 @@ fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
     let object_position_y = optional_object_position_prop(node, "object-position-y")
         .or_else(|| optional_object_position_prop(node, "object_position_y"));
 
+    // src-* accept hyphenated or underscored spellings.
+    let src_x =
+        optional_dimension_prop(node, "src-x").or_else(|| optional_dimension_prop(node, "src_x"));
+    let src_y =
+        optional_dimension_prop(node, "src-y").or_else(|| optional_dimension_prop(node, "src_y"));
+    let src_w =
+        optional_dimension_prop(node, "src-w").or_else(|| optional_dimension_prop(node, "src_w"));
+    let src_h =
+        optional_dimension_prop(node, "src-h").or_else(|| optional_dimension_prop(node, "src_h"));
+
     let unknown_props = collect_unknown_props(node, IMAGE_KNOWN_PROPS);
 
     Ok(ImageNode {
@@ -1246,6 +1264,10 @@ fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
         y: optional_dimension_prop(node, "y"),
         w: optional_dimension_prop(node, "w"),
         h: optional_dimension_prop(node, "h"),
+        src_x,
+        src_y,
+        src_w,
+        src_h,
         fit: optional_string_prop(node, "fit").map(str::to_owned),
         clip: optional_string_prop(node, "clip").map(str::to_owned),
         clip_radius: optional_property_value_aliased(node, "clip-radius", "clip_radius"),

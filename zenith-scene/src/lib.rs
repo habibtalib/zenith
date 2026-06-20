@@ -38,5 +38,5 @@ pub mod ir;
 pub use compile::{CompileResult, compile, compile_page};
 pub use ir::{
     Color, FitMode, GradientPaint, GradientStop, ImageClip, Rect, Scene, SceneCommand, SceneGlyph,
-    ShadowSpec,
+    ShadowSpec, SrcRect,
 };

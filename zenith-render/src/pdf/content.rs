@@ -357,6 +357,7 @@ fn emit_command(
             pos_y,
             opacity,
             clip_shape,
+            src_rect: _,
         } => {
             emit_image(
                 content, res, assets, *x, *y, *w, *h, asset_id, *fit, *pos_x, *pos_y, *opacity,

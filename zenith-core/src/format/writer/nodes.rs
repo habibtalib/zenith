@@ -312,9 +312,10 @@ fn write_image(i: &ImageNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("image");
 
-    // Canonical property order: id, name, role, asset, x, y, w, h, fit,
-    // object-position-x, object-position-y, opacity, visible, locked, rotate,
-    // style, then unknown props (sorted).
+    // Canonical property order: id, name, role, asset, x, y, w, h,
+    // src-x, src-y, src-w, src-h, fit, clip, clip-radius,
+    // object-position-x, object-position-y, shadow, opacity, visible, locked,
+    // rotate, style, then unknown props (sorted).
     out.push_str(" id=\"");
     out.push_str(&i.id);
     out.push('"');
@@ -327,6 +328,10 @@ fn write_image(i: &ImageNode, out: &mut String, depth: usize) {
     write_opt_dimension(out, "y", &i.y);
     write_opt_dimension(out, "w", &i.w);
     write_opt_dimension(out, "h", &i.h);
+    write_opt_dimension(out, "src-x", &i.src_x);
+    write_opt_dimension(out, "src-y", &i.src_y);
+    write_opt_dimension(out, "src-w", &i.src_w);
+    write_opt_dimension(out, "src-h", &i.src_h);
     write_opt_str(out, "fit", &i.fit);
     write_opt_str(out, "clip", &i.clip);
     write_opt_property_value(out, "clip-radius", &i.clip_radius);

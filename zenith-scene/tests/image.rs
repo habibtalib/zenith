@@ -2,7 +2,7 @@ mod common;
 use common::*;
 use zenith_core::default_provider;
 use zenith_scene::compile;
-use zenith_scene::ir::{FitMode, ImageClip, SceneCommand};
+use zenith_scene::ir::{FitMode, ImageClip, SceneCommand, SrcRect};
 
 #[test]
 fn image_emits_pushclip_drawimage_popclip() {
@@ -47,6 +47,7 @@ page id="page.i1" w=(px)320 h=(px)200 {
             pos_y,
             opacity,
             clip_shape,
+            src_rect,
         } => {
             assert_eq!(*x, 40.0);
             assert_eq!(*y, 40.0);
@@ -58,6 +59,7 @@ page id="page.i1" w=(px)320 h=(px)200 {
             assert_eq!(*pos_y, 50.0, "default object-position-y must be 50");
             assert_eq!(*opacity, 1.0);
             assert_eq!(*clip_shape, None, "default image has no clip shape");
+            assert_eq!(*src_rect, None, "default image has no src_rect");
         }
         other => panic!("expected DrawImage, got {other:?}"),
     }
@@ -391,5 +393,86 @@ fn bleed_render_is_two_run_byte_identical() {
         a.scene.to_json().expect("serialize a"),
         b.scene.to_json().expect("serialize b"),
         "two compile runs must be byte-identical"
+    );
+}
+
+// ── src-rect compile tests ─────────────────────────────────────────────────────
+
+#[test]
+fn image_with_src_rect_compiles_to_some_src_rect() {
+    let src = r##"zenith version=1 {
+  project id="proj.sr1" name="SR1"
+  assets {
+asset id="asset.photo" kind="image" src="assets/photo.png"
+  }
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.sr1" title="SR1" {
+page id="page.sr1" w=(px)320 h=(px)200 {
+  image id="img.sr1" asset="asset.photo" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fit="stretch" src-x=(px)10 src-y=(px)20 src-w=(px)50 src-h=(px)60
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let sr = result
+        .scene
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            SceneCommand::DrawImage { src_rect, .. } => Some(src_rect.clone()),
+            _ => None,
+        })
+        .expect("must emit a DrawImage");
+    assert_eq!(
+        sr,
+        Some(SrcRect {
+            x: 10.0,
+            y: 20.0,
+            w: 50.0,
+            h: 60.0
+        }),
+        "src-rect must compile to SrcRect with correct px values"
+    );
+}
+
+#[test]
+fn image_without_src_rect_has_none_src_rect() {
+    let src = r##"zenith version=1 {
+  project id="proj.sr2" name="SR2"
+  assets {
+asset id="asset.photo" kind="image" src="assets/photo.png"
+  }
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.sr2" title="SR2" {
+page id="page.sr2" w=(px)320 h=(px)200 {
+  image id="img.sr2" asset="asset.photo" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fit="stretch"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    let sr = result
+        .scene
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            SceneCommand::DrawImage { src_rect, .. } => Some(src_rect.clone()),
+            _ => None,
+        })
+        .expect("must emit a DrawImage");
+    assert_eq!(
+        sr, None,
+        "image without src-rect must have src_rect == None (byte-compat)"
     );
 }

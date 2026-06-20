@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use zenith_core::{Diagnostic, ImageNode, ObjectPosition, ResolvedToken, dim_to_px};
 
-use crate::ir::{FitMode, ImageClip, SceneCommand};
+use crate::ir::{FitMode, ImageClip, SceneCommand, SrcRect};
 
 use super::RenderCtx;
 use super::paint::resolve_property_shadow;
@@ -142,6 +142,38 @@ pub(super) fn compile_image(
         None => false,
     };
 
+    // Resolve the optional source sub-rectangle. All four dimensions must
+    // resolve to px; if any present-but-unresolvable unit is encountered, push
+    // a diagnostic and produce None (fall back to full-image draw).
+    let src_rect: Option<SrcRect> = match (&image.src_x, &image.src_y, &image.src_w, &image.src_h) {
+        (Some(sx), Some(sy), Some(sw), Some(sh)) => {
+            let rx = dim_to_px(sx.value, &sx.unit);
+            let ry = dim_to_px(sy.value, &sy.unit);
+            let rw = dim_to_px(sw.value, &sw.unit);
+            let rh = dim_to_px(sh.value, &sh.unit);
+            match (rx, ry, rw, rh) {
+                (Some(x0), Some(y0), Some(w0), Some(h0)) => Some(SrcRect {
+                    x: x0,
+                    y: y0,
+                    w: w0,
+                    h: h0,
+                }),
+                _ => {
+                    // At least one dimension has an unresolvable unit.
+                    diagnostics.push(unsupported_unit_diag(
+                        "image",
+                        &image.id,
+                        "src-x/src-y/src-w/src-h",
+                        image.source_span,
+                    ));
+                    None
+                }
+            }
+        }
+        // Partial presence is a validation error already; here we just produce None.
+        _ => None,
+    };
+
     // Box-clip (G-22): push the box, draw the image, pop. The image is always
     // clipped to its declared box ∩ enclosing clips.
     commands.push(SceneCommand::PushClip { x, y, w, h });
@@ -156,6 +188,7 @@ pub(super) fn compile_image(
         pos_y,
         opacity,
         clip_shape,
+        src_rect,
     });
     commands.push(SceneCommand::PopClip);
 
