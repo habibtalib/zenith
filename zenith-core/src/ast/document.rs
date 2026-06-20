@@ -26,6 +26,14 @@ pub struct Page {
     /// Page height — required.
     pub height: Dimension,
     pub background: Option<PropertyValue>,
+    /// Optional uniform print-bleed margin applied to all four sides. When this
+    /// resolves to a positive pixel value `b`, the rendered media box expands to
+    /// `(width + 2b) × (height + 2b)`, all page content shifts into the inner
+    /// trim box `[b, b, width, height]`, the background fills the entire media
+    /// box (bleeding off the trim edge), and crop/trim marks are auto-drawn in
+    /// the bleed margin at the four trim corners. `None` or a non-positive value
+    /// renders byte-identically to a page with no bleed.
+    pub bleed: Option<Dimension>,
     /// Author-declared safe/dead zones for this page. These are not rendering
     /// nodes; the validator checks page children against them.
     pub safe_zones: Vec<SafeZone>,

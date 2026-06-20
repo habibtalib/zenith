@@ -17,6 +17,7 @@
 
 mod chain;
 mod container;
+mod crop;
 mod image;
 mod leaf;
 mod paint;
@@ -73,6 +74,17 @@ impl RenderCtx {
             opacity: 1.0,
             dx: 0.0,
             dy: 0.0,
+        }
+    }
+
+    /// Root context translated by a fixed pixel offset on both axes. Used to
+    /// shift all page content into the trim box when a print bleed is active:
+    /// authored coordinate `(0, 0)` then lands at the trim corner `(b, b)`.
+    fn root_offset(dx: f64, dy: f64) -> Self {
+        RenderCtx {
+            opacity: 1.0,
+            dx,
+            dy,
         }
     }
 }
@@ -227,25 +239,47 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
         }
     };
 
-    let mut scene = Scene::new(page_w, page_h);
+    // ── Step 3b: resolve print bleed ─────────────────────────────────────
+    // A page may declare a uniform `bleed` margin. When it resolves to a
+    // positive pixel value `b`, the media (canvas) box expands to
+    // `(page_w + 2b) × (page_h + 2b)`, the trim box is the inner
+    // `[b, b, page_w, page_h]`, all content shifts by `(b, b)`, the background
+    // fills the whole media box, and crop marks are drawn at the trim corners.
+    // An absent / unresolvable / non-positive bleed yields `b = 0`, which is
+    // byte-identical to the no-bleed path. The validator surfaces a warning for
+    // an unresolvable unit or a negative value; the compiler just ignores it.
+    let bleed = page
+        .bleed
+        .as_ref()
+        .and_then(|d| dim_to_px(d.value, &d.unit))
+        .filter(|&px| px > 0.0)
+        .unwrap_or(0.0);
 
-    // ── Step 4: outermost page-edge clip (doc 09 normative rule) ─────────
+    // Media box (full canvas including bleed on all four sides).
+    let media_w = page_w + 2.0 * bleed;
+    let media_h = page_h + 2.0 * bleed;
+
+    let mut scene = Scene::new(media_w, media_h);
+
+    // ── Step 4: outermost media-edge clip (doc 09 normative rule) ────────
+    // The clip covers the entire media box so content and background may bleed
+    // into the margin. With bleed = 0 this is exactly the page rectangle.
     scene.commands.push(SceneCommand::PushClip {
         x: 0.0,
         y: 0.0,
-        w: page_w,
-        h: page_h,
+        w: media_w,
+        h: media_h,
     });
 
-    // ── Step 5: optional page background ─────────────────────────────────
+    // ── Step 5: optional page background (fills the entire media box) ────
     if let Some(bg_prop) = &page.background {
         if let Some(gradient) = resolve_property_gradient(bg_prop, resolved, &page.id) {
             // Page background applies no opacity cascade (mirrors the solid path).
             scene.commands.push(SceneCommand::FillRectGradient {
                 x: 0.0,
                 y: 0.0,
-                w: page_w,
-                h: page_h,
+                w: media_w,
+                h: media_h,
                 gradient,
             });
         } else if let Some(color) =
@@ -254,8 +288,8 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
             scene.commands.push(SceneCommand::FillRect {
                 x: 0.0,
                 y: 0.0,
-                w: page_w,
-                h: page_h,
+                w: media_w,
+                h: media_h,
                 color,
             });
         }
@@ -287,12 +321,25 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
             &mut scene.commands,
             &mut diagnostics,
             &chains,
-            RenderCtx::root(),
+            // Shift authored coordinates into the trim box. With bleed = 0 this
+            // is the identity root context (byte-identical to before).
+            if bleed > 0.0 {
+                RenderCtx::root_offset(bleed, bleed)
+            } else {
+                RenderCtx::root()
+            },
         );
     }
 
     // ── Step 8: close the outermost clip ─────────────────────────────────
     scene.commands.push(SceneCommand::PopClip);
+
+    // ── Step 9: crop / trim marks (only when a bleed is active) ──────────
+    // Emitted AFTER content and OUTSIDE the clip so the marks sit on top and
+    // live entirely in the bleed margin at the four trim corners.
+    if bleed > 0.0 {
+        crop::emit_crop_marks(&mut scene.commands, bleed, page_w, page_h);
+    }
 
     CompileResult { scene, diagnostics }
 }

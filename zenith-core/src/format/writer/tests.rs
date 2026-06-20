@@ -1700,3 +1700,47 @@ fn test_component_instance_override_round_trip() {
         "component formatting must be idempotent"
     );
 }
+
+/// **Page bleed round-trip**: a `bleed` attribute parses, formats back into the
+/// canonical text (right after `background`), and survives parse→format→parse.
+#[test]
+fn test_page_bleed_round_trips() {
+    let src = r##"zenith version=1 {
+  project id="proj.bleed" name="Bleed"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.bleed" title="Bleed" {
+    page id="page.bleed" w=(px)400 h=(px)600 bleed=(px)35 {
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    // The parsed page carries the bleed dimension.
+    let page = &doc.body.pages[0];
+    let bleed = page.bleed.as_ref().expect("bleed must be present");
+    assert_eq!(bleed.value, 35.0);
+    assert!(matches!(bleed.unit, crate::ast::Unit::Px));
+
+    // Canonical form preserves it verbatim.
+    let formatted = format_document(&doc).expect("format");
+    let text = String::from_utf8(formatted).expect("utf8");
+    assert!(
+        text.contains("bleed=(px)35"),
+        "formatted output must carry bleed; got:\n{text}"
+    );
+
+    // Round-trip AST equality (spans stripped).
+    let reparsed = adapter
+        .parse(text.as_bytes())
+        .expect("re-parse after format");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "bleed must survive parse → format → parse"
+    );
+}

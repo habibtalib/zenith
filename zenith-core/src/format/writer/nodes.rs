@@ -53,6 +53,7 @@ fn write_page(page: &Page, out: &mut String, depth: usize) {
     out.push_str(" h=");
     out.push_str(&fmt_dimension(&page.height));
     write_opt_property_value(out, "background", &page.background);
+    write_opt_dimension(out, "bleed", &page.bleed);
 
     out.push_str(" {\n");
     // Safe-zones and folds are page metadata, emitted before the renderable

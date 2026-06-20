@@ -5311,3 +5311,147 @@ fn unknown_component_emits_advisory_and_skips() {
         "a skipped instance must emit no fill commands"
     );
 }
+
+// ── Print bleed + crop marks ──────────────────────────────────────────
+
+/// Source for a page with `bleed` and a token-filled full-bleed background plus
+/// a single hero rect at authored origin.
+fn bleed_doc_src(bleed_attr: &str) -> String {
+    format!(
+        r##"zenith version=1 {{
+  project id="proj.bleed" name="Bleed"
+  tokens format="zenith-token-v1" {{
+    token id="color.bg" type="color" value="#102030"
+    token id="color.hero" type="color" value="#ff8800"
+  }}
+  styles {{}}
+  document id="doc.bleed" title="Bleed" {{
+    page id="page.bleed" w=(px)400 h=(px)600{bleed_attr} background=(token)"color.bg" {{
+      rect id="rect.hero" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fill=(token)"color.hero"
+    }}
+  }}
+}}
+"##
+    )
+}
+
+#[test]
+fn bleed_expands_canvas_and_shifts_content() {
+    let doc = parse(&bleed_doc_src(" bleed=(px)35"));
+    let result = compile(&doc, &default_provider());
+    assert!(
+        !result.diagnostics.iter().any(|d| d.code != "token.unused"),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    // Media box = (400 + 70) × (600 + 70).
+    assert_eq!(result.scene.width, 470.0);
+    assert_eq!(result.scene.height, 670.0);
+
+    let cmds = &result.scene.commands;
+
+    // Background fills the ENTIRE media box (bleeds off the trim edge).
+    match cmds
+        .iter()
+        .find(|c| matches!(c, SceneCommand::FillRect { color, .. } if color.r == 0x10))
+    {
+        Some(SceneCommand::FillRect { x, y, w, h, .. }) => {
+            assert_eq!((*x, *y, *w, *h), (0.0, 0.0, 470.0, 670.0));
+        }
+        other => panic!("expected full-media background FillRect, got {other:?}"),
+    }
+
+    // Hero rect shifted by (b, b) = (35, 35).
+    match cmds
+        .iter()
+        .find(|c| matches!(c, SceneCommand::FillRect { color, .. } if color.r == 0xff))
+    {
+        Some(SceneCommand::FillRect { x, y, w, h, .. }) => {
+            assert_eq!((*x, *y, *w, *h), (35.0, 35.0, 100.0, 100.0));
+        }
+        other => panic!("expected shifted hero FillRect, got {other:?}"),
+    }
+}
+
+#[test]
+fn bleed_emits_eight_crop_mark_segments_all_in_margin() {
+    let b = 35.0;
+    let doc = parse(&bleed_doc_src(" bleed=(px)35"));
+    let result = compile(&doc, &default_provider());
+
+    let lines: Vec<&SceneCommand> = result
+        .scene
+        .commands
+        .iter()
+        .filter(|c| matches!(c, SceneCommand::StrokeLine { .. }))
+        .collect();
+    assert_eq!(lines.len(), 8, "expected 8 crop-mark segments");
+
+    // Trim box: [35, 35] .. [435, 635]. Every segment endpoint must lie OUTSIDE
+    // the trim box (in the bleed margin) — i.e. NOT strictly interior to it.
+    let trim_left = b;
+    let trim_top = b;
+    let trim_right = b + 400.0;
+    let trim_bottom = b + 600.0;
+    let interior =
+        |x: f64, y: f64| x > trim_left && x < trim_right && y > trim_top && y < trim_bottom;
+    for cmd in &lines {
+        if let SceneCommand::StrokeLine { x1, y1, x2, y2, .. } = cmd {
+            assert!(
+                !interior(*x1, *y1) && !interior(*x2, *y2),
+                "crop-mark segment must stay in the bleed margin: {cmd:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bleed_absent_is_byte_identical_to_no_bleed() {
+    // The exact same document MINUS the bleed attribute must yield the same
+    // scene as a document that never mentioned bleed.
+    let with_none = parse(&bleed_doc_src(""));
+    let result = compile(&with_none, &default_provider());
+
+    // Canvas is the plain page size; no crop marks emitted.
+    assert_eq!(result.scene.width, 400.0);
+    assert_eq!(result.scene.height, 600.0);
+    assert!(
+        !result
+            .scene
+            .commands
+            .iter()
+            .any(|c| matches!(c, SceneCommand::StrokeLine { .. })),
+        "no bleed → no crop marks"
+    );
+    // PushClip covers the plain page rectangle (origin unshifted).
+    assert!(
+        matches!(
+            result.scene.commands.first(),
+            Some(SceneCommand::PushClip { x, y, w, h }) if *x == 0.0 && *y == 0.0 && *w == 400.0 && *h == 600.0
+        ),
+        "first command must be a page-sized PushClip"
+    );
+    // Hero rect is NOT shifted.
+    match result
+        .scene
+        .commands
+        .iter()
+        .find(|c| matches!(c, SceneCommand::FillRect { color, .. } if color.r == 0xff))
+    {
+        Some(SceneCommand::FillRect { x, y, .. }) => assert_eq!((*x, *y), (0.0, 0.0)),
+        other => panic!("expected unshifted hero FillRect, got {other:?}"),
+    }
+}
+
+#[test]
+fn bleed_render_is_two_run_byte_identical() {
+    let doc = parse(&bleed_doc_src(" bleed=(px)35"));
+    let a = compile(&doc, &default_provider());
+    let b = compile(&doc, &default_provider());
+    assert_eq!(
+        a.scene.to_json().expect("serialize a"),
+        b.scene.to_json().expect("serialize b"),
+        "two compile runs must be byte-identical"
+    );
+}

@@ -174,6 +174,7 @@ fn minimal_page(id: &str, children: Vec<Node>) -> Page {
         width: px(1280.0),
         height: px(720.0),
         background: None,
+        bleed: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
         children,
@@ -508,6 +509,7 @@ fn page_unknown_unit_produces_invalid_geometry() {
             },
             height: px(720.0),
             background: None,
+            bleed: None,
             safe_zones: Vec::new(),
             folds: Vec::new(),
             children: vec![],
@@ -2362,6 +2364,7 @@ fn bounded_page(id: &str, w: f64, h: f64, children: Vec<Node>) -> Page {
         width: px(w),
         height: px(h),
         background: None,
+        bleed: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
         children,
@@ -2536,6 +2539,7 @@ fn page_with_bg(id: &str, bg_token_id: &str, children: Vec<Node>) -> Page {
         width: px(1280.0),
         height: px(720.0),
         background: Some(PropertyValue::TokenRef(bg_token_id.to_owned())),
+        bleed: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
         children,
@@ -2762,6 +2766,7 @@ fn page_with_zones(
         width: px(w),
         height: px(h),
         background: None,
+        bleed: None,
         safe_zones,
         folds: Vec::new(),
         children,
@@ -2998,6 +3003,7 @@ fn page_with_folds(id: &str, w: f64, h: f64, folds: Vec<Fold>, children: Vec<Nod
         width: px(w),
         height: px(h),
         background: None,
+        bleed: None,
         safe_zones: Vec::new(),
         folds,
         children,
@@ -3325,4 +3331,50 @@ mod component_validation {
             report.diagnostics
         );
     }
+}
+
+// ── Page bleed validation ─────────────────────────────────────────────
+
+/// A page with a valid positive px bleed produces no bleed warning.
+#[test]
+fn valid_bleed_no_warning() {
+    let mut page = minimal_page("page.bleed", vec![]);
+    page.bleed = Some(px(35.0));
+    let report = validate(&doc_with(vec![], vec![page]));
+    assert!(
+        !has_code(&report, "page.invalid_bleed"),
+        "valid bleed must not warn: {:?}",
+        codes(&report)
+    );
+}
+
+/// A bleed declared with a non-resolvable unit (pct) warns but is not an error.
+#[test]
+fn bleed_bad_unit_warns_not_errors() {
+    let mut page = minimal_page("page.bleed", vec![]);
+    page.bleed = Some(Dimension {
+        value: 5.0,
+        unit: Unit::Pct,
+    });
+    let report = validate(&doc_with(vec![], vec![page]));
+    assert!(
+        has_code(&report, "page.invalid_bleed"),
+        "bad-unit bleed must warn: {:?}",
+        codes(&report)
+    );
+    assert!(
+        !report.has_errors(),
+        "bad-unit bleed must NOT be a hard error: {:?}",
+        codes(&report)
+    );
+}
+
+/// A negative bleed warns but is not an error.
+#[test]
+fn bleed_negative_warns_not_errors() {
+    let mut page = minimal_page("page.bleed", vec![]);
+    page.bleed = Some(px(-10.0));
+    let report = validate(&doc_with(vec![], vec![page]));
+    assert!(has_code(&report, "page.invalid_bleed"));
+    assert!(!report.has_errors());
 }

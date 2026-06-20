@@ -852,6 +852,12 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
         .entry("background")
         .and_then(|e| entry_to_property_value(e).ok());
 
+    // Optional uniform print-bleed margin (e.g. `bleed=(px)35`). Read like any
+    // other dimension prop; unit validity (px/pt resolvable, >= 0) is checked by
+    // the validator, never the parser, so an out-of-range/odd-unit value is
+    // preserved verbatim for a precise warning.
+    let bleed = optional_dimension_prop(node, "bleed");
+
     let source_span = node_span(node);
 
     // A page's children block mixes `safe-zone` and `fold` declarations (page
@@ -877,6 +883,7 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
         width,
         height,
         background,
+        bleed,
         safe_zones,
         folds,
         children,

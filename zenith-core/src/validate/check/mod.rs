@@ -232,6 +232,39 @@ pub fn validate(doc: &Document) -> ValidationReport {
             ));
         }
 
+        // ── Bleed validation (never a hard error) ─────────────────────────
+        // The bleed margin must resolve to pixels (px/pt) and be non-negative.
+        // An unresolvable unit (pct/deg/unknown) or a negative value is a
+        // Warning: the page still renders, bleed is simply ignored.
+        if let Some(bleed) = &page.bleed {
+            match dim_to_px(bleed.value, &bleed.unit) {
+                None => {
+                    diagnostics.push(Diagnostic::warning(
+                        "page.invalid_bleed",
+                        format!(
+                            "page '{}': bleed uses an unresolvable unit; \
+                             allowed units are px and pt (bleed is ignored)",
+                            page.id
+                        ),
+                        page.source_span,
+                        Some(page.id.clone()),
+                    ));
+                }
+                Some(px) if px < 0.0 => {
+                    diagnostics.push(Diagnostic::warning(
+                        "page.invalid_bleed",
+                        format!(
+                            "page '{}': bleed must be non-negative (bleed is ignored)",
+                            page.id
+                        ),
+                        page.source_span,
+                        Some(page.id.clone()),
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+
         // ── Page background token: validate type/existence and record the
         //    reference so it is not falsely reported as an unused token.
         check_visual_prop(
