@@ -21,8 +21,9 @@ mod tests;
 use flags::{apply_set_locked, apply_set_points, apply_set_visible};
 use geometry::{apply_align_nodes, apply_distribute_nodes, apply_set_geometry};
 use structure::{
-    ReorderKind, apply_add_node, apply_duplicate_node, apply_duplicate_page, apply_group,
-    apply_remove_node, apply_reorder, apply_reparent, apply_ungroup,
+    ReorderKind, apply_add_node, apply_add_page, apply_delete_page, apply_duplicate_node,
+    apply_duplicate_page, apply_group, apply_remove_node, apply_reorder, apply_reorder_pages,
+    apply_reparent, apply_ungroup,
 };
 use style::{
     apply_replace_text, apply_set_fill, apply_set_opacity, apply_set_stroke,
@@ -255,6 +256,28 @@ fn apply_op(
         Op::DistributeNodes { node_ids, axis } => {
             apply_distribute_nodes(node_ids, axis, doc, diagnostics, affected);
         }
+        Op::AddPage {
+            id,
+            w,
+            h,
+            background,
+            index,
+        } => {
+            let spec = structure::AddPageSpec {
+                id,
+                w,
+                h,
+                background: background.as_deref(),
+                index: *index,
+            };
+            apply_add_page(&spec, doc, diagnostics, affected);
+        }
+        Op::DeletePage { page } => {
+            apply_delete_page(page, doc, diagnostics, affected);
+        }
+        Op::ReorderPages { order } => {
+            apply_reorder_pages(order, doc, diagnostics, affected);
+        }
     }
 }
 
@@ -296,7 +319,13 @@ fn op_lock_targets(op: &Op) -> Vec<&str> {
         | Op::DuplicateNode { .. }
         | Op::DuplicatePage { .. }
         | Op::Group { .. }
-        | Op::Ungroup { .. } => Vec::new(),
+        | Op::Ungroup { .. }
+        // Page-structure ops act on `Page` structs, which have no `locked`
+        // dimension (locking is a per-`Node` property). There is no node-level
+        // lock target to enforce here, so these are exempt (empty).
+        | Op::AddPage { .. }
+        | Op::DeletePage { .. }
+        | Op::ReorderPages { .. } => Vec::new(),
     }
 }
 

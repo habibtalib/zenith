@@ -511,6 +511,70 @@ pub enum Op {
         /// The new overflow value: `fit`, `clip`, or `visible`.
         overflow: String,
     },
+    /// Create a new EMPTY page (no children) and insert it into the document
+    /// body at `index` (0-based) or, when `index` is `None`, append it at the
+    /// end.
+    ///
+    /// `w` and `h` are canonical dimension strings like `"(px)1800"` / `"(pt)90"`
+    /// (the same `(unit)value` form parsed by other ops). `background`, when
+    /// present, is a token-ref id (e.g. `"color.bg"`) stored as
+    /// `PropertyValue::TokenRef` — exactly like [`Op::SetFill`].
+    ///
+    /// Rejects with `tx.duplicate_id` if a page (or any node) already uses `id`.
+    /// Rejects with `tx.invalid_value` if `w`/`h` fail to parse as a dimension.
+    /// Rejects with `tx.out_of_range` if `index` is past the end of the page list.
+    ///
+    /// The new page carries no children, safe-zones, folds, margins, or bleed —
+    /// it is a blank canvas. Post-validation still runs over the whole document.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"add_page","id":"page.new","w":"(px)1800","h":"(px)1200","index":1}
+    /// ```
+    AddPage {
+        /// Stable id for the new page (must be unique document-wide).
+        id: String,
+        /// Page width as a canonical dimension string, e.g. `"(px)1800"`.
+        w: String,
+        /// Page height as a canonical dimension string, e.g. `"(px)1200"`.
+        h: String,
+        /// Optional background token-ref id (e.g. `"color.bg"`). `None` = no fill.
+        #[serde(default)]
+        background: Option<String>,
+        /// 0-based insert position. `None` appends at the end.
+        #[serde(default)]
+        index: Option<usize>,
+    },
+    /// Remove the page whose id == `page` (and its entire subtree) from the
+    /// document body.
+    ///
+    /// Rejects with `tx.unknown_node` if no page with that id exists.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"delete_page","page":"page.old"}
+    /// ```
+    DeletePage {
+        /// Id of the page to remove.
+        page: String,
+    },
+    /// Reorder the document body's pages to match `order`.
+    ///
+    /// `order` must be a permutation of the existing page ids: the same set,
+    /// with no duplicates and nothing missing or extra. On success the pages are
+    /// rearranged so their ids follow `order` exactly.
+    ///
+    /// Rejects with `tx.invalid_value` if `order` is not a permutation (an id is
+    /// missing, extra, duplicated, or unknown).
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"reorder_pages","order":["page.b","page.a","page.c"]}
+    /// ```
+    ReorderPages {
+        /// The new full ordering of page ids (a permutation of the existing set).
+        order: Vec<String>,
+    },
     /// Evenly distribute a set of nodes along one axis so the gaps between
     /// consecutive nodes are equal, keeping the first and last node's outer
     /// edges fixed (standard "distribute spacing" semantics).

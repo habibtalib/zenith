@@ -2589,6 +2589,341 @@ fn from_json_duplicate_page_round_trip() {
     );
 }
 
+// ── AddPage / DeletePage / ReorderPages tests ─────────────────────────────
+
+/// A two-page document used to exercise the page-structure ops.
+const TWO_PAGE_STRUCT_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#ffffff"
+  }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      rect id="r1" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+    }
+    page id="pg2" w=(px)400 h=(px)300 {
+      rect id="r2" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+    }
+  }
+}"##;
+
+/// Page ids, in document order, parsed back out of `source_after`.
+fn page_id_order(source: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut rest = source;
+    while let Some(idx) = rest.find("page id=\"") {
+        let after = &rest[idx + "page id=\"".len()..];
+        if let Some(end) = after.find('"') {
+            ids.push(after[..end].to_owned());
+            rest = &after[end..];
+        } else {
+            break;
+        }
+    }
+    ids
+}
+
+#[test]
+fn add_page_append() {
+    let doc = parse(TWO_PAGE_STRUCT_DOC);
+    let tx = Transaction {
+        ops: vec![Op::AddPage {
+            id: "pg3".to_owned(),
+            w: "(px)800".to_owned(),
+            h: "(px)600".to_owned(),
+            background: Some("color.bg".to_owned()),
+            index: None,
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(
+        result.status,
+        TxStatus::Accepted,
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        page_id_order(&result.source_after),
+        vec!["pg1", "pg2", "pg3"],
+        "new page must be appended last"
+    );
+    assert_eq!(result.affected_node_ids, vec!["pg3".to_owned()]);
+}
+
+#[test]
+fn add_page_at_index() {
+    let doc = parse(TWO_PAGE_STRUCT_DOC);
+    let tx = Transaction {
+        ops: vec![Op::AddPage {
+            id: "pg.mid".to_owned(),
+            w: "(px)800".to_owned(),
+            h: "(px)600".to_owned(),
+            background: None,
+            index: Some(1),
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(
+        result.status,
+        TxStatus::Accepted,
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        page_id_order(&result.source_after),
+        vec!["pg1", "pg.mid", "pg2"],
+        "new page must be inserted at index 1"
+    );
+}
+
+#[test]
+fn add_page_duplicate_id_rejected() {
+    let doc = parse(TWO_PAGE_STRUCT_DOC);
+    let tx = Transaction {
+        ops: vec![Op::AddPage {
+            id: "pg1".to_owned(),
+            w: "(px)800".to_owned(),
+            h: "(px)600".to_owned(),
+            background: None,
+            index: None,
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(result.status, TxStatus::Rejected);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "tx.duplicate_id"),
+        "expected tx.duplicate_id; got: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.source_after, result.source_before);
+}
+
+#[test]
+fn add_page_out_of_range_index_rejected() {
+    let doc = parse(TWO_PAGE_STRUCT_DOC);
+    let tx = Transaction {
+        ops: vec![Op::AddPage {
+            id: "pg3".to_owned(),
+            w: "(px)800".to_owned(),
+            h: "(px)600".to_owned(),
+            background: None,
+            index: Some(5),
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(result.status, TxStatus::Rejected);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "tx.out_of_range"),
+        "expected tx.out_of_range; got: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.source_after, result.source_before);
+}
+
+#[test]
+fn add_page_invalid_dimension_rejected() {
+    let doc = parse(TWO_PAGE_STRUCT_DOC);
+    let tx = Transaction {
+        ops: vec![Op::AddPage {
+            id: "pg3".to_owned(),
+            w: "not-a-dim".to_owned(),
+            h: "(px)600".to_owned(),
+            background: None,
+            index: None,
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(result.status, TxStatus::Rejected);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "tx.invalid_value"),
+        "expected tx.invalid_value; got: {:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn delete_page_removes() {
+    let doc = parse(TWO_PAGE_STRUCT_DOC);
+    let tx = Transaction {
+        ops: vec![Op::DeletePage {
+            page: "pg1".to_owned(),
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(
+        result.status,
+        TxStatus::Accepted,
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        page_id_order(&result.source_after),
+        vec!["pg2"],
+        "pg1 must be removed"
+    );
+    assert_eq!(result.affected_node_ids, vec!["pg1".to_owned()]);
+}
+
+#[test]
+fn delete_page_unknown_rejected() {
+    let doc = parse(TWO_PAGE_STRUCT_DOC);
+    let tx = Transaction {
+        ops: vec![Op::DeletePage {
+            page: "nope".to_owned(),
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(result.status, TxStatus::Rejected);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "tx.unknown_node"),
+        "expected tx.unknown_node; got: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.source_after, result.source_before);
+}
+
+#[test]
+fn reorder_pages_permutation() {
+    let doc = parse(TWO_PAGE_STRUCT_DOC);
+    let tx = Transaction {
+        ops: vec![Op::ReorderPages {
+            order: vec!["pg2".to_owned(), "pg1".to_owned()],
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(
+        result.status,
+        TxStatus::Accepted,
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        page_id_order(&result.source_after),
+        vec!["pg2", "pg1"],
+        "pages must be reordered to match `order`"
+    );
+}
+
+#[test]
+fn reorder_pages_missing_id_rejected() {
+    let doc = parse(TWO_PAGE_STRUCT_DOC);
+    let tx = Transaction {
+        ops: vec![Op::ReorderPages {
+            order: vec!["pg1".to_owned()],
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(result.status, TxStatus::Rejected);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "tx.invalid_value"),
+        "expected tx.invalid_value; got: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.source_after, result.source_before);
+}
+
+#[test]
+fn reorder_pages_extra_id_rejected() {
+    let doc = parse(TWO_PAGE_STRUCT_DOC);
+    let tx = Transaction {
+        ops: vec![Op::ReorderPages {
+            order: vec!["pg1".to_owned(), "pg2".to_owned(), "pg3".to_owned()],
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(result.status, TxStatus::Rejected);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "tx.invalid_value"),
+        "expected tx.invalid_value; got: {:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn reorder_pages_duplicate_id_rejected() {
+    let doc = parse(TWO_PAGE_STRUCT_DOC);
+    let tx = Transaction {
+        ops: vec![Op::ReorderPages {
+            order: vec!["pg1".to_owned(), "pg1".to_owned()],
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(result.status, TxStatus::Rejected);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "tx.invalid_value"),
+        "expected tx.invalid_value; got: {:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn from_json_add_page_round_trip() {
+    let json =
+        r#"{"ops":[{"op":"add_page","id":"page.new","w":"(px)1800","h":"(px)1200","index":1}]}"#;
+    let tx = Transaction::from_json(json).expect("parse JSON");
+    assert_eq!(
+        tx,
+        Transaction {
+            ops: vec![Op::AddPage {
+                id: "page.new".to_owned(),
+                w: "(px)1800".to_owned(),
+                h: "(px)1200".to_owned(),
+                background: None,
+                index: Some(1),
+            }],
+            permissions: Permissions::default(),
+        }
+    );
+}
+
+#[test]
+fn from_json_reorder_pages_round_trip() {
+    let json = r#"{"ops":[{"op":"reorder_pages","order":["b","a"]}]}"#;
+    let tx = Transaction::from_json(json).expect("parse JSON");
+    assert_eq!(
+        tx,
+        Transaction {
+            ops: vec![Op::ReorderPages {
+                order: vec!["b".to_owned(), "a".to_owned()],
+            }],
+            permissions: Permissions::default(),
+        }
+    );
+}
+
 // ── Group / Ungroup / Reparent test documents ─────────────────────────────
 
 /// Two sibling rects on a page; used for group/reparent tests.
