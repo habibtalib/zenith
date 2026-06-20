@@ -56,7 +56,15 @@ fn node_geometry_mut(node: &mut Node) -> Option<GeometryMut<'_>> {
         Node::Text(t) => Some((&mut t.x, &mut t.y, &mut t.w, &mut t.h)),
         Node::Code(c) => Some((&mut c.x, &mut c.y, &mut c.w, &mut c.h)),
         Node::Group(g) => Some((&mut g.x, &mut g.y, &mut g.w, &mut g.h)),
-        Node::Line(_) | Node::Polygon(_) | Node::Polyline(_) | Node::Unknown(_) => None,
+        // `Instance` is excluded: it carries only an x/y origin, no w/h box, so
+        // the four-slot bbox setter does not apply. A set_geometry on an instance
+        // honestly surfaces tx.unsupported_property rather than silently dropping
+        // the requested w/h.
+        Node::Line(_)
+        | Node::Polygon(_)
+        | Node::Polyline(_)
+        | Node::Instance(_)
+        | Node::Unknown(_) => None,
     }
 }
 

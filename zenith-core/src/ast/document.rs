@@ -92,6 +92,24 @@ pub struct DocumentBody {
     pub pages: Vec<Page>,
 }
 
+/// A reusable component definition: a named child-node subtree declared once
+/// (in the document-level `components` block) and instanced into multiple places
+/// via [`Node::Instance`](super::node::Node::Instance).
+///
+/// Declared as `component id="logo.block" { <any child nodes> }`. The component's
+/// child node ids are LOCAL to the component: they are validated for uniqueness
+/// only WITHIN the component, not globally, and they are prefixed with the
+/// instance id when an instance is expanded at compile time. The `component` id
+/// itself participates in the global id-uniqueness set.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComponentDef {
+    pub id: String,
+    /// The component's child nodes in source order (the reusable subtree).
+    pub children: Vec<super::node::Node>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+}
+
 /// The root `zenith` node — the complete parsed `.zen` document.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
@@ -102,5 +120,8 @@ pub struct Document {
     pub assets: AssetBlock,
     pub tokens: TokenBlock,
     pub styles: StyleBlock,
+    /// Reusable component definitions; empty when the `components` block is
+    /// absent. Instanced via [`Node::Instance`](super::node::Node::Instance).
+    pub components: Vec<ComponentDef>,
     pub body: DocumentBody,
 }

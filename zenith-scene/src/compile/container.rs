@@ -5,8 +5,8 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, Dimension, FontProvider, FrameNode, GroupNode, Node, Point, ResolvedToken, Style,
-    Unit, dim_to_px,
+    Diagnostic, Dimension, FontProvider, FrameNode, GroupNode, InstanceNode, Node, Override, Point,
+    PropertyValue, ResolvedToken, Style, Unit, dim_to_px,
 };
 use zenith_layout::RustybuzzEngine;
 
@@ -14,7 +14,7 @@ use crate::ir::SceneCommand;
 
 use super::chain::ChainAssignments;
 use super::util::{resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag};
-use super::{RenderCtx, compile_node, node_role, style_prop};
+use super::{ComponentMap, RenderCtx, compile_node, node_role, style_prop};
 
 // NOTE: compile_frame → compile_node → compile_frame recursion has no depth
 // guard, consistent with the compile_group limitation in v0.
@@ -23,6 +23,7 @@ pub(super) fn compile_frame(
     frame: &FrameNode,
     resolved: &BTreeMap<String, ResolvedToken>,
     style_map: &BTreeMap<&str, &Style>,
+    components: &ComponentMap,
     fonts: &dyn FontProvider,
     engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
@@ -128,6 +129,7 @@ pub(super) fn compile_frame(
             frame_w,
             resolved,
             style_map,
+            components,
             fonts,
             engine,
             commands,
@@ -142,6 +144,7 @@ pub(super) fn compile_frame(
                 child,
                 resolved,
                 style_map,
+                components,
                 fonts,
                 engine,
                 commands,
@@ -177,6 +180,7 @@ fn compile_frame_flow(
     frame_w: f64,
     resolved: &BTreeMap<String, ResolvedToken>,
     style_map: &BTreeMap<&str, &Style>,
+    components: &ComponentMap,
     fonts: &dyn FontProvider,
     engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
@@ -228,6 +232,7 @@ fn compile_frame_flow(
             &positioned,
             resolved,
             style_map,
+            components,
             fonts,
             engine,
             commands,
@@ -266,6 +271,7 @@ fn node_visible(node: &Node) -> Option<bool> {
         Node::Image(n) => n.visible,
         Node::Polygon(n) => n.visible,
         Node::Polyline(n) => n.visible,
+        Node::Instance(n) => n.visible,
         Node::Unknown(_) => None,
     }
 }
@@ -282,7 +288,11 @@ fn node_declared_w(node: &Node) -> Option<f64> {
         Node::Frame(n) => n.w.as_ref(),
         Node::Group(n) => n.w.as_ref(),
         Node::Image(n) => n.w.as_ref(),
-        Node::Line(_) | Node::Polygon(_) | Node::Polyline(_) | Node::Unknown(_) => None,
+        Node::Line(_)
+        | Node::Polygon(_)
+        | Node::Polyline(_)
+        | Node::Instance(_)
+        | Node::Unknown(_) => None,
     }?;
     dim_to_px(w.value, &w.unit)
 }
@@ -298,7 +308,11 @@ fn node_declared_h(node: &Node) -> Option<f64> {
         Node::Frame(n) => n.h.as_ref(),
         Node::Group(n) => n.h.as_ref(),
         Node::Image(n) => n.h.as_ref(),
-        Node::Line(_) | Node::Polygon(_) | Node::Polyline(_) | Node::Unknown(_) => None,
+        Node::Line(_)
+        | Node::Polygon(_)
+        | Node::Polyline(_)
+        | Node::Instance(_)
+        | Node::Unknown(_) => None,
     }?;
     dim_to_px(h.value, &h.unit)
 }
@@ -364,8 +378,14 @@ fn with_flow_box(node: &Node, x: f64, y: f64, w: f64, h: Option<f64>) -> Node {
             n.w = px(w);
             n.h = h_dim;
         }
-        // Geometry-less kinds: no x/y/w/h box to inject.
-        Node::Line(_) | Node::Polygon(_) | Node::Polyline(_) | Node::Unknown(_) => {}
+        // Geometry-less kinds: no x/y/w/h box to inject. (An instance carries
+        // only an x/y origin, no w/h box, so flow layout does not reposition it
+        // — it renders at its authored origin and advances the cursor by 0.)
+        Node::Line(_)
+        | Node::Polygon(_)
+        | Node::Polyline(_)
+        | Node::Instance(_)
+        | Node::Unknown(_) => {}
     }
     out
 }
@@ -378,6 +398,7 @@ pub(super) fn compile_group(
     group: &GroupNode,
     resolved: &BTreeMap<String, ResolvedToken>,
     style_map: &BTreeMap<&str, &Style>,
+    components: &ComponentMap,
     fonts: &dyn FontProvider,
     engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
@@ -461,6 +482,7 @@ pub(super) fn compile_group(
             child,
             resolved,
             style_map,
+            components,
             fonts,
             engine,
             commands,
@@ -472,6 +494,238 @@ pub(super) fn compile_group(
 
     if group_rot.is_some() && rot_center.is_some() {
         commands.push(SceneCommand::PopTransform);
+    }
+}
+
+// ── Instance ────────────────────────────────────────────────────────────────────
+
+/// Compile an `instance` node by expanding its referenced component subtree.
+///
+/// Expansion strategy (per the component/symbol design):
+/// 1. Look the component up in `components`; a missing component emits an
+///    advisory `scene.unknown_component` and the instance is skipped.
+/// 2. CLONE the component's children (never mutate the stored definition),
+///    apply each override to the matching LOCAL-id descendant, then PREFIX every
+///    descendant id with the instance id (`<inst-id>/<local-id>`) so multiple
+///    instances of the same component never produce duplicate ids in the scene.
+/// 3. Wrap the prepared children in a synthetic [`GroupNode`] carrying the
+///    instance's `x`/`y` origin (as the group translation) and its
+///    `opacity`/`visible` cascade, then delegate to [`compile_group`]. This
+///    reuses the group translation + opacity-cascade machinery verbatim rather
+///    than duplicating it; the instance itself emits no command.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn compile_instance(
+    instance: &InstanceNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
+    components: &ComponentMap,
+    fonts: &dyn FontProvider,
+    engine: &RustybuzzEngine,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    chains: &ChainAssignments,
+    ctx: RenderCtx,
+) {
+    // Entire expansion excluded when visible=false (mirror group/frame).
+    if instance.visible == Some(false) {
+        return;
+    }
+
+    let Some(component) = components.get(instance.component.as_str()) else {
+        diagnostics.push(Diagnostic::advisory(
+            "scene.unknown_component",
+            format!(
+                "instance '{}' references component '{}' which is not declared; \
+                 the instance is skipped",
+                instance.id, instance.component
+            ),
+            instance.source_span,
+            Some(instance.id.clone()),
+        ));
+        return;
+    };
+
+    // Clone the component subtree (the stored definition is never mutated),
+    // apply overrides against LOCAL ids, then prefix ids with the instance id.
+    let mut children = component.children.clone();
+    for ov in &instance.overrides {
+        apply_override(&mut children, ov);
+    }
+    let prefix = format!("{}/", instance.id);
+    prefix_ids_in_children(&mut children, &prefix);
+
+    // Build a synthetic group carrying the instance origin + cascade and reuse
+    // compile_group's translation/opacity logic. The group's own id is the
+    // instance id (it emits no command, so the id is only for self-consistency).
+    let synthetic = GroupNode {
+        id: instance.id.clone(),
+        name: instance.name.clone(),
+        role: instance.role.clone(),
+        x: instance.x.clone(),
+        y: instance.y.clone(),
+        w: None,
+        h: None,
+        opacity: instance.opacity,
+        visible: instance.visible,
+        locked: instance.locked,
+        rotate: None,
+        style: None,
+        children,
+        source_span: instance.source_span,
+        unknown_props: BTreeMap::new(),
+    };
+
+    compile_group(
+        &synthetic,
+        resolved,
+        style_map,
+        components,
+        fonts,
+        engine,
+        commands,
+        diagnostics,
+        chains,
+        ctx,
+    );
+}
+
+/// Apply a single [`Override`] to the first descendant in `children` (descending
+/// into `group`/`frame`/`instance` containers) whose LOCAL id equals
+/// `ov.ref_id`. Mutates a CLONE — callers pass the cloned component subtree.
+///
+/// Supported v0 payload: replace `spans` (text targets), `fill`, and `visible`.
+/// An override targeting a kind without the relevant field is a no-op for that
+/// field (e.g. `spans` on a rect). An unmatched ref is silently ignored here;
+/// the validator already warns via `component.unknown_override_target`.
+fn apply_override(children: &mut [Node], ov: &Override) -> bool {
+    for child in children.iter_mut() {
+        if node_local_id(child) == Some(ov.ref_id.as_str()) {
+            apply_override_to_node(child, ov);
+            return true;
+        }
+        let grandchildren = match child {
+            Node::Frame(f) => Some(&mut f.children),
+            Node::Group(g) => Some(&mut g.children),
+            _ => None,
+        };
+        if let Some(gc) = grandchildren
+            && apply_override(gc, ov)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Merge an override's supported fields onto a single matched node.
+fn apply_override_to_node(node: &mut Node, ov: &Override) {
+    // spans → only a text node carries spans.
+    if let Some(spans) = &ov.spans
+        && let Node::Text(t) = node
+    {
+        t.spans = spans.clone();
+    }
+    // fill → the kinds that carry a fill property.
+    if let Some(fill) = &ov.fill {
+        set_node_fill(node, fill.clone());
+    }
+    // visible → every id-bearing renderable kind carries a visible flag.
+    if let Some(v) = ov.visible {
+        set_node_visible(node, v);
+    }
+}
+
+/// Set the `fill` of a node kind that carries one; a no-op for kinds without
+/// a fill property.
+fn set_node_fill(node: &mut Node, fill: PropertyValue) {
+    match node {
+        Node::Rect(n) => n.fill = Some(fill),
+        Node::Ellipse(n) => n.fill = Some(fill),
+        Node::Text(n) => n.fill = Some(fill),
+        Node::Code(n) => n.fill = Some(fill),
+        Node::Polygon(n) => n.fill = Some(fill),
+        Node::Polyline(n) => n.fill = Some(fill),
+        Node::Line(_)
+        | Node::Frame(_)
+        | Node::Group(_)
+        | Node::Image(_)
+        | Node::Instance(_)
+        | Node::Unknown(_) => {}
+    }
+}
+
+/// Set the `visible` flag of a node kind that carries one.
+fn set_node_visible(node: &mut Node, v: bool) {
+    match node {
+        Node::Rect(n) => n.visible = Some(v),
+        Node::Ellipse(n) => n.visible = Some(v),
+        Node::Line(n) => n.visible = Some(v),
+        Node::Text(n) => n.visible = Some(v),
+        Node::Code(n) => n.visible = Some(v),
+        Node::Frame(n) => n.visible = Some(v),
+        Node::Group(n) => n.visible = Some(v),
+        Node::Image(n) => n.visible = Some(v),
+        Node::Polygon(n) => n.visible = Some(v),
+        Node::Polyline(n) => n.visible = Some(v),
+        Node::Instance(n) => n.visible = Some(v),
+        Node::Unknown(_) => {}
+    }
+}
+
+/// The LOCAL id of a node (the id as authored), or `None` for `Unknown`.
+fn node_local_id(node: &Node) -> Option<&str> {
+    match node {
+        Node::Rect(n) => Some(&n.id),
+        Node::Ellipse(n) => Some(&n.id),
+        Node::Line(n) => Some(&n.id),
+        Node::Text(n) => Some(&n.id),
+        Node::Code(n) => Some(&n.id),
+        Node::Frame(n) => Some(&n.id),
+        Node::Group(n) => Some(&n.id),
+        Node::Image(n) => Some(&n.id),
+        Node::Polygon(n) => Some(&n.id),
+        Node::Polyline(n) => Some(&n.id),
+        Node::Instance(n) => Some(&n.id),
+        Node::Unknown(_) => None,
+    }
+}
+
+/// Recursively prepend `prefix` to the id of every id-bearing node in
+/// `children`, descending into `group`/`frame` containers (and prefixing nested
+/// instance ids too). Mirrors the suffix walk used by `duplicate_page` in
+/// zenith-tx (an in-order recursion, deterministic, no HashMap), but applied as
+/// a PREFIX with the instance id so two instances of one component never collide.
+fn prefix_ids_in_children(children: &mut [Node], prefix: &str) {
+    for child in children.iter_mut() {
+        prefix_node_id(child, prefix);
+        match child {
+            Node::Frame(f) => prefix_ids_in_children(&mut f.children, prefix),
+            Node::Group(g) => prefix_ids_in_children(&mut g.children, prefix),
+            _ => {}
+        }
+    }
+}
+
+/// Prepend `prefix` to a single node's id (a no-op for `Unknown`).
+fn prefix_node_id(node: &mut Node, prefix: &str) {
+    macro_rules! pre {
+        ($field:expr) => {{
+            $field = format!("{prefix}{}", $field);
+        }};
+    }
+    match node {
+        Node::Rect(n) => pre!(n.id),
+        Node::Ellipse(n) => pre!(n.id),
+        Node::Line(n) => pre!(n.id),
+        Node::Text(n) => pre!(n.id),
+        Node::Code(n) => pre!(n.id),
+        Node::Frame(n) => pre!(n.id),
+        Node::Group(n) => pre!(n.id),
+        Node::Image(n) => pre!(n.id),
+        Node::Polygon(n) => pre!(n.id),
+        Node::Polyline(n) => pre!(n.id),
+        Node::Instance(n) => pre!(n.id),
+        Node::Unknown(_) => {}
     }
 }
 
@@ -664,8 +918,9 @@ fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Optio
                 };
                 expand!(base_dx + x, base_dy + y, w, h);
             }
-            // Unknown nodes have no geometry — skip.
-            Node::Unknown(_) => {}
+            // Instances have no authoritative bbox (their expanded subtree is
+            // the geometry) and unknown nodes have no geometry — skip both.
+            Node::Instance(_) | Node::Unknown(_) => {}
         }
     }
 

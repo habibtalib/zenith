@@ -5159,3 +5159,155 @@ page id="page.nc" w=(px)600 h=(px)200 {
         r1.scene.commands
     );
 }
+
+// ── Component / instance / override expansion ─────────────────────────
+
+/// Source with a `panel.master` component (bg rect + text label) instanced
+/// three times at three x positions, each overriding the label text.
+const COMPONENT_SRC: &str = r##"zenith version=1 {
+  project id="proj.c" name="C"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#101010"
+    token id="color.fg" type="color" value="#fafafa"
+    token id="color.alt" type="color" value="#ff0000"
+    token id="size.body" type="dimension" value=(pt)18
+    token id="font.fam" type="fontFamily" value="Noto Sans"
+  }
+  styles {}
+  components {
+    component id="panel.master" {
+      rect id="bg" x=(px)0 y=(px)0 w=(px)100 h=(px)60 fill=(token)"color.bg"
+      text id="label" x=(px)5 y=(px)5 w=(px)90 h=(px)30 fill=(token)"color.fg" font-family=(token)"font.fam" font-size=(token)"size.body" {
+        span "Default"
+      }
+    }
+  }
+  document id="doc.c" title="C" {
+    page id="page.c" w=(px)640 h=(px)360 {
+      instance id="inst.1" component="panel.master" x=(px)0 y=(px)0 {
+        override ref="label" { span "Back" }
+      }
+      instance id="inst.2" component="panel.master" x=(px)200 y=(px)0 {
+        override ref="label" fill=(token)"color.alt" { span "Center" }
+      }
+      instance id="inst.3" component="panel.master" x=(px)400 y=(px)0 {
+        override ref="label" { span "Cover" }
+      }
+    }
+  }
+}
+"##;
+
+#[test]
+fn instance_expands_component_translated_three_times() {
+    let doc = parse(COMPONENT_SRC);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "scene.unknown_component"),
+        "no unknown-component advisory expected: {:?}",
+        result.diagnostics
+    );
+
+    // The component's bg rect should appear 3× as a FillRect at x = 0, 200, 400.
+    let rect_xs: Vec<f64> = result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            SceneCommand::FillRect { x, w, h, .. } if *w == 100.0 && *h == 60.0 => Some(*x),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        rect_xs,
+        vec![0.0, 200.0, 400.0],
+        "the master bg rect must appear 3× at the 3 instance origins"
+    );
+
+    // Three glyph runs (one label per instance).
+    let glyph_runs = result
+        .scene
+        .commands
+        .iter()
+        .filter(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }))
+        .count();
+    assert_eq!(glyph_runs, 3, "each expanded instance draws its label");
+}
+
+#[test]
+fn instance_override_fill_recolors_target_label() {
+    let doc = parse(COMPONENT_SRC);
+    let result = compile(&doc, &default_provider());
+
+    // inst.2 overrides the label fill to color.alt (#ff0000); the other two
+    // labels keep color.fg (#fafafa). Collect glyph-run colors in z-order.
+    let colors: Vec<(u8, u8, u8)> = result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            SceneCommand::DrawGlyphRun { color, .. } => Some((color.r, color.g, color.b)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(colors.len(), 3);
+    assert_eq!(
+        colors[0],
+        (0xfa, 0xfa, 0xfa),
+        "inst.1 label keeps default fg"
+    );
+    assert_eq!(
+        colors[1],
+        (0xff, 0x00, 0x00),
+        "inst.2 label takes override fill"
+    );
+    assert_eq!(
+        colors[2],
+        (0xfa, 0xfa, 0xfa),
+        "inst.3 label keeps default fg"
+    );
+}
+
+#[test]
+fn unknown_component_emits_advisory_and_skips() {
+    let src = r##"zenith version=1 {
+  project id="proj.u" name="U"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#101010"
+  }
+  styles {}
+  components {
+    component id="real.one" {
+      rect id="bg" x=(px)0 y=(px)0 w=(px)10 h=(px)10 fill=(token)"color.bg"
+    }
+  }
+  document id="doc.u" title="U" {
+    page id="page.u" w=(px)100 h=(px)100 {
+      instance id="inst.x" component="missing.comp" x=(px)0 y=(px)0 {
+      }
+    }
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "scene.unknown_component"),
+        "expected scene.unknown_component advisory"
+    );
+    // Only PushClip + PopClip — the instance emitted nothing.
+    assert!(
+        !result
+            .scene
+            .commands
+            .iter()
+            .any(|c| matches!(c, SceneCommand::FillRect { .. })),
+        "a skipped instance must emit no fill commands"
+    );
+}

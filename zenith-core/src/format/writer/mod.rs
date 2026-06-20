@@ -29,8 +29,8 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    AssetBlock, AssetDecl, Dimension, Document, ObjectPosition, Project, PropertyValue, Unit,
-    UnknownValue,
+    AssetBlock, AssetDecl, ComponentDef, Dimension, Document, ObjectPosition, Project,
+    PropertyValue, Unit, UnknownValue,
 };
 use crate::error::FormatError;
 
@@ -41,7 +41,7 @@ mod tokens;
 #[cfg(test)]
 mod tests;
 
-use nodes::write_document_body;
+use nodes::{write_component_children, write_document_body};
 use styles::write_style_block;
 use tokens::write_token_block;
 
@@ -242,9 +242,39 @@ fn write_document(doc: &Document, out: &mut String) {
     write_asset_block(&doc.assets, out, 1);
     write_token_block(&doc.tokens, out, 1);
     write_style_block(&doc.styles, out, 1);
+    write_component_block(&doc.components, out, 1);
     write_document_body(&doc.body, out, 1);
 
     out.push('}');
+}
+
+// ---------------------------------------------------------------------------
+// Components
+// ---------------------------------------------------------------------------
+
+/// Emit the `components { … }` block.
+///
+/// Stable position: after `styles`, before `document`. The block is emitted ONLY
+/// when at least one component is declared, so documents without components keep
+/// their existing canonical form (and round-trip) unchanged. Each component emits
+/// `component id="…" { <child nodes> }`.
+fn write_component_block(components: &[ComponentDef], out: &mut String, depth: usize) {
+    if components.is_empty() {
+        return;
+    }
+    indent(out, depth);
+    out.push_str("components {\n");
+    for def in components {
+        indent(out, depth + 1);
+        out.push_str("component id=\"");
+        out.push_str(&def.id);
+        out.push_str("\" {\n");
+        write_component_children(&def.children, out, depth + 1);
+        indent(out, depth + 1);
+        out.push_str("}\n");
+    }
+    indent(out, depth);
+    out.push_str("}\n");
 }
 
 // ---------------------------------------------------------------------------

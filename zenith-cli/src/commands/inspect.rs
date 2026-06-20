@@ -279,6 +279,16 @@ fn build_node_entry(node: &Node) -> NodeEntry {
             locked: n.locked,
             children: vec![],
         },
+        Node::Instance(n) => NodeEntry {
+            id: n.id.clone(),
+            kind: "instance".into(),
+            // An instance carries only an x/y origin (no w/h box); report those
+            // two via the bbox geometry slots with w/h left None.
+            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), None, None),
+            visible: n.visible,
+            locked: n.locked,
+            children: vec![],
+        },
         Node::Unknown(n) => NodeEntry {
             id: String::new(),
             kind: n.kind.clone(),
@@ -333,6 +343,7 @@ fn node_id_str(node: &Node) -> &str {
         Node::Image(n) => &n.id,
         Node::Polygon(n) => &n.id,
         Node::Polyline(n) => &n.id,
+        Node::Instance(n) => &n.id,
         Node::Unknown(_) => "",
     }
 }

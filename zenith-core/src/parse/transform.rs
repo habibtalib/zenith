@@ -10,11 +10,11 @@ use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
 use crate::ast::{
     Span,
     asset::{AssetBlock, AssetDecl, AssetKind},
-    document::{Document, DocumentBody, Fold, Page, Project, SafeZone, SafeZoneType},
+    document::{ComponentDef, Document, DocumentBody, Fold, Page, Project, SafeZone, SafeZoneType},
     node::{
-        CodeNode, EllipseNode, FrameNode, GroupNode, ImageNode, LineNode, Node, ObjectPosition,
-        Point, PolygonNode, PolylineNode, RectNode, TextNode, TextSpan, UnknownNode,
-        UnknownProperty, UnknownValue,
+        CodeNode, EllipseNode, FrameNode, GroupNode, ImageNode, InstanceNode, LineNode, Node,
+        ObjectPosition, Override, Point, PolygonNode, PolylineNode, RectNode, TextNode, TextSpan,
+        UnknownNode, UnknownProperty, UnknownValue,
     },
     style::{Style, StyleBlock, UnknownStyleProp},
     token::{
@@ -338,6 +338,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     let mut assets = AssetBlock::default();
     let mut tokens = TokenBlock::default();
     let mut styles = StyleBlock::default();
+    let mut components: Vec<ComponentDef> = Vec::new();
     let mut body: Option<DocumentBody> = None;
 
     for child in children_doc.nodes() {
@@ -353,6 +354,9 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
             }
             "styles" => {
                 styles = transform_styles(child)?;
+            }
+            "components" => {
+                components = transform_components(child)?;
             }
             "document" => {
                 body = Some(transform_document_body(child)?);
@@ -376,7 +380,39 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
         assets,
         tokens,
         styles,
+        components,
         body,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Components
+// ---------------------------------------------------------------------------
+
+/// Transform the document-level `components { … }` block into a list of
+/// [`ComponentDef`]. Each `component id="..." { <child nodes> }` becomes one
+/// definition whose children are parsed exactly like page/group children (via
+/// [`transform_node`]). Non-`component` children inside the block are silently
+/// ignored (forward-compat).
+fn transform_components(node: &KdlNode) -> Result<Vec<ComponentDef>, ParseError> {
+    let mut defs: Vec<ComponentDef> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "component" {
+                defs.push(transform_component_def(child)?);
+            }
+        }
+    }
+    Ok(defs)
+}
+
+fn transform_component_def(node: &KdlNode) -> Result<ComponentDef, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+    let children = transform_children(node)?;
+    Ok(ComponentDef {
+        id,
+        children,
+        source_span: node_span(node),
     })
 }
 
@@ -969,6 +1005,7 @@ fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
         "image" => transform_image(node).map(Node::Image),
         "polygon" => transform_polygon(node).map(Node::Polygon),
         "polyline" => transform_polyline(node).map(Node::Polyline),
+        "instance" => transform_instance(node).map(Node::Instance),
         _ => Ok(Node::Unknown(UnknownNode {
             kind: node.name().value().to_owned(),
             source_span: node_span(node),
@@ -1537,6 +1574,86 @@ fn transform_polyline(node: &KdlNode) -> Result<PolylineNode, ParseError> {
         points,
         source_span: node_span(node),
         unknown_props,
+    })
+}
+
+const INSTANCE_KNOWN_PROPS: &[&str] = &[
+    "id",
+    "name",
+    "role",
+    "component",
+    "x",
+    "y",
+    "opacity",
+    "visible",
+    "locked",
+];
+
+/// Transform an `instance` node into an [`InstanceNode`].
+///
+/// Reads required `id` and `component`; optional `x`/`y` origin dimensions,
+/// `opacity`/`visible`/`locked`; and collects `override` child nodes into
+/// [`Override`]s. Non-`override` children are ignored (forward-compat).
+fn transform_instance(node: &KdlNode) -> Result<InstanceNode, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+    let component = required_string_prop(node, "component")?.to_owned();
+
+    let mut overrides: Vec<Override> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "override" {
+                overrides.push(transform_override(child)?);
+            }
+        }
+    }
+
+    let unknown_props = collect_unknown_props(node, INSTANCE_KNOWN_PROPS);
+
+    Ok(InstanceNode {
+        id,
+        name: optional_string_prop(node, "name").map(str::to_owned),
+        role: optional_string_prop(node, "role").map(str::to_owned),
+        component,
+        x: optional_dimension_prop(node, "x"),
+        y: optional_dimension_prop(node, "y"),
+        opacity: optional_f64_prop(node, "opacity"),
+        visible: optional_bool_prop(node, "visible"),
+        locked: optional_bool_prop(node, "locked"),
+        overrides,
+        source_span: node_span(node),
+        unknown_props,
+    })
+}
+
+/// Transform an `override ref="..." { … }` instance child into an [`Override`].
+///
+/// `ref` (required) names a component-LOCAL descendant id. Supported v0 override
+/// payload: `span` children (→ `spans`), a `fill` prop, and a `visible` prop.
+fn transform_override(node: &KdlNode) -> Result<Override, ParseError> {
+    let ref_id = required_string_prop(node, "ref")?.to_owned();
+
+    // Collect `span` children; only set `spans` when at least one is present so
+    // an override that does not touch text leaves the target's spans untouched.
+    let mut span_list: Vec<TextSpan> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "span" {
+                span_list.push(transform_span(child)?);
+            }
+        }
+    }
+    let spans = if span_list.is_empty() {
+        None
+    } else {
+        Some(span_list)
+    };
+
+    Ok(Override {
+        ref_id,
+        spans,
+        fill: optional_property_value(node, "fill"),
+        visible: optional_bool_prop(node, "visible"),
+        source_span: node_span(node),
     })
 }
 

@@ -453,6 +453,70 @@ pub struct PolylineNode {
     pub unknown_props: BTreeMap<String, UnknownProperty>,
 }
 
+/// An instance-local override applied to a single descendant of the referenced
+/// component when an [`InstanceNode`] is expanded at compile time.
+///
+/// An `override` is an `override ref="<local-descendant-id>" { … }` child of an
+/// instance. `ref_id` names a descendant by its component-LOCAL id (the id as
+/// declared inside the [`ComponentDef`], before instance-id prefixing).
+///
+/// v0 supported override set (documented; richer overrides are a follow-up):
+/// - `spans` — replaces the target text node's `spans` wholesale (the override's
+///   `span` children become the target's new spans).
+/// - `fill` — replaces the target node's `fill` visual property.
+/// - `visible` — replaces the target node's `visible` flag.
+///
+/// Each field is `None` when the override does not touch that aspect; a `None`
+/// field leaves the corresponding property on the cloned target untouched.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Override {
+    /// The component-LOCAL id of the descendant this override targets.
+    pub ref_id: String,
+    /// Replacement text spans (only meaningful for a text target).
+    pub spans: Option<Vec<TextSpan>>,
+    /// Replacement fill (color token ref or literal — validated like any fill).
+    pub fill: Option<PropertyValue>,
+    /// Replacement visibility flag.
+    pub visible: Option<bool>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+}
+
+/// An `instance` node — a placement of a declared [`ComponentDef`] at an origin
+/// `(x, y)`, with an optional opacity/visible cascade and instance-local
+/// overrides.
+///
+/// At compile time the instance expands to the component's child subtree treated
+/// as a GROUP translated by `(x, y)`, cascading `opacity`/`visible` exactly like
+/// a [`GroupNode`]. Every expanded descendant id is PREFIXED with the instance id
+/// (`<instance-id>/<local-id>`) so multiple instances of the same component never
+/// collide. The instance node itself emits no scene command; its expanded subtree
+/// does. Expansion happens at COMPILE time only — the instance stays a single node
+/// in the canonical AST so parse→format→parse round-trips.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstanceNode {
+    pub id: String,
+    pub name: Option<String>,
+    pub role: Option<String>,
+    /// The referenced [`ComponentDef`] id.
+    pub component: String,
+    /// Instance origin x-translation applied to the expanded subtree (default 0).
+    pub x: Option<Dimension>,
+    /// Instance origin y-translation applied to the expanded subtree (default 0).
+    pub y: Option<Dimension>,
+    /// Opacity that cascades (multiplies) into all expanded descendant alphas.
+    pub opacity: Option<f64>,
+    /// When `Some(false)` the entire expanded subtree is excluded from the render.
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    /// Instance-local overrides applied to component descendants on expansion.
+    pub overrides: Vec<Override>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+}
+
 /// A renderable content node within a page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
@@ -466,5 +530,6 @@ pub enum Node {
     Image(ImageNode),
     Polygon(PolygonNode),
     Polyline(PolylineNode),
+    Instance(InstanceNode),
     Unknown(UnknownNode),
 }

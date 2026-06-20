@@ -318,6 +318,7 @@ fn node_is_locked(doc: &Document, id: &str) -> bool {
             Node::Image(n) => n.locked,
             Node::Polygon(n) => n.locked,
             Node::Polyline(n) => n.locked,
+            Node::Instance(n) => n.locked,
             Node::Unknown(_) => None,
         }
     }
@@ -442,6 +443,7 @@ pub(super) fn node_id_of(node: &Node) -> Option<&str> {
         Node::Image(i) => Some(&i.id),
         Node::Polygon(p) => Some(&p.id),
         Node::Polyline(p) => Some(&p.id),
+        Node::Instance(i) => Some(&i.id),
         Node::Unknown(_) => None,
     }
 }
@@ -461,6 +463,7 @@ pub(super) fn node_kind_str(node: &Node) -> &'static str {
         Node::Image(_) => "image",
         Node::Polygon(_) => "polygon",
         Node::Polyline(_) => "polyline",
+        Node::Instance(_) => "instance",
         Node::Unknown(_) => "unknown",
     }
 }

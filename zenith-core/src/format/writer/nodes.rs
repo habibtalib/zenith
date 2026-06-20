@@ -5,8 +5,9 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    CodeNode, DocumentBody, EllipseNode, Fold, FrameNode, GroupNode, ImageNode, LineNode, Node,
-    Page, Point, PolygonNode, PolylineNode, RectNode, SafeZone, SafeZoneType, TextNode, TextSpan,
+    CodeNode, DocumentBody, EllipseNode, Fold, FrameNode, GroupNode, ImageNode, InstanceNode,
+    LineNode, Node, Override, Page, Point, PolygonNode, PolylineNode, RectNode, SafeZone,
+    SafeZoneType, TextNode, TextSpan,
 };
 
 use super::{
@@ -126,6 +127,16 @@ fn write_children_block(children: &[Node], out: &mut String, depth: usize) {
     }
 }
 
+/// Emit a component definition's child nodes at `depth + 1` indentation.
+///
+/// Public to the writer module so the `components` block writer in the module
+/// root can reuse the exact same per-node serialization the page/group/frame
+/// child blocks use. (`write_children_block` indents relative to a container
+/// node's own depth; here `depth` is the `component` node's depth.)
+pub(super) fn write_component_children(children: &[Node], out: &mut String, depth: usize) {
+    write_children_block(children, out, depth);
+}
+
 // ---------------------------------------------------------------------------
 // Nodes
 // ---------------------------------------------------------------------------
@@ -142,7 +153,69 @@ fn write_node(node: &Node, out: &mut String, depth: usize) {
         Node::Image(i) => write_image(i, out, depth),
         Node::Polygon(p) => write_polygon(p, out, depth),
         Node::Polyline(p) => write_polyline(p, out, depth),
+        Node::Instance(i) => write_instance(i, out, depth),
         Node::Unknown(u) => write_unknown_node(u, out, depth),
+    }
+}
+
+fn write_instance(i: &InstanceNode, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("instance");
+
+    // Canonical property order: id, name, role, component, x, y, opacity,
+    // visible, locked, then unknown props (sorted), then the override children.
+    out.push_str(" id=\"");
+    out.push_str(&i.id);
+    out.push('"');
+    write_opt_str(out, "name", &i.name);
+    write_opt_str(out, "role", &i.role);
+    out.push_str(" component=\"");
+    out.push_str(&i.component);
+    out.push('"');
+    write_opt_dimension(out, "x", &i.x);
+    write_opt_dimension(out, "y", &i.y);
+    write_opt_f64(out, "opacity", &i.opacity);
+    write_opt_bool(out, "visible", &i.visible);
+    write_opt_bool(out, "locked", &i.locked);
+
+    // Unknown properties in sorted key order (BTreeMap iteration is sorted).
+    for (key, prop) in &i.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_value(&prop.value));
+    }
+
+    // Always emit a brace block (container style), even with no overrides, so
+    // an instance is visually consistent with group/frame container nodes.
+    out.push_str(" {\n");
+    for ov in &i.overrides {
+        write_override(ov, out, depth + 1);
+    }
+    indent(out, depth);
+    out.push_str("}\n");
+}
+
+fn write_override(ov: &Override, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("override ref=\"");
+    out.push_str(&ov.ref_id);
+    out.push('"');
+    write_opt_property_value(out, "fill", &ov.fill);
+    write_opt_bool(out, "visible", &ov.visible);
+
+    // Span children (replacement text) live in a brace block; emit one only
+    // when the override carries spans, otherwise close the line.
+    match &ov.spans {
+        Some(spans) => {
+            out.push_str(" {\n");
+            for span in spans {
+                write_span(span, out, depth + 1);
+            }
+            indent(out, depth);
+            out.push_str("}\n");
+        }
+        None => out.push('\n'),
     }
 }
 

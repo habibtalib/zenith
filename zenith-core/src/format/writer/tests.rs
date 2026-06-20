@@ -140,6 +140,13 @@ fn strip_spans(mut doc: crate::ast::Document) -> crate::ast::Document {
     for style in &mut doc.styles.styles {
         style.source_span = None;
     }
+    // Components
+    for comp in &mut doc.components {
+        comp.source_span = None;
+        for node in &mut comp.children {
+            strip_node_span(node);
+        }
+    }
     // Pages and nodes
     for page in &mut doc.body.pages {
         page.source_span = None;
@@ -180,6 +187,12 @@ fn strip_node_span(node: &mut crate::ast::Node) {
         Node::Image(i) => i.source_span = None,
         Node::Polygon(p) => p.source_span = None,
         Node::Polyline(p) => p.source_span = None,
+        Node::Instance(i) => {
+            i.source_span = None;
+            for ov in &mut i.overrides {
+                ov.source_span = None;
+            }
+        }
         Node::Unknown(u) => u.source_span = None,
     }
 }
@@ -1600,5 +1613,90 @@ fn test_fold_format_round_trip() {
         strip_spans(doc_orig),
         strip_spans(doc_reparsed),
         "fold must survive a format round-trip (spans excluded)"
+    );
+}
+
+/// A `.zen` document exercising the `components` block, an `instance` node, and
+/// an `override` with a `span` replacement, a `fill`, and a `visible` flag.
+const COMPONENT_DOC: &str = r##"zenith version=1 {
+  project id="proj.comp" name="Component Project"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#101010"
+    token id="color.fg" type="color" value="#fafafa"
+    token id="color.alt" type="color" value="#ff0000"
+    token id="size.body" type="dimension" value=(pt)18
+  }
+  styles {
+  }
+  components {
+    component id="panel.master" {
+      rect id="bg" x=(px)0 y=(px)0 w=(px)200 h=(px)120 fill=(token)"color.bg"
+      text id="label" x=(px)10 y=(px)10 w=(px)180 h=(px)40 fill=(token)"color.fg" {
+        span "Default"
+      }
+    }
+  }
+  document id="doc.comp" title="Comp Doc" {
+    page id="page.one" w=(px)640 h=(px)360 background=(token)"color.bg" {
+      instance id="inst.1" component="panel.master" x=(px)0 y=(px)0 {
+        override ref="label" fill=(token)"color.alt" visible=#true {
+          span "Back"
+        }
+      }
+      instance id="inst.2" component="panel.master" x=(px)220 y=(px)0 {
+        override ref="label" {
+          span "Center"
+        }
+      }
+    }
+  }
+}
+"##;
+
+/// **components / instance / override round-trip**: parse → format → parse must
+/// yield the same AST (spans excluded), and the formatter must be idempotent.
+#[test]
+fn test_component_instance_override_round_trip() {
+    let adapter = KdlAdapter;
+    let doc_orig = adapter
+        .parse(COMPONENT_DOC.as_bytes())
+        .expect("original parse");
+
+    // Structural sanity: one component, two instances, first with rich override.
+    assert_eq!(doc_orig.components.len(), 1);
+    assert_eq!(doc_orig.components[0].id, "panel.master");
+    assert_eq!(doc_orig.components[0].children.len(), 2);
+    match &doc_orig.body.pages[0].children[0] {
+        Node::Instance(i) => {
+            assert_eq!(i.id, "inst.1");
+            assert_eq!(i.component, "panel.master");
+            assert_eq!(i.overrides.len(), 1);
+            let ov = &i.overrides[0];
+            assert_eq!(ov.ref_id, "label");
+            assert_eq!(ov.visible, Some(true));
+            assert!(ov.fill.is_some());
+            let spans = ov.spans.as_ref().expect("override spans");
+            assert_eq!(spans.len(), 1);
+            assert_eq!(spans[0].text, "Back");
+        }
+        other => panic!("expected Instance node, got {other:?}"),
+    }
+
+    let formatted = format_document(&doc_orig).expect("format");
+    let doc_reparsed = adapter.parse(&formatted).expect("re-parse");
+
+    assert_eq!(
+        strip_spans(doc_orig),
+        strip_spans(doc_reparsed),
+        "components/instance/override must survive a format round-trip (spans excluded)"
+    );
+
+    // Idempotency.
+    let s2 = format_document(&adapter.parse(&formatted).expect("re-parse for idempotency"))
+        .expect("format 2");
+    assert_eq!(
+        String::from_utf8(formatted).unwrap(),
+        String::from_utf8(s2).unwrap(),
+        "component formatting must be idempotent"
     );
 }

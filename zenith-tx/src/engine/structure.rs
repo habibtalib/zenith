@@ -427,7 +427,11 @@ pub(super) fn apply_remove_node(
 /// Duplicating a container would clone all descendant ids verbatim, producing
 /// document-wide duplicate ids. Re-id'ing an entire subtree is deferred.
 fn node_is_container(node: &Node) -> bool {
-    matches!(node, Node::Frame(_) | Node::Group(_))
+    // `Instance` is treated as container-ish here so the leaf-only duplicate
+    // guard rejects it: its expanded subtree re-ids descendants by an
+    // instance-id prefix, so duplicating it verbatim (with a single new id) is
+    // not a v0-supported operation — the same deferral as Frame/Group.
+    matches!(node, Node::Frame(_) | Node::Group(_) | Node::Instance(_))
 }
 
 /// Set the `id` field on a leaf [`Node`] variant to `new_id`.
@@ -473,9 +477,10 @@ fn node_set_id(node: &mut Node, new_id: String) -> bool {
             p.id = new_id;
             true
         }
-        // Containers handled by the v0 guard in apply_duplicate_node; Unknown
-        // nodes have no id field and are never reached here.
-        Node::Frame(_) | Node::Group(_) | Node::Unknown(_) => false,
+        // Containers (and the container-ish instance) are handled by the v0
+        // guard in apply_duplicate_node; Unknown nodes have no id field and are
+        // never reached here.
+        Node::Frame(_) | Node::Group(_) | Node::Instance(_) | Node::Unknown(_) => false,
     }
 }
 
@@ -619,6 +624,9 @@ fn node_set_id_any(node: &mut Node, new_id: String) {
     match node {
         Node::Frame(f) => f.id = new_id,
         Node::Group(g) => g.id = new_id,
+        // The instance is an id-bearing container-ish node; set it directly
+        // (node_set_id deliberately excludes it as a non-leaf).
+        Node::Instance(i) => i.id = new_id,
         // Leaf variants share the existing setter.
         Node::Rect(_)
         | Node::Ellipse(_)

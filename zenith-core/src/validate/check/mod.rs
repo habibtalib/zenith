@@ -99,6 +99,22 @@ pub fn validate(doc: &Document) -> ValidationReport {
     let declared_style_ids: HashSet<String> =
         doc.styles.styles.iter().map(|s| s.id.clone()).collect();
 
+    // Declared component ids, collected once so the node walk can validate that
+    // every `instance component="..."` references a declared component.
+    let declared_component_ids: HashSet<String> =
+        doc.components.iter().map(|c| c.id.clone()).collect();
+
+    // Per-component LOCAL descendant id sets, used to validate that an override
+    // `ref` targets a real descendant. Built once before the page walk. Ordered
+    // for determinism. A component appears once; a duplicate component id is
+    // diagnosed separately (id.duplicate) and the first wins in this map.
+    let mut component_local_ids: BTreeMap<String, HashSet<String>> = BTreeMap::new();
+    for comp in &doc.components {
+        let mut local: HashSet<String> = HashSet::new();
+        collect_local_ids(&comp.children, &mut local);
+        component_local_ids.entry(comp.id.clone()).or_insert(local);
+    }
+
     // Style lookup by id, so the contrast check can resolve a text node's
     // style-inherited fill / font-size / font-weight. Ordered for determinism.
     let style_map: BTreeMap<&str, &Style> = doc
@@ -130,6 +146,36 @@ pub fn validate(doc: &Document) -> ValidationReport {
     for decl in &doc.assets.assets {
         register_id(&decl.id, &mut seen_ids, &mut diagnostics);
         validate_asset_decl(decl, &mut diagnostics);
+    }
+
+    // ── Component definitions ─────────────────────────────────────────────
+    // The component id participates in the GLOBAL uniqueness set. Each
+    // component's CHILD ids are validated for uniqueness within a LOCAL scope
+    // (a fresh seen-id set per component) so the same local id may appear in
+    // two different components without colliding. Token/asset/style refs inside
+    // a component are validated ONCE here at the definition, by walking the
+    // component's children exactly like page children (no page bounds → no
+    // off_canvas/contrast checks, which are placement-relative).
+    for comp in &doc.components {
+        register_id(&comp.id, &mut seen_ids, &mut diagnostics);
+
+        let mut local_seen: HashSet<String> = HashSet::new();
+        for child in &comp.children {
+            walk_node(
+                child,
+                &mut local_seen,
+                &mut referenced_token_ids,
+                resolved_tokens,
+                &declared_asset_ids,
+                &declared_style_ids,
+                &declared_component_ids,
+                &component_local_ids,
+                None,
+                false,
+                None,
+                &mut diagnostics,
+            );
+        }
     }
 
     // ── Document body id ──────────────────────────────────────────────────
@@ -216,6 +262,8 @@ pub fn validate(doc: &Document) -> ValidationReport {
                 resolved_tokens,
                 &declared_asset_ids,
                 &declared_style_ids,
+                &declared_component_ids,
+                &component_local_ids,
                 page_px_bounds,
                 false,
                 None,
@@ -268,6 +316,56 @@ pub fn validate(doc: &Document) -> ValidationReport {
 }
 
 // ── Tiny helpers ──────────────────────────────────────────────────────────────
+
+/// Recursively collect the LOCAL ids of every id-bearing node in `children`
+/// (descending into `group`/`frame`/`instance` containers) into `out`.
+///
+/// Used to build the per-component descendant-id set so an override `ref` can be
+/// checked against the real local ids. Mirrors the container recursion used by
+/// the node walk; `Instance` and `Unknown` ids are included where present.
+pub(super) fn collect_local_ids(children: &[crate::ast::node::Node], out: &mut HashSet<String>) {
+    use crate::ast::node::Node;
+    for child in children {
+        match child {
+            Node::Rect(n) => {
+                out.insert(n.id.clone());
+            }
+            Node::Ellipse(n) => {
+                out.insert(n.id.clone());
+            }
+            Node::Line(n) => {
+                out.insert(n.id.clone());
+            }
+            Node::Text(n) => {
+                out.insert(n.id.clone());
+            }
+            Node::Code(n) => {
+                out.insert(n.id.clone());
+            }
+            Node::Image(n) => {
+                out.insert(n.id.clone());
+            }
+            Node::Polygon(n) => {
+                out.insert(n.id.clone());
+            }
+            Node::Polyline(n) => {
+                out.insert(n.id.clone());
+            }
+            Node::Frame(n) => {
+                out.insert(n.id.clone());
+                collect_local_ids(&n.children, out);
+            }
+            Node::Group(n) => {
+                out.insert(n.id.clone());
+                collect_local_ids(&n.children, out);
+            }
+            Node::Instance(n) => {
+                out.insert(n.id.clone());
+            }
+            Node::Unknown(_) => {}
+        }
+    }
+}
 
 /// Register a single id; push `id.duplicate` if already seen.
 ///

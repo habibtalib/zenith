@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use crate::ast::node::{Node, PolygonNode, PolylineNode};
+use crate::ast::node::{InstanceNode, Node, PolygonNode, PolylineNode};
 use crate::ast::value::{Dimension, Unit, dim_to_px};
 use crate::diagnostics::Diagnostic;
 use crate::tokens::ResolvedToken;
@@ -33,6 +33,8 @@ pub(super) fn walk_node(
     resolved_tokens: &BTreeMap<String, ResolvedToken>,
     declared_asset_ids: &HashSet<String>,
     declared_style_ids: &HashSet<String>,
+    declared_component_ids: &HashSet<String>,
+    component_local_ids: &BTreeMap<String, HashSet<String>>,
     page_px_bounds: Option<(f64, f64)>,
     in_flow_parent: bool,
     enclosing_frame: Option<(f64, f64, f64, f64)>,
@@ -663,6 +665,8 @@ pub(super) fn walk_node(
                     resolved_tokens,
                     declared_asset_ids,
                     declared_style_ids,
+                    declared_component_ids,
+                    component_local_ids,
                     page_px_bounds,
                     children_in_flow,
                     frame_box,
@@ -711,6 +715,8 @@ pub(super) fn walk_node(
                     resolved_tokens,
                     declared_asset_ids,
                     declared_style_ids,
+                    declared_component_ids,
+                    component_local_ids,
                     page_px_bounds,
                     false,
                     enclosing_frame,
@@ -853,6 +859,18 @@ pub(super) fn walk_node(
             );
         }
 
+        Node::Instance(inst) => {
+            check_instance(
+                inst,
+                seen_ids,
+                referenced_token_ids,
+                resolved_tokens,
+                declared_component_ids,
+                component_local_ids,
+                diagnostics,
+            );
+        }
+
         Node::Unknown(u) => {
             diagnostics.push(Diagnostic::warning(
                 "node.unknown_kind",
@@ -950,8 +968,10 @@ pub(super) fn node_bbox(node: &Node, page_w: f64, page_h: f64) -> Option<(f64, f
         }
         Node::Polygon(n) => points_bbox(&n.points, page_w, page_h),
         Node::Polyline(n) => points_bbox(&n.points, page_w, page_h),
-        // Groups have no authoritative bbox in v0 — children are checked individually.
-        Node::Group(_) | Node::Unknown(_) => None,
+        // Groups have no authoritative bbox in v0 — children are checked
+        // individually. An instance likewise has no authoritative bbox: its
+        // expanded subtree (a translated group) is the renderable geometry.
+        Node::Group(_) | Node::Instance(_) | Node::Unknown(_) => None,
     }
 }
 
@@ -1002,6 +1022,7 @@ pub(super) fn node_id_and_span(node: &Node) -> (&str, Option<crate::ast::Span>) 
         Node::Image(n) => (&n.id, n.source_span),
         Node::Polygon(n) => (&n.id, n.source_span),
         Node::Polyline(n) => (&n.id, n.source_span),
+        Node::Instance(n) => (&n.id, n.source_span),
         Node::Unknown(n) => (&n.kind, n.source_span),
     }
 }
@@ -1234,6 +1255,106 @@ fn check_polyline(
         ));
     }
     // polyline is a LEAF: no child-node recursion (points are sub-data).
+}
+
+// ── instance validation ───────────────────────────────────────────────────────
+
+/// Validate an `instance` node:
+/// - its own `id` participates in GLOBAL uniqueness;
+/// - `component` must reference a declared component → else
+///   `component.unknown_reference` (Error);
+/// - each override `ref` must match a LOCAL descendant id of the referenced
+///   component → else `component.unknown_override_target` (Warning).
+///
+/// The instance is a container-ish node but it does NOT recurse here: its
+/// expanded subtree (and the component definition's own ids) are validated at
+/// the component definition site, not per-instance, so token/asset refs are
+/// checked once.
+fn check_instance(
+    inst: &InstanceNode,
+    seen_ids: &mut HashSet<String>,
+    referenced_token_ids: &mut HashSet<String>,
+    resolved_tokens: &BTreeMap<String, ResolvedToken>,
+    declared_component_ids: &HashSet<String>,
+    component_local_ids: &BTreeMap<String, HashSet<String>>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    register_id(&inst.id, seen_ids, diagnostics);
+
+    let component_known = declared_component_ids.contains(&inst.component);
+    if !component_known {
+        diagnostics.push(Diagnostic::error(
+            "component.unknown_reference",
+            format!(
+                "instance '{}': references component '{}' which is not declared in the \
+                 components block",
+                inst.id, inst.component
+            ),
+            inst.source_span,
+            Some(inst.id.clone()),
+        ));
+    }
+
+    // Override targets are only checkable when the component is known. Look up the
+    // referenced component's local-id set; an override `ref` that matches no local
+    // descendant id → warning.
+    let local_ids = component_local_ids.get(&inst.component);
+    for ov in &inst.overrides {
+        // Validate (and register as referenced) any token refs the override
+        // carries, so an override-only token is not falsely flagged unused and
+        // a bad override fill/span fill is type-checked like a node fill.
+        check_visual_prop(
+            &inst.id,
+            "fill",
+            ov.fill.as_ref(),
+            VisualExpect::Color,
+            referenced_token_ids,
+            resolved_tokens,
+            diagnostics,
+        );
+        if let Some(spans) = &ov.spans {
+            for span in spans {
+                check_visual_prop(
+                    &inst.id,
+                    "fill",
+                    span.fill.as_ref(),
+                    VisualExpect::Color,
+                    referenced_token_ids,
+                    resolved_tokens,
+                    diagnostics,
+                );
+            }
+        }
+
+        let target_known = local_ids
+            .map(|ids| ids.contains(&ov.ref_id))
+            .unwrap_or(false);
+        if component_known && !target_known {
+            diagnostics.push(Diagnostic::warning(
+                "component.unknown_override_target",
+                format!(
+                    "instance '{}': override ref '{}' matches no descendant id in component '{}'",
+                    inst.id, ov.ref_id, inst.component
+                ),
+                ov.source_span.or(inst.source_span),
+                Some(inst.id.clone()),
+            ));
+        }
+    }
+
+    // Unknown properties on the instance node.
+    for prop_name in inst.unknown_props.keys() {
+        diagnostics.push(Diagnostic::warning(
+            "node.unknown_property",
+            format!(
+                "instance '{}': unknown property '{}' (version-relative; \
+                 may be valid in a later schema version)",
+                inst.id, prop_name
+            ),
+            inst.source_span,
+            Some(inst.id.clone()),
+        ));
+    }
 }
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────

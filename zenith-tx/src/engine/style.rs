@@ -25,7 +25,12 @@ fn node_fill_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
         Node::Code(n) => Some(&mut n.fill),
         Node::Polygon(n) => Some(&mut n.fill),
         Node::Polyline(n) => Some(&mut n.fill),
-        Node::Line(_) | Node::Frame(_) | Node::Group(_) | Node::Image(_) | Node::Unknown(_) => None,
+        Node::Line(_)
+        | Node::Frame(_)
+        | Node::Group(_)
+        | Node::Image(_)
+        | Node::Instance(_)
+        | Node::Unknown(_) => None,
     }
 }
 
@@ -44,6 +49,7 @@ fn node_stroke_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
         | Node::Frame(_)
         | Node::Group(_)
         | Node::Image(_)
+        | Node::Instance(_)
         | Node::Unknown(_) => None,
     }
 }
@@ -63,6 +69,7 @@ fn node_stroke_width_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> 
         | Node::Frame(_)
         | Node::Group(_)
         | Node::Image(_)
+        | Node::Instance(_)
         | Node::Unknown(_) => None,
     }
 }
@@ -81,6 +88,7 @@ fn node_opacity_mut(node: &mut Node) -> Option<&mut Option<f64>> {
         Node::Image(n) => Some(&mut n.opacity),
         Node::Polygon(n) => Some(&mut n.opacity),
         Node::Polyline(n) => Some(&mut n.opacity),
+        Node::Instance(n) => Some(&mut n.opacity),
         Node::Unknown(_) => None,
     }
 }
@@ -104,6 +112,7 @@ fn node_overflow_mut(node: &mut Node) -> Option<&mut Option<String>> {
         | Node::Image(_)
         | Node::Polygon(_)
         | Node::Polyline(_)
+        | Node::Instance(_)
         | Node::Unknown(_) => None,
     }
 }

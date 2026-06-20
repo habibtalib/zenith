@@ -29,19 +29,24 @@ mod tests;
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, Document, FontProvider, Node, PropertyValue, ResolvedToken, Style, dim_to_px,
-    resolve_tokens,
+    ComponentDef, Diagnostic, Document, FontProvider, Node, PropertyValue, ResolvedToken, Style,
+    dim_to_px, resolve_tokens,
 };
 use zenith_layout::RustybuzzEngine;
 
 use crate::ir::{Scene, SceneCommand};
 
 use chain::{ChainAssignments, resolve_chains};
-use container::{compile_frame, compile_group};
+use container::{compile_frame, compile_group, compile_instance};
 use image::compile_image;
 use leaf::{compile_ellipse, compile_line, compile_polygon, compile_polyline, compile_rect};
 use paint::{resolve_property_color, resolve_property_gradient};
 use text::{compile_code, compile_text};
+
+/// Compile-time lookup of component definitions by id. Threaded through the
+/// node-compilation dispatch so [`Node::Instance`] can expand its referenced
+/// component subtree. Ordered (`BTreeMap`) for deterministic iteration.
+pub(super) type ComponentMap<'a> = BTreeMap<&'a str, &'a ComponentDef>;
 
 // ── Render context ────────────────────────────────────────────────────────────
 
@@ -148,6 +153,14 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
         .iter()
         .map(|s| (s.id.as_str(), s))
         .collect();
+
+    // ── Step 1c: build component lookup map ──────────────────────────────
+    // Instances expand their referenced component at compile time. First
+    // declaration wins on a duplicate id (the validator flags id.duplicate).
+    let mut component_map: ComponentMap = BTreeMap::new();
+    for comp in &doc.components {
+        component_map.entry(comp.id.as_str()).or_insert(comp);
+    }
 
     // ── Step 2: select the requested page ────────────────────────────────
     let Some(page) = doc.body.pages.get(page_index) else {
@@ -268,6 +281,7 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
             node,
             resolved,
             &style_map,
+            &component_map,
             fonts,
             &engine,
             &mut scene.commands,
@@ -299,6 +313,7 @@ pub(super) fn node_role(node: &Node) -> Option<&str> {
         Node::Image(n) => n.role.as_deref(),
         Node::Polygon(n) => n.role.as_deref(),
         Node::Polyline(n) => n.role.as_deref(),
+        Node::Instance(n) => n.role.as_deref(),
         Node::Unknown(_) => None,
     }
 }
@@ -318,6 +333,7 @@ pub(super) fn compile_node(
     node: &Node,
     resolved: &BTreeMap<String, ResolvedToken>,
     style_map: &BTreeMap<&str, &Style>,
+    components: &ComponentMap,
     fonts: &dyn FontProvider,
     engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
@@ -360,6 +376,7 @@ pub(super) fn compile_node(
                 frame,
                 resolved,
                 style_map,
+                components,
                 fonts,
                 engine,
                 commands,
@@ -374,6 +391,22 @@ pub(super) fn compile_node(
                 group,
                 resolved,
                 style_map,
+                components,
+                fonts,
+                engine,
+                commands,
+                diagnostics,
+                chains,
+                ctx,
+            );
+            0.0
+        }
+        Node::Instance(instance) => {
+            compile_instance(
+                instance,
+                resolved,
+                style_map,
+                components,
                 fonts,
                 engine,
                 commands,
