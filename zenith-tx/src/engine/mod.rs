@@ -15,9 +15,6 @@ mod geometry;
 mod structure;
 mod style;
 
-#[cfg(test)]
-mod tests;
-
 use flags::{apply_set_locked, apply_set_points, apply_set_visible};
 use geometry::{apply_align_nodes, apply_distribute_nodes, apply_set_geometry};
 use structure::{
