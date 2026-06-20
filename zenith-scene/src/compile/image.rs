@@ -8,7 +8,9 @@ use crate::ir::{FitMode, ImageClip, SceneCommand, SrcRect};
 
 use super::RenderCtx;
 use super::paint::resolve_property_shadow;
-use super::util::{resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag};
+use super::util::{
+    blend_mode_ir, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
+};
 
 /// Compile an `image` leaf node.
 ///
@@ -89,7 +91,16 @@ pub(super) fn compile_image(
     let y = y_raw + ctx.dy;
 
     // Effective opacity: node opacity × cascaded ctx opacity.
-    let opacity = image.opacity.unwrap_or(1.0).clamp(0.0, 1.0) * ctx.opacity;
+    let full_opacity = image.opacity.unwrap_or(1.0).clamp(0.0, 1.0) * ctx.opacity;
+
+    // Blend-mode layer (see compile_rect for the opacity-split rationale). With
+    // a blend the layer carries `full_opacity` and the DrawImage paints at full
+    // alpha; with no blend `opacity == full_opacity` → byte-identical.
+    let blend = blend_mode_ir(image.blend_mode.as_deref());
+    let (layer_op, opacity) = match blend {
+        Some(_) => (full_opacity, 1.0),
+        None => (1.0, full_opacity),
+    };
 
     // Map fit string → FitMode. Default (absent or unknown) = Stretch.
     let fit = match image.fit.as_deref() {
@@ -125,6 +136,14 @@ pub(super) fn compile_image(
             angle_deg: angle,
             cx,
             cy,
+        });
+    }
+
+    // BLEND-MODE layer bracket (inside the rotation, outside the shadow).
+    if let Some(blend_mode) = blend {
+        commands.push(SceneCommand::PushLayer {
+            opacity: layer_op,
+            blend_mode: Some(blend_mode),
         });
     }
 
@@ -194,6 +213,10 @@ pub(super) fn compile_image(
 
     if has_shadow {
         commands.push(SceneCommand::EndShadow);
+    }
+
+    if blend.is_some() {
+        commands.push(SceneCommand::PopLayer);
     }
 
     if rot.is_some() {

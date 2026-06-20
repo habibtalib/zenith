@@ -19,7 +19,9 @@ use super::RenderCtx;
 use super::chain::ChainAssignments;
 use super::paint::{resolve_property_color, resolve_property_shadow};
 use super::style_prop;
-use super::util::{resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag};
+use super::util::{
+    blend_mode_ir, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
+};
 
 // ── Shared word-wrap structures + helpers ─────────────────────────────────────
 //
@@ -1146,6 +1148,18 @@ fn render_chain_member(
         });
     }
 
+    // BLEND-MODE layer bracket (inside rotation, outside shadow). The chain
+    // pre-pass already baked the node/ctx opacity into each word color, so the
+    // layer uses opacity 1.0 — it only changes the compositing operator, never
+    // re-applies opacity. Absent for normal/no blend (byte-identical).
+    let blend = blend_mode_ir(text.blend_mode.as_deref());
+    if let Some(blend_mode) = blend {
+        commands.push(SceneCommand::PushLayer {
+            opacity: 1.0,
+            blend_mode: Some(blend_mode),
+        });
+    }
+
     let has_shadow = if assignment.lines.is_empty() {
         false
     } else {
@@ -1192,6 +1206,10 @@ fn render_chain_member(
 
     if has_shadow {
         commands.push(SceneCommand::EndShadow);
+    }
+
+    if blend.is_some() {
+        commands.push(SceneCommand::PopLayer);
     }
 
     if text_rot.is_some() {
@@ -2075,6 +2093,19 @@ pub(super) fn compile_text_sized(
     // every span's alpha below.
     let node_opacity = text.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
 
+    // Blend-mode layer (see compile_rect). When a non-normal blend is active the
+    // full opacity cascade rides on the PushLayer and the glyph colors are
+    // emitted at full alpha (`color_opacity == 1.0`); otherwise `color_opacity`
+    // keeps the prior `node_opacity * ctx.opacity`, so the non-blend command
+    // stream is byte-identical. `layer_op` is the alpha the layer composites at.
+    let blend = blend_mode_ir(text.blend_mode.as_deref());
+    let layer_op = node_opacity * ctx.opacity;
+    let color_opacity = if blend.is_some() {
+        1.0
+    } else {
+        node_opacity * ctx.opacity
+    };
+
     // Node-level fill/weight props with style cascade — these are the
     // per-span fallbacks (span override → node → style → default).
     let node_fill_prop: Option<&PropertyValue> = text
@@ -2091,6 +2122,37 @@ pub(super) fn compile_text_sized(
     // non-empty string. The normal fast/wrap paths below are untouched (and so
     // remain byte-identical) when `tab_leader` is None/empty.
     if let Some(leader) = text.tab_leader.as_deref().filter(|s| !s.is_empty()) {
+        // Under a non-normal blend, the leader rows draw into a compositing
+        // layer that carries the opacity cascade; the inner emit then runs at
+        // full alpha (node_opacity 1.0 + a ctx with opacity 1.0, dx/dy/grid
+        // preserved). With no blend this is the prior call, byte-identical.
+        if let Some(blend_mode) = blend {
+            commands.push(SceneCommand::PushLayer {
+                opacity: layer_op,
+                blend_mode: Some(blend_mode),
+            });
+            let mut inner_ctx = ctx;
+            inner_ctx.opacity = 1.0;
+            let h = compile_tab_leader(
+                text,
+                leader,
+                &families,
+                font_size,
+                node_fill_prop,
+                node_weight_prop,
+                1.0,
+                resolved,
+                engine,
+                fonts,
+                commands,
+                diagnostics,
+                text_x,
+                text_y,
+                inner_ctx,
+            );
+            commands.push(SceneCommand::PopLayer);
+            return h;
+        }
         return compile_tab_leader(
             text,
             leader,
@@ -2175,7 +2237,7 @@ pub(super) fn compile_text_sized(
         let mut color = fill_prop
             .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &text.id))
             .unwrap_or(Color::srgb(0, 0, 0, 255));
-        color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+        color.a = (color.a as f64 * color_opacity).round() as u8;
 
         // Per-span weight: span.font_weight overrides node weight; 400.
         let weight_prop = span.font_weight.as_ref().or(node_weight_prop);
@@ -2306,6 +2368,16 @@ pub(super) fn compile_text_sized(
             angle_deg: angle,
             cx,
             cy,
+        });
+    }
+
+    // BLEND-MODE layer bracket (inside rotation, outside shadow). The glyph
+    // colors above were emitted at full alpha when blend is active; the layer
+    // carries the opacity cascade. Absent for normal/no blend (byte-identical).
+    if let Some(blend_mode) = blend {
+        commands.push(SceneCommand::PushLayer {
+            opacity: layer_op,
+            blend_mode: Some(blend_mode),
         });
     }
 
@@ -2713,7 +2785,7 @@ pub(super) fn compile_text_sized(
                             })
                             .unwrap_or(Color::srgb(0, 0, 0, 255));
                         marker_color.a =
-                            (marker_color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+                            (marker_color.a as f64 * color_opacity).round() as u8;
 
                         // Shape the marker string at the node's resolved
                         // font/weight/size (mirror `shape_drop_cap`). Take only
@@ -2978,6 +3050,10 @@ pub(super) fn compile_text_sized(
 
     if has_shadow {
         commands.push(SceneCommand::EndShadow);
+    }
+
+    if blend.is_some() {
+        commands.push(SceneCommand::PopLayer);
     }
 
     if text_rot.is_some() {

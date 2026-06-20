@@ -120,6 +120,9 @@ pub struct ImageNode {
     pub opacity: Option<f64>,
     /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
     pub shadow: Option<PropertyValue>,
+    /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
+    /// blends. `None`/`"normal"` render source-over (byte-identical).
+    pub blend_mode: Option<String>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,
     pub rotate: Option<Dimension>,
@@ -161,6 +164,10 @@ pub struct RectNode {
     pub stroke_linecap: Option<String>,
     /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
     pub shadow: Option<PropertyValue>,
+    /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
+    /// blends (`multiply`, `screen`, `overlay`, …). `None`/`"normal"` render
+    /// source-over (byte-identical to having no blend).
+    pub blend_mode: Option<String>,
     pub opacity: Option<f64>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,
@@ -237,6 +244,9 @@ pub struct EllipseNode {
     pub stroke_linecap: Option<String>,
     /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
     pub shadow: Option<PropertyValue>,
+    /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
+    /// blends. `None`/`"normal"` render source-over (byte-identical).
+    pub blend_mode: Option<String>,
     pub opacity: Option<f64>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,
@@ -288,6 +298,9 @@ pub struct TextNode {
     pub font_weight: Option<PropertyValue>,
     /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
     pub shadow: Option<PropertyValue>,
+    /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
+    /// blends. `None`/`"normal"` render source-over (byte-identical).
+    pub blend_mode: Option<String>,
     pub opacity: Option<f64>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,
@@ -493,6 +506,9 @@ pub struct FrameNode {
     /// Rotation — parsed and preserved but DEFERRED (not applied at render,
     /// consistent with the universal rotate deferral on all node types).
     pub rotate: Option<Dimension>,
+    /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
+    /// blends. `None`/`"normal"` render source-over (byte-identical).
+    pub blend_mode: Option<String>,
     pub style: Option<String>,
     /// Child nodes in source order.
     pub children: Vec<Node>,
@@ -530,6 +546,9 @@ pub struct GroupNode {
     /// Rotation — parsed and preserved but DEFERRED (not applied at render,
     /// consistent with the universal rotate deferral on all node types).
     pub rotate: Option<Dimension>,
+    /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
+    /// blends. `None`/`"normal"` render source-over (byte-identical).
+    pub blend_mode: Option<String>,
     pub style: Option<String>,
     /// Child nodes in source order.
     pub children: Vec<Node>,

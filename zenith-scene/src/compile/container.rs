@@ -14,7 +14,9 @@ use crate::ir::SceneCommand;
 
 use super::chain::ChainAssignments;
 use super::field::FieldCtx;
-use super::util::{resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag};
+use super::util::{
+    blend_mode_ir, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
+};
 use super::{ComponentMap, RenderCtx, compile_node, node_role, style_prop};
 
 // NOTE: compile_frame → compile_node → compile_frame recursion has no depth
@@ -107,6 +109,25 @@ pub(super) fn compile_frame(
         });
     }
 
+    // Blend-mode layer (inside the rotation, around the clip + children). When a
+    // non-normal blend is active the children render into an offscreen layer that
+    // composites back with the frame's opacity cascade; the children therefore
+    // inherit `ctx.opacity` UNMULTIPLIED (the layer carries the frame opacity so
+    // it is not double-counted). With no blend the cascade is unchanged and the
+    // command stream is byte-identical.
+    let frame_opacity = frame.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
+    let blend = blend_mode_ir(frame.blend_mode.as_deref());
+    let child_opacity = match blend {
+        Some(blend_mode) => {
+            commands.push(SceneCommand::PushLayer {
+                opacity: ctx.opacity * frame_opacity,
+                blend_mode: Some(blend_mode),
+            });
+            ctx.opacity
+        }
+        None => ctx.opacity * frame_opacity,
+    };
+
     // Clip rectangle is the frame's own bbox.
     commands.push(SceneCommand::PushClip {
         x: frame_x,
@@ -118,7 +139,7 @@ pub(super) fn compile_frame(
     // Frame clips only — it does NOT translate children (dx/dy unchanged).
     // Opacity cascades into all descendant alphas exactly as group does.
     let child_ctx = RenderCtx {
-        opacity: ctx.opacity * frame.opacity.unwrap_or(1.0).clamp(0.0, 1.0),
+        opacity: child_opacity,
         dx: ctx.dx, // clip-only: no translation
         dy: ctx.dy, // clip-only: no translation
         // Page baseline grid cascades unchanged so all text shares one grid.
@@ -184,6 +205,10 @@ pub(super) fn compile_frame(
     }
 
     commands.push(SceneCommand::PopClip);
+
+    if blend.is_some() {
+        commands.push(SceneCommand::PopLayer);
+    }
 
     if frame_rot.is_some() {
         commands.push(SceneCommand::PopTransform);
@@ -557,8 +582,15 @@ pub(super) fn compile_group(
     }
 
     // Cascade opacity: multiply the group's own opacity into the inherited ctx.
+    // With a non-normal blend the group's opacity instead rides the PushLayer
+    // (emitted after the rotation push below) and children inherit `ctx.opacity`
+    // unmultiplied, so opacity is applied exactly once. No-blend path unchanged.
     let group_opacity = group.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
-    let child_opacity = ctx.opacity * group_opacity;
+    let blend = blend_mode_ir(group.blend_mode.as_deref());
+    let child_opacity = match blend {
+        Some(_) => ctx.opacity,
+        None => ctx.opacity * group_opacity,
+    };
 
     // Resolve group x/y to pixels; absent or unsupported-unit → 0.0 (no diagnostic).
     let group_x_px = group
@@ -616,6 +648,15 @@ pub(super) fn compile_group(
         });
     }
 
+    // Blend-mode layer bracket (inside the rotation, around all children). The
+    // layer composites back with the group's full opacity cascade.
+    if let Some(blend_mode) = blend {
+        commands.push(SceneCommand::PushLayer {
+            opacity: ctx.opacity * group_opacity,
+            blend_mode: Some(blend_mode),
+        });
+    }
+
     // Emit children in source order; the group itself produces no command.
     let child_ctx = RenderCtx {
         opacity: child_opacity,
@@ -638,6 +679,10 @@ pub(super) fn compile_group(
             field_ctx,
             child_ctx,
         );
+    }
+
+    if blend.is_some() {
+        commands.push(SceneCommand::PopLayer);
     }
 
     if group_rot.is_some() && rot_center.is_some() {
@@ -718,6 +763,7 @@ pub(super) fn compile_instance(
         visible: instance.visible,
         locked: instance.locked,
         rotate: None,
+        blend_mode: None,
         style: None,
         children,
         source_span: instance.source_span,

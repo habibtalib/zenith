@@ -466,6 +466,10 @@ fn emit_command(
         // resolved into each command's color in the scene IR, so a layer
         // bracket needs only a save/restore to scope any state it sets. (No
         // group transparency object in v0; matched explicitly, not dropped.)
+        //
+        // v0 limitation: the `blend_mode` field is ignored — the PDF backend has
+        // no ExtGState soft-mask / blend-mode group, so blended content renders
+        // source-over. Documented honest limitation (the PNG backend honors it).
         SceneCommand::PushLayer { .. } => {
             content.save_state();
         }

@@ -9,8 +9,8 @@ use std::sync::Arc;
 use zenith_core::{AssetKind, BytesAssetProvider, FontStyle, default_provider};
 use zenith_layout::{RustybuzzEngine, ShapeRequest, TextDirection, TextLayoutEngine};
 use zenith_scene::{
-    Color, FitMode, GradientPaint, GradientStop, ImageClip, Scene, SceneCommand, SceneGlyph,
-    ShadowSpec, SrcRect,
+    BlendMode, Color, FitMode, GradientPaint, GradientStop, ImageClip, Scene, SceneCommand,
+    SceneGlyph, ShadowSpec, SrcRect,
 };
 
 use crate::backend::RasterBackend;
@@ -1600,4 +1600,71 @@ fn draw_image_src_rect_crops_to_blue_column() {
             );
         }
     }
+}
+
+// ── Blend-mode layer compositing ──────────────────────────────────────
+
+/// A blue rect wrapped in a `PushLayer { Multiply } … PopLayer` over a red
+/// background composites the overlap as multiply (red×blue → black), which is
+/// darker than either source. The render must not panic.
+#[test]
+fn blend_multiply_layer_darkens_overlap() {
+    let page = 8.0;
+    let mut scene = Scene::new(page, page);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: page,
+        h: page,
+    });
+    // Opaque red background covering the page.
+    scene.commands.push(SceneCommand::FillRect {
+        x: 0.0,
+        y: 0.0,
+        w: page,
+        h: page,
+        color: Color::srgb(255, 0, 0, 255),
+    });
+    // Blue rect over the red, composited with multiply via a layer.
+    scene.commands.push(SceneCommand::PushLayer {
+        opacity: 1.0,
+        blend_mode: Some(BlendMode::Multiply),
+    });
+    scene.commands.push(SceneCommand::FillRect {
+        x: 0.0,
+        y: 0.0,
+        w: page,
+        h: page,
+        color: Color::srgb(0, 0, 255, 255),
+    });
+    scene.commands.push(SceneCommand::PopLayer);
+    scene.commands.push(SceneCommand::PopClip);
+
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize must succeed");
+
+    // Multiply(red, blue) = (255*0, 0*0, 0*255)/255 = (0,0,0): black, darker
+    // than both the red and the blue source.
+    let (r, g, b, a) = pixel(&img.rgba, img.width, 4, 4);
+    assert_eq!(a, 255, "overlap must be opaque");
+    assert!(
+        r < 16 && g < 16 && b < 16,
+        "multiply overlap must be near-black (darker than red and blue); got r={r} g={g} b={b}"
+    );
+}
+
+/// A normal scene with NO layer commands renders unchanged: a solid red page
+/// stays solid red (the layer mechanism never touches the no-layer path).
+#[test]
+fn no_layer_scene_unchanged() {
+    let scene = make_solid_red_scene(4.0);
+    let backend = TinySkiaBackend;
+    let provider = default_provider();
+    let img = backend
+        .rasterize(&scene, &provider, &no_assets())
+        .expect("rasterize must succeed");
+    assert_eq!(pixel(&img.rgba, img.width, 2, 2), (255, 0, 0, 255));
 }

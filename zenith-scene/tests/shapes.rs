@@ -2017,3 +2017,98 @@ page id="page.ss" w=(px)100 h=(px)100 {
         other => panic!("expected StrokeRect, got {other:?}"),
     }
 }
+
+// ── Blend-mode layer bracket ──────────────────────────────────────────
+
+/// A rect with `blend-mode="multiply"` must wrap its FillRect in a
+/// `PushLayer { blend_mode: Some(Multiply) } … PopLayer` bracket.
+#[test]
+fn rect_blend_mode_wraps_fill_in_layer() {
+    use zenith_scene::ir::BlendMode;
+
+    let src = r##"zenith version=1 {
+  project id="proj.bm" name="BM"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#112233"
+  }
+  styles {}
+  document id="doc.bm" title="BM" {
+    page id="page.bm" w=(px)100 h=(px)100 {
+      rect id="rect.bm" x=(px)10 y=(px)10 w=(px)50 h=(px)50 fill=(token)"color.fill" blend-mode="multiply"
+    }
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let cmds = &result.scene.commands;
+    // PushClip, PushLayer, FillRect, PopLayer, PopClip
+    assert_eq!(cmds.len(), 5, "expected 5 commands, got: {:?}", cmds);
+
+    assert!(
+        matches!(cmds[0], SceneCommand::PushClip { .. }),
+        "first command must be PushClip"
+    );
+    match &cmds[1] {
+        SceneCommand::PushLayer {
+            blend_mode,
+            opacity,
+        } => {
+            assert_eq!(*blend_mode, Some(BlendMode::Multiply));
+            assert_eq!(*opacity, 1.0, "no node opacity → layer opacity 1.0");
+        }
+        other => panic!("expected PushLayer, got {other:?}"),
+    }
+    match &cmds[2] {
+        SceneCommand::FillRect { color, .. } => {
+            // Colors emit at full alpha when a blend layer is active.
+            assert_eq!(color.a, 255, "blend-layer fill must use full alpha");
+        }
+        other => panic!("expected FillRect, got {other:?}"),
+    }
+    assert!(
+        matches!(cmds[3], SceneCommand::PopLayer),
+        "fourth command must be PopLayer"
+    );
+    assert!(
+        matches!(cmds[4], SceneCommand::PopClip),
+        "last command must be PopClip"
+    );
+}
+
+/// A rect WITHOUT blend-mode must NOT emit any PushLayer/PopLayer — the
+/// command stream is byte-identical to before blend-mode existed.
+#[test]
+fn rect_without_blend_mode_emits_no_layer() {
+    let src = r##"zenith version=1 {
+  project id="proj.nb" name="NB"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#112233"
+  }
+  styles {}
+  document id="doc.nb" title="NB" {
+    page id="page.nb" w=(px)100 h=(px)100 {
+      rect id="rect.nb" x=(px)10 y=(px)10 w=(px)50 h=(px)50 fill=(token)"color.fill"
+    }
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    assert!(result.diagnostics.is_empty());
+
+    let cmds = &result.scene.commands;
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, SceneCommand::PushLayer { .. } | SceneCommand::PopLayer)),
+        "a node without blend-mode must emit no layer commands: {:?}",
+        cmds
+    );
+}

@@ -1195,6 +1195,8 @@ const RECT_KNOWN_PROPS: &[&str] = &[
     "stroke-linecap",
     "stroke_linecap",
     "shadow",
+    "blend-mode",
+    "blend_mode",
     "opacity",
     "visible",
     "locked",
@@ -1213,6 +1215,8 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
     let stroke_gap = optional_property_value_aliased(node, "stroke-gap", "stroke_gap");
     let stroke_linecap =
         optional_string_prop_aliased(node, "stroke-linecap", "stroke_linecap").map(str::to_owned);
+    let blend_mode =
+        optional_string_prop_aliased(node, "blend-mode", "blend_mode").map(str::to_owned);
 
     // Per-corner radius overrides: accept both hyphenated and underscored spellings.
     let radius_tl = optional_property_value_aliased(node, "radius-tl", "radius_tl");
@@ -1244,6 +1248,7 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
         stroke_gap,
         stroke_linecap,
         shadow: optional_property_value(node, "shadow"),
+        blend_mode,
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
@@ -1279,6 +1284,8 @@ const IMAGE_KNOWN_PROPS: &[&str] = &[
     "object-position-y",
     "object_position_y",
     "shadow",
+    "blend-mode",
+    "blend_mode",
     "opacity",
     "visible",
     "locked",
@@ -1327,6 +1334,8 @@ fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
         object_position_x,
         object_position_y,
         shadow: optional_property_value(node, "shadow"),
+        blend_mode: optional_string_prop_aliased(node, "blend-mode", "blend_mode")
+            .map(str::to_owned),
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
@@ -1359,6 +1368,8 @@ const ELLIPSE_KNOWN_PROPS: &[&str] = &[
     "stroke-linecap",
     "stroke_linecap",
     "shadow",
+    "blend-mode",
+    "blend_mode",
     "opacity",
     "visible",
     "locked",
@@ -1374,6 +1385,8 @@ fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
     let stroke_gap = optional_property_value_aliased(node, "stroke-gap", "stroke_gap");
     let stroke_linecap =
         optional_string_prop_aliased(node, "stroke-linecap", "stroke_linecap").map(str::to_owned);
+    let blend_mode =
+        optional_string_prop_aliased(node, "blend-mode", "blend_mode").map(str::to_owned);
 
     // Independent axis radii (override inscribed-ellipse default).
     let rx = optional_property_value(node, "rx");
@@ -1399,6 +1412,7 @@ fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
         stroke_gap,
         stroke_linecap,
         shadow: optional_property_value(node, "shadow"),
+        blend_mode,
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
@@ -1494,6 +1508,8 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "font-weight",
     "font_weight",
     "shadow",
+    "blend-mode",
+    "blend_mode",
     "opacity",
     "visible",
     "locked",
@@ -1578,6 +1594,8 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         font_size_min,
         font_weight,
         shadow: optional_property_value(node, "shadow"),
+        blend_mode: optional_string_prop_aliased(node, "blend-mode", "blend_mode")
+            .map(str::to_owned),
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
@@ -1691,7 +1709,7 @@ fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
 
 const FRAME_KNOWN_PROPS: &[&str] = &[
     "id", "name", "role", "x", "y", "w", "h", "layout", "columns", "rows", "opacity", "visible",
-    "locked", "rotate", "style",
+    "locked", "rotate", "blend-mode", "blend_mode", "style",
 ];
 
 fn transform_frame(node: &KdlNode) -> Result<FrameNode, ParseError> {
@@ -1713,6 +1731,8 @@ fn transform_frame(node: &KdlNode) -> Result<FrameNode, ParseError> {
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
+        blend_mode: optional_string_prop_aliased(node, "blend-mode", "blend_mode")
+            .map(str::to_owned),
         style: optional_string_prop(node, "style").map(str::to_owned),
         children: transform_children(node)?,
         source_span: node_span(node),
@@ -1721,7 +1741,8 @@ fn transform_frame(node: &KdlNode) -> Result<FrameNode, ParseError> {
 }
 
 const GROUP_KNOWN_PROPS: &[&str] = &[
-    "id", "name", "role", "x", "y", "w", "h", "opacity", "visible", "locked", "rotate", "style",
+    "id", "name", "role", "x", "y", "w", "h", "opacity", "visible", "locked", "rotate",
+    "blend-mode", "blend_mode", "style",
 ];
 
 fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
@@ -1741,6 +1762,8 @@ fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
+        blend_mode: optional_string_prop_aliased(node, "blend-mode", "blend_mode")
+            .map(str::to_owned),
         style: optional_string_prop(node, "style").map(str::to_owned),
         children: transform_children(node)?,
         source_span: node_span(node),

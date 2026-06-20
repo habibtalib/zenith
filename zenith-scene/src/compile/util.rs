@@ -8,12 +8,40 @@ use zenith_core::{
     Diagnostic, Dimension, PropertyValue, ResolvedToken, ResolvedValue, Span, Unit, dim_to_px,
 };
 
+use crate::ir::BlendMode;
+
 // ── Rotation helper ───────────────────────────────────────────────────────────
 
 /// If `rotate` is a non-zero angle, returns the degrees to rotate the node's
 /// commands around its center; else None. (deg unit; value read directly.)
 pub(super) fn rotation_degrees(rotate: Option<&Dimension>) -> Option<f64> {
     rotate.map(|d| d.value).filter(|a| *a != 0.0)
+}
+
+// ── Blend-mode helper ───────────────────────────────────────────────────────
+
+/// Map a `blend-mode` attribute string to a non-`Normal` [`BlendMode`], or
+/// `None` when no compositing layer is needed.
+///
+/// `None`, `"normal"`, and any unrecognized value all return `None` — those
+/// nodes compile to a plain (layer-free) command stream, byte-identical to
+/// before blend-mode existed. Only the 11 separable blends open a layer.
+pub(super) fn blend_mode_ir(s: Option<&str>) -> Option<BlendMode> {
+    match s {
+        Some("multiply") => Some(BlendMode::Multiply),
+        Some("screen") => Some(BlendMode::Screen),
+        Some("overlay") => Some(BlendMode::Overlay),
+        Some("darken") => Some(BlendMode::Darken),
+        Some("lighten") => Some(BlendMode::Lighten),
+        Some("color-dodge") => Some(BlendMode::ColorDodge),
+        Some("color-burn") => Some(BlendMode::ColorBurn),
+        Some("hard-light") => Some(BlendMode::HardLight),
+        Some("soft-light") => Some(BlendMode::SoftLight),
+        Some("difference") => Some(BlendMode::Difference),
+        Some("exclusion") => Some(BlendMode::Exclusion),
+        // "normal", None, and unrecognized values: no layer.
+        _ => None,
+    }
 }
 
 /// Build a `scene.unsupported_unit` advisory for a named geometry field.

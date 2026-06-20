@@ -124,6 +124,7 @@ pub(super) fn resolve_field_to_text(field: &FieldNode, ctx: &FieldCtx) -> Option
         font_size_min: None,
         font_weight: None,
         shadow: None,
+        blend_mode: None,
         opacity: field.opacity,
         visible: field.visible,
         locked: field.locked,

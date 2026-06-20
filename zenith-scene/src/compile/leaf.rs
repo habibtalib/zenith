@@ -19,7 +19,9 @@ use super::paint::{
     resolve_property_shadow,
 };
 use super::style_prop;
-use super::util::{resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag};
+use super::util::{
+    blend_mode_ir, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
+};
 
 /// Resolve dashed-stroke parameters from raw node fields.
 ///
@@ -126,6 +128,18 @@ pub(super) fn compile_rect(
     // Apply node opacity then cascade ctx.opacity on top.
     let node_opacity = rect.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
 
+    // Blend-mode layer. When the node specifies a non-normal blend, the whole
+    // opacity cascade (`node_opacity * ctx.opacity`) rides on the PushLayer and
+    // is applied once, at PopLayer; the colors are then emitted at full alpha
+    // (`color_op == 1.0`) so opacity is not double-counted. With no blend (the
+    // common case) the layer is absent and `color_op` keeps the prior
+    // `node_opacity * ctx.opacity`, leaving the command stream byte-identical.
+    let blend = blend_mode_ir(rect.blend_mode.as_deref());
+    let (layer_op, color_op) = match blend {
+        Some(_) => (node_opacity * ctx.opacity, 1.0),
+        None => (1.0, node_opacity * ctx.opacity),
+    };
+
     // Resolve corner radius (optional; 0.0 when absent). Node-local
     // overrides style.
     let radius_prop = rect
@@ -175,6 +189,15 @@ pub(super) fn compile_rect(
         });
     }
 
+    // BLEND-MODE layer bracket (inside the rotation, outside the shadow). Only
+    // emitted for a non-normal blend; the matching PopLayer rides the arm tail.
+    if let Some(blend_mode) = blend {
+        commands.push(SceneCommand::PushLayer {
+            opacity: layer_op,
+            blend_mode: Some(blend_mode),
+        });
+    }
+
     // SHADOW bracket (innermost of the rotation, behind fill+stroke).
     // Only opened once we are committed to emitting the draws below; the
     // matching EndShadow rides at the arm's single tail.
@@ -198,7 +221,7 @@ pub(super) fn compile_rect(
         .or_else(|| style_prop(&rect.style, style_map, "fill"));
     if let Some(fill_prop) = fill_prop {
         if let Some(mut gradient) = resolve_property_gradient(fill_prop, resolved, &rect.id) {
-            apply_gradient_opacity(&mut gradient, node_opacity, ctx.opacity);
+            apply_gradient_opacity(&mut gradient, color_op, 1.0);
             if is_rounded {
                 commands.push(SceneCommand::FillRoundedRectGradient {
                     x,
@@ -221,7 +244,7 @@ pub(super) fn compile_rect(
         } else if let Some(mut color) =
             resolve_property_color(fill_prop, resolved, diagnostics, &rect.id)
         {
-            color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+            color.a = (color.a as f64 * color_op).round() as u8;
             if is_rounded {
                 commands.push(SceneCommand::FillRoundedRect {
                     x,
@@ -248,7 +271,7 @@ pub(super) fn compile_rect(
         && let Some(mut color) =
             resolve_property_color(stroke_prop, resolved, diagnostics, &rect.id)
     {
-        color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+        color.a = (color.a as f64 * color_op).round() as u8;
         let sw = rect
             .stroke_width
             .clone()
@@ -350,6 +373,10 @@ pub(super) fn compile_rect(
         commands.push(SceneCommand::EndShadow);
     }
 
+    if blend.is_some() {
+        commands.push(SceneCommand::PopLayer);
+    }
+
     if rot.is_some() {
         commands.push(SceneCommand::PopTransform);
     }
@@ -431,6 +458,14 @@ pub(super) fn compile_ellipse(
     // Apply node opacity then cascade ctx.opacity on top.
     let node_opacity = ellipse.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
 
+    // Blend-mode layer (see compile_rect for the opacity-split rationale). With
+    // no blend, `color_op == node_opacity * ctx.opacity` → byte-identical.
+    let blend = blend_mode_ir(ellipse.blend_mode.as_deref());
+    let (layer_op, color_op) = match blend {
+        Some(_) => (node_opacity * ctx.opacity, 1.0),
+        None => (1.0, node_opacity * ctx.opacity),
+    };
+
     // Resolve independent semi-axis overrides. When absent → `None` → byte-identical
     // to inscribed-ellipse behavior (renderer uses w/h directly).
     let rx: Option<f64> = ellipse.rx.as_ref().and_then(|p| {
@@ -451,6 +486,14 @@ pub(super) fn compile_ellipse(
             angle_deg: angle,
             cx,
             cy,
+        });
+    }
+
+    // BLEND-MODE layer bracket (inside rotation, outside shadow).
+    if let Some(blend_mode) = blend {
+        commands.push(SceneCommand::PushLayer {
+            opacity: layer_op,
+            blend_mode: Some(blend_mode),
         });
     }
 
@@ -476,7 +519,7 @@ pub(super) fn compile_ellipse(
         .or_else(|| style_prop(&ellipse.style, style_map, "fill"));
     if let Some(fill_prop) = fill_prop {
         if let Some(mut gradient) = resolve_property_gradient(fill_prop, resolved, &ellipse.id) {
-            apply_gradient_opacity(&mut gradient, node_opacity, ctx.opacity);
+            apply_gradient_opacity(&mut gradient, color_op, 1.0);
             commands.push(SceneCommand::FillEllipseGradient {
                 x,
                 y,
@@ -489,7 +532,7 @@ pub(super) fn compile_ellipse(
         } else if let Some(mut color) =
             resolve_property_color(fill_prop, resolved, diagnostics, &ellipse.id)
         {
-            color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+            color.a = (color.a as f64 * color_op).round() as u8;
             commands.push(SceneCommand::FillEllipse {
                 x,
                 y,
@@ -512,7 +555,7 @@ pub(super) fn compile_ellipse(
         && let Some(mut color) =
             resolve_property_color(stroke_prop, resolved, diagnostics, &ellipse.id)
     {
-        color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+        color.a = (color.a as f64 * color_op).round() as u8;
         let sw = ellipse
             .stroke_width
             .clone()
@@ -547,6 +590,10 @@ pub(super) fn compile_ellipse(
 
     if has_shadow {
         commands.push(SceneCommand::EndShadow);
+    }
+
+    if blend.is_some() {
+        commands.push(SceneCommand::PopLayer);
     }
 
     if rot.is_some() {

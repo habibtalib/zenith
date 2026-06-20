@@ -1111,6 +1111,7 @@ pub(super) fn apply_group(
         visible: None,
         locked: None,
         rotate: None,
+        blend_mode: None,
         style: None,
         children: group_children,
         source_span: None,

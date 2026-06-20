@@ -18,7 +18,10 @@ use tiny_skia::{
     Stroke, StrokeDash, Transform,
 };
 use zenith_core::{AssetKind, AssetProvider, FontProvider};
-use zenith_scene::{FitMode, ImageClip, LineCap as IrLineCap, Scene, SceneCommand, ShadowSpec};
+use zenith_scene::{
+    BlendMode as IrBlendMode, FitMode, ImageClip, LineCap as IrLineCap, Scene, SceneCommand,
+    ShadowSpec,
+};
 
 use crate::backend::{RasterBackend, RasterImage};
 use crate::error::RenderError;
@@ -56,6 +59,31 @@ use shadow::composite_shadows;
 /// - PNG encoding via `tiny_skia::Pixmap::encode_png` writes no timestamps.
 pub struct TinySkiaBackend;
 
+/// Map a scene-IR [`IrBlendMode`] to the `tiny_skia::BlendMode` used when a
+/// compositing layer is painted back onto its parent.
+///
+/// `None` and `Some(Normal)` both yield `SourceOver` — plain compositing — so a
+/// layer with no blend (or an explicit `normal`) composites byte-identically to
+/// having no layer at all. Every other variant maps to the tiny-skia operator of
+/// the same name. Exhaustive over `IrBlendMode`.
+fn map_blend_mode(b: Option<IrBlendMode>) -> tiny_skia::BlendMode {
+    use tiny_skia::BlendMode as Tk;
+    match b {
+        None | Some(IrBlendMode::Normal) => Tk::SourceOver,
+        Some(IrBlendMode::Multiply) => Tk::Multiply,
+        Some(IrBlendMode::Screen) => Tk::Screen,
+        Some(IrBlendMode::Overlay) => Tk::Overlay,
+        Some(IrBlendMode::Darken) => Tk::Darken,
+        Some(IrBlendMode::Lighten) => Tk::Lighten,
+        Some(IrBlendMode::ColorDodge) => Tk::ColorDodge,
+        Some(IrBlendMode::ColorBurn) => Tk::ColorBurn,
+        Some(IrBlendMode::HardLight) => Tk::HardLight,
+        Some(IrBlendMode::SoftLight) => Tk::SoftLight,
+        Some(IrBlendMode::Difference) => Tk::Difference,
+        Some(IrBlendMode::Exclusion) => Tk::Exclusion,
+    }
+}
+
 impl RasterBackend for TinySkiaBackend {
     fn rasterize(
         &self,
@@ -91,6 +119,14 @@ impl RasterBackend for TinySkiaBackend {
         // the matching EndShadow. `None` means draws target the real canvas.
         // v0 shadows are leaf-only and never nest (at most one active capture).
         let mut capture: Option<(Pixmap, Vec<ShadowSpec>)> = None;
+
+        // Active compositing layers. Each entry is a full-page offscreen pixmap
+        // that buffers the ink of a blend-mode node (or its children), plus the
+        // opacity and tiny-skia blend operator used to composite it back onto
+        // its parent at the matching PopLayer. Empty in the common case — with
+        // no layers active the draw target resolution is byte-identical to
+        // before (the layer check below short-circuits on an empty Vec).
+        let mut layer_stack: Vec<(Pixmap, f32, tiny_skia::BlendMode)> = Vec::new();
 
         for cmd in &scene.commands {
             // Hoist once per iteration. Push/pop arms mutate the stack and
@@ -153,7 +189,60 @@ impl RasterBackend for TinySkiaBackend {
                 // the real canvas, then composite the crisp ink on top.
                 SceneCommand::EndShadow => {
                     if let Some((ink, shadows)) = capture.take() {
-                        composite_shadows(&mut pixmap, &ink, &shadows, width, height);
+                        // The shadow composites into whatever target lies beneath
+                        // it: the innermost active layer if any, else the canvas.
+                        // (Resolution mirrors the draw target's layer-vs-canvas
+                        // choice; the shadow capture itself is the inner target
+                        // while open, so it is excluded here.)
+                        let shadow_target = layer_stack
+                            .last_mut()
+                            .map(|(pm, _, _)| pm)
+                            .unwrap_or(&mut pixmap);
+                        composite_shadows(shadow_target, &ink, &shadows, width, height);
+                    }
+                    continue;
+                }
+
+                // Open a compositing layer: allocate a full-page offscreen pixmap
+                // that the following draws (and any nested layers/shadows) paint
+                // into, to be composited back at PopLayer. On allocation failure
+                // we skip pushing — draws then fall through to the previous
+                // target and paint source-over (degraded, never a crash).
+                SceneCommand::PushLayer {
+                    opacity,
+                    blend_mode,
+                } => {
+                    if let Some(pm) = Pixmap::new(width, height) {
+                        layer_stack.push((pm, *opacity as f32, map_blend_mode(*blend_mode)));
+                    }
+                    continue;
+                }
+
+                // Close the most-recent layer: composite its buffered ink onto
+                // the NEW current target — the next layer down if one remains,
+                // else the active shadow capture, else the canvas — using the
+                // layer's opacity and blend operator.
+                SceneCommand::PopLayer => {
+                    if let Some((layer_pm, op, bm)) = layer_stack.pop() {
+                        let target_after_pop: &mut Pixmap = match layer_stack.last_mut() {
+                            Some((pm, _, _)) => pm,
+                            None => match capture.as_mut() {
+                                Some((pm, _)) => pm,
+                                None => &mut pixmap,
+                            },
+                        };
+                        target_after_pop.draw_pixmap(
+                            0,
+                            0,
+                            layer_pm.as_ref(),
+                            &PixmapPaint {
+                                opacity: op.clamp(0.0, 1.0),
+                                blend_mode: bm,
+                                quality: FilterQuality::Nearest,
+                            },
+                            Transform::identity(),
+                            None,
+                        );
                     }
                     continue;
                 }
@@ -161,12 +250,19 @@ impl RasterBackend for TinySkiaBackend {
                 _ => {}
             }
 
-            // The active drawing target: the offscreen capture when one is open,
-            // otherwise the real canvas. Computed once per drawing command, after
-            // the structural match above has run (so no borrow overlaps).
+            // The active drawing target, innermost-first: the offscreen shadow
+            // capture when one is open (shadow ink is always the innermost draw
+            // target), else the top compositing layer if any, else the real
+            // canvas. Computed once per drawing command, after the structural
+            // match above has run (so no borrow overlaps). With no shadow and no
+            // layer active this resolves to `&mut pixmap` exactly as before —
+            // the no-layer path is byte-identical.
             let target: &mut Pixmap = match capture.as_mut() {
                 Some((pm, _)) => pm,
-                None => &mut pixmap,
+                None => match layer_stack.last_mut() {
+                    Some((pm, _, _)) => pm,
+                    None => &mut pixmap,
+                },
             };
 
             match cmd {

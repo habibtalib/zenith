@@ -24,6 +24,31 @@ pub enum LineCap {
     Square,
 }
 
+// ── BlendMode ─────────────────────────────────────────────────────────────────
+
+/// Compositing blend mode for a layer's ink onto what lies beneath it.
+///
+/// `Normal` is plain source-over compositing (the default). Every other variant
+/// is a separable Porter-Duff/PDF blend that maps directly onto the
+/// `tiny_skia::BlendMode` of the same name. Serialized in kebab-case so the JSON
+/// matches the KDL attribute values (`color-dodge`, `hard-light`, …).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BlendMode {
+    Normal,
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+}
+
 // ── Color ─────────────────────────────────────────────────────────────────────
 
 /// An sRGB 8-bit color with pre-multiplied-independent alpha.
@@ -461,7 +486,16 @@ pub enum SceneCommand {
     /// Pop the most-recently pushed clip rectangle.
     PopClip,
     /// Push a compositing layer (for opacity, blend, mask).
-    PushLayer { opacity: f64 },
+    ///
+    /// `opacity` is the layer alpha applied when the layer is composited back
+    /// onto its parent. `blend_mode` selects the compositing operator used for
+    /// that composite; `None` (and `Some(BlendMode::Normal)`) mean plain
+    /// source-over and serialize identically to a layer with no blend.
+    PushLayer {
+        opacity: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        blend_mode: Option<BlendMode>,
+    },
     /// Pop the most-recently pushed compositing layer.
     PopLayer,
     /// Push an affine rotation around a pivot; composes onto the renderer's transform stack.

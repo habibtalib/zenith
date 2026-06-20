@@ -257,6 +257,16 @@ pub(super) fn walk_node(
                     Some(r.id.clone()),
                 ));
             }
+            if let Some(bm) = r.blend_mode.as_deref()
+                && !is_valid_blend_mode(bm)
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!("rect '{}': blend-mode '{bm}' is not a recognized value", r.id),
+                    r.source_span,
+                    Some(r.id.clone()),
+                ));
+            }
             check_visual_prop(
                 &r.id,
                 "radius",
@@ -441,6 +451,16 @@ pub(super) fn walk_node(
                     Some(e.id.clone()),
                 ));
             }
+            if let Some(bm) = e.blend_mode.as_deref()
+                && !is_valid_blend_mode(bm)
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!("ellipse '{}': blend-mode '{bm}' is not a recognized value", e.id),
+                    e.source_span,
+                    Some(e.id.clone()),
+                ));
+            }
             // Independent axis radii: same validation as dimension props.
             for (prop_name, prop_val) in [("rx", e.rx.as_ref()), ("ry", e.ry.as_ref())] {
                 check_visual_prop(
@@ -594,6 +614,16 @@ pub(super) fn walk_node(
 
         Node::Text(t) => {
             register_id(&t.id, seen_ids, diagnostics);
+            if let Some(bm) = t.blend_mode.as_deref()
+                && !is_valid_blend_mode(bm)
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!("text '{}': blend-mode '{bm}' is not a recognized value", t.id),
+                    t.source_span,
+                    Some(t.id.clone()),
+                ));
+            }
             check_style_ref(
                 &t.id,
                 t.style.as_deref(),
@@ -859,6 +889,16 @@ pub(super) fn walk_node(
 
         Node::Frame(f) => {
             register_id(&f.id, seen_ids, diagnostics);
+            if let Some(bm) = f.blend_mode.as_deref()
+                && !is_valid_blend_mode(bm)
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!("frame '{}': blend-mode '{bm}' is not a recognized value", f.id),
+                    f.source_span,
+                    Some(f.id.clone()),
+                ));
+            }
             check_style_ref(
                 &f.id,
                 f.style.as_deref(),
@@ -972,6 +1012,16 @@ pub(super) fn walk_node(
 
         Node::Group(g) => {
             register_id(&g.id, seen_ids, diagnostics);
+            if let Some(bm) = g.blend_mode.as_deref()
+                && !is_valid_blend_mode(bm)
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!("group '{}': blend-mode '{bm}' is not a recognized value", g.id),
+                    g.source_span,
+                    Some(g.id.clone()),
+                ));
+            }
             check_style_ref(
                 &g.id,
                 g.style.as_deref(),
@@ -1023,6 +1073,16 @@ pub(super) fn walk_node(
 
         Node::Image(img) => {
             register_id(&img.id, seen_ids, diagnostics);
+            if let Some(bm) = img.blend_mode.as_deref()
+                && !is_valid_blend_mode(bm)
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!("image '{}': blend-mode '{bm}' is not a recognized value", img.id),
+                    img.source_span,
+                    Some(img.id.clone()),
+                ));
+            }
             check_style_ref(
                 &img.id,
                 img.style.as_deref(),
@@ -1299,6 +1359,26 @@ fn resolve_axis(dim: &Dimension, basis: f64) -> Option<f64> {
     } else {
         dim_to_px(dim.value, &dim.unit)
     }
+}
+
+/// Whether `s` is one of the 12 recognized `blend-mode` values (`normal` plus
+/// the 11 separable blends). Unknown values warn at validation time.
+fn is_valid_blend_mode(s: &str) -> bool {
+    matches!(
+        s,
+        "normal"
+            | "multiply"
+            | "screen"
+            | "overlay"
+            | "darken"
+            | "lighten"
+            | "color-dodge"
+            | "color-burn"
+            | "hard-light"
+            | "soft-light"
+            | "difference"
+            | "exclusion"
+    )
 }
 
 /// Compute the authored bounding box `(x, y, w, h)` of a node in pixels.
