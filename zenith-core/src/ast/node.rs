@@ -963,6 +963,12 @@ pub struct TableNode {
     pub rows: Vec<TableRow>,
     /// First N rows are headers (styling + repeat in later units).
     pub header_rows: Option<u32>,
+    /// Multi-page flow id. Tables sharing a `flows` id form ONE logical table:
+    /// the FIRST member (page-order, then source-order) is the SOURCE carrying
+    /// all rows + columns; continuation members declare the same id with empty
+    /// rows and receive the body-row slice that fits their box, with header rows
+    /// repeated. Mirrors the text-node `chain` field. `None` = standalone table.
+    pub flows: Option<String>,
     /// Uniform gutter between cells in px (token or literal).
     pub gap: Option<PropertyValue>,
     /// Inset inside each cell in px (token or literal).

@@ -22,8 +22,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use zenith_core::{
-    Diagnostic, FontProvider, Node, PropertyValue, ResolvedToken, ResolvedValue, Style, TableNode,
-    dim_to_px,
+    Diagnostic, FontProvider, Node, PropertyValue, ResolvedToken, ResolvedValue, Style,
+    TableColumn, TableNode, TableRow, dim_to_px,
 };
 use zenith_layout::RustybuzzEngine;
 
@@ -32,6 +32,7 @@ use crate::ir::SceneCommand;
 use super::chain::ChainAssignments;
 use super::field::FieldCtx;
 use super::paint::resolve_property_color;
+use super::table_flow::TableFlowAssignments;
 use super::text::{
     MeasureEnv, measure_text_natural, measure_text_wrapped_height, resolve_text_families,
 };
@@ -164,7 +165,7 @@ fn resolve_border_width(
 /// One placed cell after the HTML-table occupancy walk: its top-left grid
 /// position plus resolved column/row spans. Shared by the width, height, and
 /// emission passes so cell placement is byte-identical across all three.
-struct PlacedCell<'a> {
+pub(super) struct PlacedCell<'a> {
     /// 0-based starting row.
     row: usize,
     /// 0-based starting column.
@@ -181,11 +182,15 @@ struct PlacedCell<'a> {
 /// order. This is the SINGLE placement walk reused by the auto-width pass, the
 /// row-height pass, and the emit pass, so a cell occupies byte-identical slots
 /// in measurement and rendering.
-fn place_cells(table: &TableNode, col_count: usize, row_count: usize) -> Vec<PlacedCell<'_>> {
+pub(super) fn place_cells(
+    rows: &[TableRow],
+    col_count: usize,
+    row_count: usize,
+) -> Vec<PlacedCell<'_>> {
     let mut placed: Vec<PlacedCell> = Vec::new();
     let mut occupied: BTreeSet<(usize, usize)> = BTreeSet::new();
 
-    for (r, row) in table.rows.iter().enumerate() {
+    for (r, row) in rows.iter().enumerate() {
         let mut col_cursor = 0usize;
         for cell in &row.cells {
             while col_cursor < col_count && occupied.contains(&(r, col_cursor)) {
@@ -223,6 +228,149 @@ struct CellRect {
     h: f64,
 }
 
+/// The resolved per-column widths and per-row heights of a table grid, computed
+/// ONCE from the placed cells and reused by both [`compile_table`] (for emission)
+/// and the multi-page flow pre-pass in [`super::table_flow`] (for fit decisions).
+///
+/// `col_widths`/`row_heights` are FINAL (auto-column + row shrink-to-fit applied),
+/// while `row_natural` holds the per-row content height BEFORE any vertical shrink
+/// — the pre-pass measures row fit against the natural heights so a member's box
+/// height decides the body-row slice deterministically.
+pub(super) struct TableLayout {
+    pub(super) col_widths: Vec<f64>,
+    pub(super) row_heights: Vec<f64>,
+    pub(super) row_natural: Vec<f64>,
+}
+
+/// Compute the content-based column widths and row heights for a table grid laid
+/// out as `columns` × `rows` inside a box of `table_w` × `table_h` pixels with the
+/// given `gap` and `pad`. This is the SINGLE sizing implementation shared by
+/// [`compile_table`] and the multi-page flow pre-pass; it is origin-independent
+/// (it produces widths/heights, not absolute positions).
+///
+/// `placed` must be the result of [`place_cells`] over the SAME `rows` slice so
+/// cell occupancy is byte-identical to the emit pass.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn compute_table_layout(
+    columns: &[TableColumn],
+    placed: &[PlacedCell<'_>],
+    col_count: usize,
+    row_count: usize,
+    gap: f64,
+    pad: f64,
+    table_w: f64,
+    table_h: f64,
+    env: &MeasureEnv,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> TableLayout {
+    // ── Column widths (CONTENT-BASED auto-sizing) ────────────────────────
+    let mut explicit_w: Vec<Option<f64>> = Vec::with_capacity(col_count);
+    for i in 0..col_count {
+        let w = columns
+            .get(i)
+            .and_then(|c| c.width.as_ref())
+            .and_then(|d| dim_to_px(d.value, &d.unit))
+            .map(|v| v.max(0.0));
+        explicit_w.push(w);
+    }
+    let sum_explicit: f64 = explicit_w.iter().filter_map(|w| *w).sum();
+
+    // Resolve the node-level font families ONCE per text node we measure (cached
+    // by node id) so repeated cells of the same node don't re-probe the provider
+    // or re-emit advisories.
+    let mut family_cache: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    // Natural content width demanded for each AUTO column.
+    let mut auto_natural: Vec<f64> = vec![0.0; col_count];
+    for pc in placed {
+        let cell_natural = cell_natural_width(pc.cell, pad, env, diagnostics, &mut family_cache);
+        let is_auto = |c: usize| explicit_w.get(c).is_some_and(|w| w.is_none());
+        let auto_col_count = (pc.col..pc.col + pc.cs).filter(|&c| is_auto(c)).count();
+        if auto_col_count == 0 {
+            continue;
+        }
+        let explicit_in_span: f64 = (pc.col..pc.col + pc.cs)
+            .filter_map(|c| explicit_w.get(c).copied().flatten())
+            .sum();
+        let span_gaps = gap * (pc.cs.saturating_sub(1)) as f64;
+        let auto_demand = (cell_natural - explicit_in_span - span_gaps).max(0.0);
+        let per_col = auto_demand / auto_col_count as f64;
+        for c in (pc.col..pc.col + pc.cs).filter(|&c| is_auto(c)) {
+            if let Some(slot) = auto_natural.get_mut(c) {
+                *slot = slot.max(per_col);
+            }
+        }
+    }
+
+    let total_gap_w = gap * (col_count.saturating_sub(1)) as f64;
+    let avail_auto = (table_w - sum_explicit - total_gap_w - 2.0 * pad).max(0.0);
+    let sum_auto_natural: f64 = explicit_w
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| w.is_none())
+        .map(|(i, _)| auto_natural.get(i).copied().unwrap_or(0.0))
+        .sum();
+    let auto_scale = if sum_auto_natural > avail_auto && sum_auto_natural > 0.0 {
+        avail_auto / sum_auto_natural
+    } else {
+        1.0
+    };
+    let col_widths: Vec<f64> = explicit_w
+        .iter()
+        .enumerate()
+        .map(|(i, w)| match w {
+            Some(px) => px.max(0.0),
+            None => {
+                let nat = auto_natural.get(i).copied().unwrap_or(0.0) * auto_scale;
+                if auto_scale < 1.0 {
+                    nat.max(MIN_AUTO_COL_W)
+                } else {
+                    nat.max(0.0)
+                }
+            }
+        })
+        .collect();
+
+    // ── Row heights (CONTENT-BASED) ──────────────────────────────────────
+    let mut row_natural: Vec<f64> = vec![0.0; row_count];
+    for pc in placed {
+        let mut span_w = 0.0;
+        for c in pc.col..pc.col + pc.cs {
+            span_w += col_widths.get(c).copied().unwrap_or(0.0);
+        }
+        span_w += gap * (pc.cs.saturating_sub(1)) as f64;
+        let content_w = (span_w - 2.0 * pad).max(0.0);
+
+        let cell_h =
+            cell_content_height(pc.cell, content_w, pad, env, diagnostics, &mut family_cache);
+        let per_row = cell_h / pc.rs as f64;
+        for dr in 0..pc.rs {
+            if let Some(slot) = row_natural.get_mut(pc.row + dr) {
+                *slot = slot.max(per_row);
+            }
+        }
+    }
+
+    let total_gap_h = gap * (row_count.saturating_sub(1)) as f64;
+    let avail_h = (table_h - total_gap_h - 2.0 * pad).max(0.0);
+    let sum_rows: f64 = row_natural.iter().sum();
+    let row_scale = if sum_rows > avail_h && sum_rows > 0.0 {
+        avail_h / sum_rows
+    } else {
+        1.0
+    };
+    let row_heights: Vec<f64> = row_natural
+        .iter()
+        .map(|h| (h * row_scale).max(0.0))
+        .collect();
+
+    TableLayout {
+        col_widths,
+        row_heights,
+        row_natural,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compile_table(
     table: &TableNode,
@@ -234,6 +382,7 @@ pub(super) fn compile_table(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    flows: &TableFlowAssignments,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) {
@@ -241,6 +390,14 @@ pub(super) fn compile_table(
     if table.visible == Some(false) {
         return;
     }
+
+    // Multi-page flow: if this table id was assigned a slice by the document-wide
+    // pre-pass, render that slice's rows + columns (the member box's own geometry,
+    // gap, padding, border, fill, header styling still apply). A table NOT in the
+    // map (the common case) uses its own rows/columns — byte-identical to before.
+    let flow = flows.get(&table.id);
+    let rows: &[TableRow] = flow.map(|a| a.rows.as_slice()).unwrap_or(&table.rows);
+    let columns: &[TableColumn] = flow.map(|a| a.columns.as_slice()).unwrap_or(&table.columns);
 
     // ── Resolve table geometry ───────────────────────────────────────────
     let (Some(x_dim), Some(y_dim), Some(w_dim), Some(h_dim)) =
@@ -287,40 +444,19 @@ pub(super) fn compile_table(
     let opacity = (table.opacity.unwrap_or(1.0).clamp(0.0, 1.0)) * ctx.opacity;
 
     // ── Grid dimensions ──────────────────────────────────────────────────
-    let col_count = table.columns.len().max(1);
-    let row_count = table.rows.len();
+    let col_count = columns.len().max(1);
+    let row_count = rows.len();
     if row_count == 0 {
-        // No rows → nothing to draw (the table box itself has no fill in v0).
+        // No rows → nothing to draw (the table box itself has no fill in v0). A
+        // flow continuation member with an empty assigned slice also lands here.
         return;
     }
 
     // ── Cell placement (shared occupancy walk) ───────────────────────────
-    // Computed ONCE here and reused by the width pass, height pass, and emit
-    // pass so a cell occupies byte-identical slots throughout.
-    let placed = place_cells(table, col_count, row_count);
+    // Computed ONCE here and reused by the layout pass and the emit pass so a
+    // cell occupies byte-identical slots throughout.
+    let placed = place_cells(rows, col_count, row_count);
 
-    // ── Column widths (CONTENT-BASED auto-sizing) ────────────────────────
-    // Explicit `column.width` resolves to its px and is fixed. Each AUTO column
-    // (no width) sizes to the widest natural content of the cells that span it
-    // (a colspan>1 auto cell divides its natural width across the auto columns
-    // it covers). If the natural total overflows the table, only the AUTO
-    // columns shrink proportionally (explicit columns stay fixed).
-    let mut explicit_w: Vec<Option<f64>> = Vec::with_capacity(col_count);
-    for i in 0..col_count {
-        let w = table
-            .columns
-            .get(i)
-            .and_then(|c| c.width.as_ref())
-            .and_then(|d| dim_to_px(d.value, &d.unit))
-            .map(|v| v.max(0.0));
-        explicit_w.push(w);
-    }
-    let sum_explicit: f64 = explicit_w.iter().filter_map(|w| *w).sum();
-
-    // Resolve the node-level font families ONCE per text node we measure (cached
-    // by node id) so repeated cells of the same node don't re-probe the provider
-    // or re-emit advisories.
-    let mut family_cache: BTreeMap<String, Vec<String>> = BTreeMap::new();
     // Shared shaping environment for the per-cell measurers.
     let env = MeasureEnv {
         resolved,
@@ -329,65 +465,25 @@ pub(super) fn compile_table(
         engine,
     };
 
-    // Natural content width demanded for each AUTO column. Explicit columns keep
-    // their resolved px; auto columns accumulate the max demand.
-    let mut auto_natural: Vec<f64> = vec![0.0; col_count];
-    for pc in &placed {
-        // The natural content width this cell needs (widest child + insets).
-        let cell_natural = cell_natural_width(pc.cell, pad, &env, diagnostics, &mut family_cache);
-        // Which of the columns this cell spans are AUTO? Distribute the cell's
-        // natural width equally across them (mirrors the occupancy placement).
-        let is_auto = |c: usize| explicit_w.get(c).is_some_and(|w| w.is_none());
-        let auto_col_count = (pc.col..pc.col + pc.cs).filter(|&c| is_auto(c)).count();
-        if auto_col_count == 0 {
-            continue;
-        }
-        // Subtract the explicit columns the cell also spans from its demand, then
-        // split the remainder across the auto columns it covers.
-        let explicit_in_span: f64 = (pc.col..pc.col + pc.cs)
-            .filter_map(|c| explicit_w.get(c).copied().flatten())
-            .sum();
-        let span_gaps = gap * (pc.cs.saturating_sub(1)) as f64;
-        let auto_demand = (cell_natural - explicit_in_span - span_gaps).max(0.0);
-        let per_col = auto_demand / auto_col_count as f64;
-        for c in (pc.col..pc.col + pc.cs).filter(|&c| is_auto(c)) {
-            if let Some(slot) = auto_natural.get_mut(c) {
-                *slot = slot.max(per_col);
-            }
-        }
-    }
-
-    // Assemble natural column widths, then shrink AUTO columns to fit if needed.
-    let total_gap_w = gap * (col_count.saturating_sub(1)) as f64;
-    let avail_auto = (table_w - sum_explicit - total_gap_w - 2.0 * pad).max(0.0);
-    let sum_auto_natural: f64 = explicit_w
-        .iter()
-        .enumerate()
-        .filter(|(_, w)| w.is_none())
-        .map(|(i, _)| auto_natural.get(i).copied().unwrap_or(0.0))
-        .sum();
-    // Shrink factor ≤ 1 applied to AUTO columns only when they overflow.
-    let auto_scale = if sum_auto_natural > avail_auto && sum_auto_natural > 0.0 {
-        avail_auto / sum_auto_natural
-    } else {
-        1.0
-    };
-    let col_widths: Vec<f64> = explicit_w
-        .iter()
-        .enumerate()
-        .map(|(i, w)| match w {
-            Some(px) => px.max(0.0),
-            None => {
-                let nat = auto_natural.get(i).copied().unwrap_or(0.0) * auto_scale;
-                // Clamp shrunk columns to a small minimum (never below 0).
-                if auto_scale < 1.0 {
-                    nat.max(MIN_AUTO_COL_W)
-                } else {
-                    nat.max(0.0)
-                }
-            }
-        })
-        .collect();
+    // ── Column widths + row heights (shared sizing math) ─────────────────
+    // The SINGLE sizing implementation, also used by the multi-page flow
+    // pre-pass for its fit decisions (see `compute_table_layout`).
+    let TableLayout {
+        col_widths,
+        row_heights,
+        row_natural: _,
+    } = compute_table_layout(
+        columns,
+        &placed,
+        col_count,
+        row_count,
+        gap,
+        pad,
+        table_w,
+        table_h,
+        &env,
+        diagnostics,
+    );
 
     // Left edge of each column (content-box left = origin + pad).
     let mut col_left: Vec<f64> = Vec::with_capacity(col_count);
@@ -396,55 +492,6 @@ pub(super) fn compile_table(
         col_left.push(cursor);
         cursor += w + gap;
     }
-
-    // ── Row heights (CONTENT-BASED) ──────────────────────────────────────
-    // After column widths are final, each row's height is the max over its
-    // cells of the cell's wrapped content height at its assigned column width
-    // plus the two padding insets. A rowspan>1 cell distributes its measured
-    // height across the rows it covers (max per row), so totals stay
-    // consistent. If the natural total overflows `table_h`, rows shrink
-    // proportionally; if it underflows, rows stay top-aligned (no stretch).
-    let mut row_natural: Vec<f64> = vec![0.0; row_count];
-    for pc in &placed {
-        // Assigned content width for this cell = summed spanned column widths +
-        // interior gaps − the two padding insets.
-        let mut span_w = 0.0;
-        for c in pc.col..pc.col + pc.cs {
-            span_w += col_widths.get(c).copied().unwrap_or(0.0);
-        }
-        span_w += gap * (pc.cs.saturating_sub(1)) as f64;
-        let content_w = (span_w - 2.0 * pad).max(0.0);
-
-        let cell_h = cell_content_height(
-            pc.cell,
-            content_w,
-            pad,
-            &env,
-            diagnostics,
-            &mut family_cache,
-        );
-        // Distribute across the spanned rows (max per row). `pc.rs` is ≥1 by
-        // construction in `place_cells`, so the division is always well-defined.
-        let per_row = cell_h / pc.rs as f64;
-        for dr in 0..pc.rs {
-            if let Some(slot) = row_natural.get_mut(pc.row + dr) {
-                *slot = slot.max(per_row);
-            }
-        }
-    }
-
-    let total_gap_h = gap * (row_count.saturating_sub(1)) as f64;
-    let avail_h = (table_h - total_gap_h - 2.0 * pad).max(0.0);
-    let sum_rows: f64 = row_natural.iter().sum();
-    let row_scale = if sum_rows > avail_h && sum_rows > 0.0 {
-        avail_h / sum_rows
-    } else {
-        1.0
-    };
-    let row_heights: Vec<f64> = row_natural
-        .iter()
-        .map(|h| (h * row_scale).max(0.0))
-        .collect();
 
     let mut row_top: Vec<f64> = Vec::with_capacity(row_count);
     let mut rcursor = origin_y + pad;
@@ -512,6 +559,7 @@ pub(super) fn compile_table(
                 commands,
                 diagnostics,
                 chains,
+                flows,
                 field_ctx,
                 ctx,
                 is_header,
@@ -540,6 +588,7 @@ pub(super) fn compile_table(
                 commands,
                 diagnostics,
                 chains,
+                flows,
                 field_ctx,
                 ctx,
                 is_header,
@@ -664,6 +713,7 @@ fn emit_cell_no_border(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    flows: &TableFlowAssignments,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
     is_header: bool,
@@ -742,7 +792,7 @@ fn emit_cell_no_border(
             if is_header && table.header_style.is_some() {
                 if let zenith_core::Node::Text(t) = child {
                     if t.style.is_none() {
-                        let mut cloned = *t.clone();
+                        let mut cloned = (**t).clone();
                         cloned.style = table.header_style.clone();
                         std::borrow::Cow::Owned(zenith_core::Node::Text(Box::new(cloned)))
                     } else {
@@ -764,6 +814,7 @@ fn emit_cell_no_border(
             commands,
             diagnostics,
             chains,
+            flows,
             field_ctx,
             child_ctx,
         );
@@ -853,6 +904,7 @@ fn emit_cell(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    flows: &TableFlowAssignments,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
     is_header: bool,
@@ -979,7 +1031,7 @@ fn emit_cell(
             if is_header && table.header_style.is_some() {
                 if let zenith_core::Node::Text(t) = child {
                     if t.style.is_none() {
-                        let mut cloned = *t.clone();
+                        let mut cloned = (**t).clone();
                         cloned.style = table.header_style.clone();
                         std::borrow::Cow::Owned(zenith_core::Node::Text(Box::new(cloned)))
                     } else {
@@ -1001,6 +1053,7 @@ fn emit_cell(
             commands,
             diagnostics,
             chains,
+            flows,
             field_ctx,
             child_ctx,
         );

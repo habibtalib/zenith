@@ -1904,6 +1904,7 @@ const TABLE_KNOWN_PROPS: &[&str] = &[
     "h",
     "header-rows",
     "header_rows",
+    "flows",
     "gap",
     "cell-padding",
     "cell_padding",
@@ -1996,6 +1997,7 @@ fn transform_table(node: &KdlNode) -> Result<TableNode, ParseError> {
         rows,
         header_rows: optional_u32_prop(node, "header-rows")
             .or_else(|| optional_u32_prop(node, "header_rows")),
+        flows: optional_string_prop(node, "flows").map(str::to_owned),
         gap: optional_property_value(node, "gap"),
         cell_padding: optional_property_value_aliased(node, "cell-padding", "cell_padding"),
         border_collapse: optional_string_prop_aliased(node, "border-collapse", "border_collapse")

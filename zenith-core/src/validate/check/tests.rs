@@ -5088,6 +5088,7 @@ fn table_node(
         columns,
         rows,
         header_rows: None,
+        flows: None,
         gap: None,
         cell_padding: None,
         border_collapse: None,

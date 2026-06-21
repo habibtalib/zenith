@@ -501,6 +501,68 @@ fn test_table_parse_format_round_trip() {
     );
 }
 
+/// **Table flow round-trip**: a SOURCE `table flows="t"` carrying rows + a
+/// CONTINUATION `table flows="t"` with EMPTY rows (a multi-page flow member)
+/// must parse the `flows` id onto both `TableNode`s, be re-emitted by the
+/// formatter, and survive a parse → format → parse round-trip.
+#[test]
+fn test_table_flows_parse_format_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.fl" name="FL"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.fl" title="FL" {
+    page id="page.fl1" w=(px)400 h=(px)400 {
+      table id="src" flows="t" x=(px)20 y=(px)20 w=(px)360 h=(px)120 header-rows=1 {
+        column
+        row {
+          cell { text id="h1" { span "HEAD" } }
+        }
+        row {
+          cell { text id="r1" { span "row-1" } }
+        }
+      }
+    }
+    page id="page.fl2" w=(px)400 h=(px)400 {
+      table id="cont" flows="t" x=(px)20 y=(px)20 w=(px)360 h=(px)400 header-rows=1 {
+        column
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let src_table = match &doc.body.pages[0].children[0] {
+        Node::Table(t) => t,
+        other => panic!("expected Table node, got {other:?}"),
+    };
+    let cont_table = match &doc.body.pages[1].children[0] {
+        Node::Table(t) => t,
+        other => panic!("expected Table node, got {other:?}"),
+    };
+    assert_eq!(src_table.flows.as_deref(), Some("t"));
+    assert_eq!(src_table.rows.len(), 2);
+    // The continuation member carries the same flow id but NO rows.
+    assert_eq!(cont_table.flows.as_deref(), Some("t"));
+    assert!(
+        cont_table.rows.is_empty(),
+        "a flow continuation member legitimately has zero rows"
+    );
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let doc2 = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert_eq!(
+        strip_spans(doc).body.pages,
+        strip_spans(doc2).body.pages,
+        "table flows must survive a parse → format → parse round-trip"
+    );
+}
+
 /// **Image clip round-trip**: `clip="rounded"` + `clip-radius=(token)"..."`
 /// must parse onto the `ImageNode`, be re-emitted by the formatter, and survive
 /// a format → re-parse round-trip.

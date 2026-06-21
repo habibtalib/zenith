@@ -24,6 +24,7 @@ mod image;
 mod leaf;
 mod paint;
 mod table;
+mod table_flow;
 mod text;
 mod toc;
 mod util;
@@ -48,6 +49,7 @@ use image::compile_image;
 use leaf::{compile_ellipse, compile_line, compile_polygon, compile_polyline, compile_rect};
 use paint::{resolve_property_color, resolve_property_gradient};
 use table::compile_table;
+use table_flow::{TableFlowAssignments, resolve_table_flows};
 use text::{compile_code, compile_text};
 use toc::resolve_toc_to_text;
 
@@ -355,6 +357,10 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
     let mut chain_diags: Vec<Diagnostic> = Vec::new();
     let chains =
         resolve_chains_document(doc, resolved, &style_map, fonts, &engine, &mut chain_diags);
+    // Multi-page table flow pre-pass (DOCUMENT-WIDE), built ONCE like the chain
+    // map and threaded identically into every `compile_node`. Its advisories are
+    // document-wide; like the chain diags they surface only on page 0.
+    let flows = resolve_table_flows(doc, resolved, &style_map, fonts, &engine, &mut chain_diags);
     if page_index == 0 {
         diagnostics.extend(chain_diags);
     }
@@ -468,6 +474,7 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
                 &mut scene.commands,
                 &mut diagnostics,
                 &chains,
+                &flows,
                 &field_ctx,
                 root_ctx,
             );
@@ -486,6 +493,7 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
             &mut scene.commands,
             &mut diagnostics,
             &chains,
+            &flows,
             &field_ctx,
             root_ctx,
         );
@@ -585,6 +593,7 @@ pub(super) fn compile_node(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    flows: &TableFlowAssignments,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) -> f64 {
@@ -631,6 +640,7 @@ pub(super) fn compile_node(
                 commands,
                 diagnostics,
                 chains,
+                flows,
                 field_ctx,
                 ctx,
             );
@@ -647,6 +657,7 @@ pub(super) fn compile_node(
                 commands,
                 diagnostics,
                 chains,
+                flows,
                 field_ctx,
                 ctx,
             );
@@ -663,6 +674,7 @@ pub(super) fn compile_node(
                 commands,
                 diagnostics,
                 chains,
+                flows,
                 field_ctx,
                 ctx,
             );
@@ -747,6 +759,7 @@ pub(super) fn compile_node(
                 commands,
                 diagnostics,
                 chains,
+                flows,
                 field_ctx,
                 ctx,
             );

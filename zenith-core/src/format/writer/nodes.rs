@@ -205,8 +205,8 @@ fn write_table(t: &TableNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("table");
 
-    // Canonical property order: id, name, role, x, y, w, h, header-rows, gap,
-    // cell-padding, border-collapse, fill, border, border-width, header-fill,
+    // Canonical property order: id, name, role, x, y, w, h, header-rows, flows,
+    // gap, cell-padding, border-collapse, fill, border, border-width, header-fill,
     // header-style, h-align, v-align, opacity, visible, locked, rotate, style,
     // then unknown props (sorted), then the column/row children block.
     out.push_str(" id=\"");
@@ -221,6 +221,7 @@ fn write_table(t: &TableNode, out: &mut String, depth: usize) {
     if let Some(n) = t.header_rows {
         let _ = write!(out, " header-rows={n}");
     }
+    write_opt_str(out, "flows", &t.flows);
     write_opt_property_value(out, "gap", &t.gap);
     write_opt_property_value(out, "cell-padding", &t.cell_padding);
     write_opt_str(out, "border-collapse", &t.border_collapse);

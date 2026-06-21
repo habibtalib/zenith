@@ -14,6 +14,7 @@ use crate::ir::SceneCommand;
 
 use super::chain::ChainAssignments;
 use super::field::FieldCtx;
+use super::table_flow::TableFlowAssignments;
 use super::util::{
     blend_mode_ir, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
 };
@@ -32,6 +33,7 @@ pub(super) fn compile_frame(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    flows: &TableFlowAssignments,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) {
@@ -173,6 +175,7 @@ pub(super) fn compile_frame(
                 commands,
                 diagnostics,
                 chains,
+                flows,
                 field_ctx,
                 child_ctx,
             );
@@ -192,6 +195,7 @@ pub(super) fn compile_frame(
                 commands,
                 diagnostics,
                 chains,
+                flows,
                 field_ctx,
                 child_ctx,
             );
@@ -209,6 +213,7 @@ pub(super) fn compile_frame(
                     commands,
                     diagnostics,
                     chains,
+                    flows,
                     field_ctx,
                     child_ctx,
                 );
@@ -255,6 +260,7 @@ fn compile_frame_flow(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    flows: &TableFlowAssignments,
     field_ctx: &FieldCtx,
     child_ctx: RenderCtx,
 ) {
@@ -308,6 +314,7 @@ fn compile_frame_flow(
             commands,
             diagnostics,
             chains,
+            flows,
             field_ctx,
             child_ctx,
         );
@@ -356,6 +363,7 @@ fn compile_frame_grid(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    flows: &TableFlowAssignments,
     field_ctx: &FieldCtx,
     child_ctx: RenderCtx,
 ) {
@@ -416,6 +424,7 @@ fn compile_frame_grid(
             commands,
             diagnostics,
             chains,
+            flows,
             field_ctx,
             child_ctx,
         );
@@ -607,6 +616,7 @@ pub(super) fn compile_group(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    flows: &TableFlowAssignments,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) {
@@ -722,6 +732,7 @@ pub(super) fn compile_group(
             commands,
             diagnostics,
             chains,
+            flows,
             field_ctx,
             child_ctx,
         );
@@ -767,6 +778,7 @@ pub(super) fn compile_instance(
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
     chains: &ChainAssignments,
+    flows: &TableFlowAssignments,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
 ) {
@@ -831,6 +843,7 @@ pub(super) fn compile_instance(
         commands,
         diagnostics,
         chains,
+        flows,
         field_ctx,
         ctx,
     );
