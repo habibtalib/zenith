@@ -9,6 +9,7 @@
 use std::path::Path;
 
 use zenith_core::{KdlAdapter, KdlSource, Severity, validate};
+use zenith_tx::TxStatus;
 
 use crate::commands::serialize_pretty;
 use crate::library::{ItemKind, LibraryPack, parse_spec, resolve_packs};
@@ -172,10 +173,66 @@ pub fn add(
 
     let summary = match item_kind {
         Some(ItemKind::Action) => {
-            return Err(AddCmdErr::new(
-                "applying action items via 'library add' is not yet implemented",
-                2,
+            let outcome = crate::library::materialize_action(target_src, &packs, &pkg_id, &item)
+                .map_err(|e| AddCmdErr::new(e.message, 2))?;
+
+            // Rejected → early-return with the rejection diagnostics; the two
+            // accepted variants yield the status label used in the summary.
+            let status_label = match outcome.tx_result.status {
+                TxStatus::Rejected => {
+                    let diag_lines: Vec<String> = outcome
+                        .tx_result
+                        .diagnostics
+                        .iter()
+                        .map(crate::commands::format_diagnostic_line)
+                        .collect();
+                    return Err(AddCmdErr::new(
+                        format!(
+                            "action '{}#{}' was rejected:\n{}",
+                            pkg_id,
+                            item,
+                            diag_lines.join("\n")
+                        ),
+                        1,
+                    ));
+                }
+                TxStatus::Accepted => "accepted",
+                TxStatus::AcceptedWithWarnings => "accepted-with-warnings",
+            };
+
+            let final_source = outcome.final_source.ok_or_else(|| {
+                AddCmdErr::new("internal error: accepted action produced no source", 2)
+            })?;
+
+            let result_doc = KdlAdapter.parse(final_source.as_bytes()).map_err(|e| {
+                AddCmdErr::new(
+                    format!(
+                        "internal error: could not re-parse action result: {}",
+                        e.message
+                    ),
+                    2,
+                )
+            })?;
+
+            let formatted = validate_and_format(&result_doc)?;
+
+            let affected = if outcome.tx_result.affected_node_ids.is_empty() {
+                "none".to_owned()
+            } else {
+                outcome.tx_result.affected_node_ids.join(", ")
+            };
+            let provenance_id = outcome.provenance_id.unwrap_or_default();
+            let mut summary = String::new();
+            summary.push_str(&format!(
+                "applied {}#{} ({})\n",
+                outcome.pkg_id, outcome.item, status_label
             ));
+            summary.push_str(&format!("  affected: {}\n", affected));
+            summary.push_str(&format!("  provenance: {}", provenance_id));
+            for w in &outcome.warnings {
+                summary.push_str(&format!("\n  warning: {}", w));
+            }
+            return Ok(AddResult { formatted, summary });
         }
         Some(ItemKind::Token) => {
             // TOKEN item: copy the filter token + color deps; no instance, no page.
@@ -536,23 +593,81 @@ mod tests {
     }
 
     #[test]
-    fn add_action_item_returns_not_yet_implemented_error() {
-        // Build a minimal project pack that declares an action item so the
-        // resolver can surface it as `ItemKind::Action`.
-        const ACTION_PACK_SRC: &str = r#"zenith version=1 {
+    fn add_action_accepted_applies_tx_and_writes_provenance() {
+        // Pack source with an action that updates token color.brand to #e11d48.
+        // Raw string uses r##"..."## to avoid early termination on "#e11d48".
+        const ACTION_PACK_SRC: &str = r##"zenith version=1 {
   project id="@test/actions" name="Test Actions"
   libraries { library id="@test/actions" version="1.0.0" }
   actions {
     action id="apply-brand-kit" {
-      tx "{\"ops\":[]}"
+      tx "{\"ops\":[{\"op\":\"update_token_value\",\"id\":\"color.brand\",\"value\":\"#e11d48\"}]}"
     }
   }
   document id="d" title="x" {
-    page id="pg" w=(px)100 h=(px)100 {
-    }
+    page id="pg" w=(px)100 h=(px)100 {}
   }
 }
-"#;
+"##;
+        // Target document that declares the token the action will update.
+        const TARGET_WITH_TOKEN: &str = r##"zenith version=1 {
+  project id="proj.x" name="Target"
+  tokens format="zenith-token-v1" {
+    token id="color.brand" type="color" value="#111111"
+  }
+  styles {}
+  document id="d" title="x" {
+    page id="pg" w=(px)800 h=(px)600 {}
+  }
+}
+"##;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lib_dir = dir.path().join("libraries");
+        std::fs::create_dir_all(&lib_dir).expect("create libraries dir");
+        std::fs::write(lib_dir.join("actions.zen"), ACTION_PACK_SRC).expect("write pack");
+
+        let result = add(
+            TARGET_WITH_TOKEN,
+            "@test/actions#apply-brand-kit",
+            Some(dir.path()),
+            None,
+            (0.0, 0.0),
+            None,
+        )
+        .expect("action add ok");
+
+        let src = String::from_utf8(result.formatted).expect("utf8");
+        assert!(src.contains("#e11d48"), "updated value in output: {}", src);
+        assert!(
+            result.summary.contains("apply-brand-kit"),
+            "summary mentions action id: {}",
+            result.summary
+        );
+        assert!(
+            result.summary.contains("provenance"),
+            "summary mentions provenance: {}",
+            result.summary
+        );
+    }
+
+    #[test]
+    fn add_action_rejected_returns_error_exit_1() {
+        // Action targets a non-existent token — tx will be rejected.
+        const ACTION_PACK_SRC: &str = r##"zenith version=1 {
+  project id="@test/actions" name="Test Actions"
+  libraries { library id="@test/actions" version="1.0.0" }
+  actions {
+    action id="bad-action" {
+      tx "{\"ops\":[{\"op\":\"update_token_value\",\"id\":\"no.such.token\",\"value\":\"#fff\"}]}"
+    }
+  }
+  document id="d" title="x" {
+    page id="pg" w=(px)100 h=(px)100 {}
+  }
+}
+"##;
+
         let dir = tempfile::tempdir().expect("tempdir");
         let lib_dir = dir.path().join("libraries");
         std::fs::create_dir_all(&lib_dir).expect("create libraries dir");
@@ -560,18 +675,18 @@ mod tests {
 
         let err = add(
             TARGET_SRC,
-            "@test/actions#apply-brand-kit",
+            "@test/actions#bad-action",
             Some(dir.path()),
             None,
             (0.0, 0.0),
             None,
         )
-        .expect_err("action item must return an error");
-        assert_eq!(err.exit_code, 2);
+        .expect_err("rejected action must return an error");
+
+        assert_eq!(err.exit_code, 1, "exit_code must be 1 for rejected tx");
         assert!(
-            err.message
-                .contains("applying action items via 'library add' is not yet implemented"),
-            "msg: {}",
+            err.message.contains("rejected"),
+            "msg must mention rejected: {}",
             err.message
         );
     }
