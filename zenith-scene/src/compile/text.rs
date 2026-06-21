@@ -3148,6 +3148,26 @@ pub(super) fn compile_text_sized(
     fit_line_count as f64 * first_line_height
 }
 
+/// Pixels of padding on the left and right sides of the line-number digit area.
+const GUTTER_PAD: f64 = 6.0;
+
+/// Resolved geometry for the line-number gutter.
+///
+/// `None` when line numbers are disabled or the digit "0" could not be shaped
+/// (graceful degradation — no panic, just no gutter).
+struct GutterMetrics {
+    /// Width of the full gutter band (digits + both pads).
+    gutter_width: f64,
+    /// Right edge of the digit area inside the gutter (left pad + digits).
+    right_edge: f64,
+    /// Ascent for the gutter font (same face/size as code text).
+    ascent: f64,
+    /// Line height for the gutter font.
+    line_height: f64,
+    /// Muted color used for line numbers (comment color, theme-aware).
+    number_color: Color,
+}
+
 /// Compile a `code` leaf node.
 ///
 /// Returns the laid-out content height in pixels (`line_count * line_height`,
@@ -3345,6 +3365,76 @@ pub(super) fn compile_code(
         c
     };
 
+    // ── Line-number gutter (only when `line_numbers = true`) ─────────────
+    //
+    // When enabled:
+    //   - Shape the digit "0" once to obtain per-digit advance width and
+    //     the gutter font's ascent/line_height.
+    //   - Compute gutter_width = digit_count * digit_advance + 2*GUTTER_PAD.
+    //   - Shift the code-text x-origin right by gutter_width.
+    //   - For every physical line (including blank ones) emit a right-aligned
+    //     line-number glyph run in the gutter, colored with the comment color
+    //     (the muted/secondary color used by the syntax highlighter).
+    //
+    // When disabled the entire block is unreachable and the code path is
+    // byte-identical to before.
+    let gutter: Option<GutterMetrics> = if code.line_numbers == Some(true) {
+        let physical_line_count = expanded.split('\n').count();
+        // Number of decimal digits in the total line count (minimum 1).
+        let digit_count = {
+            let mut n = physical_line_count;
+            let mut d = 0usize;
+            loop {
+                d += 1;
+                n /= 10;
+                if n == 0 {
+                    break;
+                }
+            }
+            d
+        };
+
+        // Shape the digit "0" to obtain per-digit metrics.
+        let digit_req = ShapeRequest {
+            text: "0",
+            families: &families,
+            weight,
+            style: FontStyle::Normal,
+            font_size,
+            direction: TextDirection::Ltr,
+        };
+        match engine.shape(&digit_req, fonts) {
+            Err(_) => {
+                // Cannot shape the digit → skip the gutter entirely, proceed
+                // without line numbers rather than panicking.
+                None
+            }
+            Ok(digit_run) => {
+                let digit_advance = digit_run.advance_width as f64;
+                let gutter_digits_w = digit_count as f64 * digit_advance;
+                let gutter_width = gutter_digits_w + 2.0 * GUTTER_PAD;
+                let right_edge = code_x + gutter_digits_w + GUTTER_PAD;
+                let number_color = syntax_color(TokenKind::Comment);
+                Some(GutterMetrics {
+                    gutter_width,
+                    right_edge,
+                    ascent: digit_run.ascent as f64,
+                    line_height: digit_run.line_height as f64,
+                    number_color,
+                })
+            }
+        }
+    } else {
+        None
+    };
+
+    // Shift the code-text x-origin right by the gutter width so that
+    // gutter and code-text occupy non-overlapping horizontal bands.
+    let code_x = match &gutter {
+        Some(g) => code_x + g.gutter_width,
+        None => code_x,
+    };
+
     // Multi-line emission: each physical line becomes its own glyph run,
     // stacked by `line_height`. Blank lines emit no run but the index `i`
     // still advances, preserving their vertical space. All non-blank
@@ -3359,6 +3449,44 @@ pub(super) fn compile_code(
     // line count spanned by the block, ignoring trailing blank lines.
     let mut last_inked_line: Option<usize> = None;
     for (i, line) in expanded.split('\n').enumerate() {
+        // ── Gutter: emit line number BEFORE the code text for this line ──
+        // Blank lines are numbered too (editors number every physical line).
+        // We emit the gutter run first so ordering is gutter-then-code.
+        if let Some(g) = &gutter {
+            // Use the gutter font metrics for the baseline; they share the
+            // same font family/size/weight as the code text, so the baselines
+            // are identical.
+            let baseline_y = code_y + g.ascent + (i as f64) * g.line_height;
+            let label = (i + 1).to_string();
+            let num_req = ShapeRequest {
+                text: &label,
+                families: &families,
+                weight,
+                style: FontStyle::Normal,
+                font_size,
+                direction: TextDirection::Ltr,
+            };
+            // If shaping fails for a particular label, skip gracefully.
+            if let Ok(num_run) = engine.shape(&num_req, fonts) {
+                // Right-align: use the actual shaped advance so the right edge
+                // of the number lands exactly at `right_edge`, even if the
+                // font does not use identical advance for every digit.
+                let actual_width = num_run.advance_width as f64;
+                let actual_x = g.right_edge - actual_width;
+                let glyphs = run_to_scene_glyphs(&num_run);
+                commands.push(SceneCommand::DrawGlyphRun {
+                    x: actual_x,
+                    y: baseline_y,
+                    font_id: num_run.font_id,
+                    font_size: num_run.font_size,
+                    color: g.number_color,
+                    stroke_color: None,
+                    stroke_width: None,
+                    glyphs,
+                });
+            }
+        }
+
         if line.is_empty() {
             continue;
         }

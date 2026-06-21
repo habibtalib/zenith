@@ -501,3 +501,253 @@ page id="page.cdw" w=(px)400 h=(px)200 {
         glyph_runs[0]
     );
 }
+
+// ── Line-number gutter tests ───────────────────────────────────────────────
+
+/// `line-numbers=#true` on a 3-line node emits extra gutter glyph runs whose
+/// x positions are LEFT of the code-text origin (`code_x=10`). The gutter
+/// runs must appear in the command stream (one per physical line) and their
+/// x must be ≥ 10 but less than the x of the first code-text run.
+#[test]
+fn code_line_numbers_true_emits_gutter_runs_left_of_code_text() {
+    // 3-line code node; code_x=10, code_y=20, no clip (overflow=visible).
+    let src = r##"zenith version=1 {
+  project id="proj.ln1" name="LN1"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.ln1" title="LN1" {
+page id="page.ln1" w=(px)800 h=(px)400 {
+  code id="code.ln1" x=(px)10 y=(px)20 font-size=(px)14 overflow="visible" line-numbers=#true {
+    content "alpha\nbeta\ngamma"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    // No shaping errors expected.
+    let unshaped: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "scene.text_unshaped")
+        .collect();
+    assert!(
+        unshaped.is_empty(),
+        "no shaping errors expected; got: {:?}",
+        result.diagnostics
+    );
+
+    let runs: Vec<(f64, (u8, u8, u8))> = result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            SceneCommand::DrawGlyphRun { x, color, .. } => Some((*x, (color.r, color.g, color.b))),
+            _ => None,
+        })
+        .collect();
+
+    // With line-numbers=true and 3 non-blank lines:
+    //   - 3 gutter runs (one per line)
+    //   - 3 code-text runs (one per non-blank line)
+    // Total: 6 DrawGlyphRun commands.
+    assert!(
+        runs.len() >= 6,
+        "expected ≥6 DrawGlyphRun (3 gutter + 3 code); got {} runs: {:?}",
+        runs.len(),
+        runs
+    );
+
+    // The code-text runs are emitted AFTER the gutter run for each line.
+    // The first gutter run appears at some x ≥ 10 (the node x), and all
+    // code-text runs must have a strictly larger x (because code_x is
+    // shifted right by gutter_width).
+    //
+    // The dark-theme comment color is #546e7a (r=84, g=110, b=122).
+    // Any run with that color is a gutter run.
+    let comment_r: u8 = 0x54; // 84
+    let comment_g: u8 = 0x6e; // 110
+    let comment_b: u8 = 0x7a; // 122
+
+    let gutter_xs: Vec<f64> = result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            SceneCommand::DrawGlyphRun { x, color, .. }
+                if color.r == comment_r && color.g == comment_g && color.b == comment_b =>
+            {
+                Some(*x)
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        gutter_xs.len(),
+        3,
+        "expected exactly 3 gutter (comment-colored) runs; got {:?}",
+        gutter_xs
+    );
+
+    // Find the minimum x of any non-gutter (code-text) run.
+    let code_text_min_x: f64 = result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            SceneCommand::DrawGlyphRun { x, color, .. }
+                if !(color.r == comment_r && color.g == comment_g && color.b == comment_b) =>
+            {
+                Some(*x)
+            }
+            _ => None,
+        })
+        .fold(f64::INFINITY, f64::min);
+
+    // All gutter x values must be strictly less than code-text x.
+    for gx in &gutter_xs {
+        assert!(
+            *gx < code_text_min_x,
+            "gutter run x={gx} must be left of code-text x={code_text_min_x}"
+        );
+    }
+
+    // Gutter runs must be at or right of the node x (10.0).
+    for gx in &gutter_xs {
+        assert!(*gx >= 10.0, "gutter run x={gx} must be ≥ node x=10.0");
+    }
+}
+
+/// Without `line-numbers` (or with `line-numbers=#false`), the number of
+/// DrawGlyphRun commands is identical to the baseline (no gutter overhead).
+#[test]
+fn code_line_numbers_absent_or_false_is_byte_identical() {
+    let src_no_flag = r##"zenith version=1 {
+  project id="proj.ln2a" name="LN2A"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.ln2a" title="LN2A" {
+page id="page.ln2a" w=(px)800 h=(px)400 {
+  code id="code.ln2a" x=(px)10 y=(px)20 font-size=(px)14 overflow="visible" {
+    content "hello\nworld"
+  }
+}
+  }
+}
+"##;
+    let src_false = r##"zenith version=1 {
+  project id="proj.ln2b" name="LN2B"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.ln2b" title="LN2B" {
+page id="page.ln2b" w=(px)800 h=(px)400 {
+  code id="code.ln2b" x=(px)10 y=(px)20 font-size=(px)14 overflow="visible" line-numbers=#false {
+    content "hello\nworld"
+  }
+}
+  }
+}
+"##;
+
+    let result_no = compile(&parse(src_no_flag), &default_provider());
+    let result_false = compile(&parse(src_false), &default_provider());
+
+    let count_no = result_no
+        .scene
+        .commands
+        .iter()
+        .filter(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }))
+        .count();
+    let count_false = result_false
+        .scene
+        .commands
+        .iter()
+        .filter(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }))
+        .count();
+
+    // Both must produce exactly 2 DrawGlyphRun (one per non-blank line),
+    // with no extra gutter overhead.
+    assert_eq!(
+        count_no, 2,
+        "no line-numbers flag must yield 1 run/line (2 total); got {count_no}"
+    );
+    assert_eq!(
+        count_false, 2,
+        "line-numbers=#false must yield 1 run/line (2 total); got {count_false}"
+    );
+    assert_eq!(
+        count_no, count_false,
+        "absent and explicit-false must produce the same run count"
+    );
+}
+
+/// With `line-numbers=#true` and content "a\n\nb" (blank middle line),
+/// the blank line 2 must still emit a gutter run — editors number blank lines.
+#[test]
+fn code_line_numbers_blank_line_is_numbered() {
+    let src = r##"zenith version=1 {
+  project id="proj.ln3" name="LN3"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.ln3" title="LN3" {
+page id="page.ln3" w=(px)800 h=(px)400 {
+  code id="code.ln3" x=(px)10 y=(px)20 font-size=(px)14 overflow="visible" line-numbers=#true {
+    content "a\n\nb"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    // Dark-theme comment color (#546e7a) identifies gutter runs.
+    let comment_r: u8 = 0x54;
+    let comment_g: u8 = 0x6e;
+    let comment_b: u8 = 0x7a;
+
+    // Collect gutter run baseline y values.
+    let gutter_ys: Vec<f64> = result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            SceneCommand::DrawGlyphRun { y, color, .. }
+                if color.r == comment_r && color.g == comment_g && color.b == comment_b =>
+            {
+                Some(*y)
+            }
+            _ => None,
+        })
+        .collect();
+
+    // There are 3 physical lines ("a", "", "b") → 3 gutter runs.
+    assert_eq!(
+        gutter_ys.len(),
+        3,
+        "expected 3 gutter runs for 3 physical lines (including blank); got {:?}",
+        gutter_ys
+    );
+
+    // The gutter runs must be at strictly increasing y (one per line).
+    assert!(
+        gutter_ys[0] < gutter_ys[1] && gutter_ys[1] < gutter_ys[2],
+        "gutter baselines must be strictly increasing (one per line); got {:?}",
+        gutter_ys
+    );
+
+    // The blank line (index 1) must have a gutter run whose y is exactly
+    // one line_height above the "b" run (index 2). Verify by checking that
+    // the gap between gutter_ys[1] and gutter_ys[2] equals the gap between
+    // gutter_ys[0] and gutter_ys[1] (constant line_height).
+    let d0 = gutter_ys[1] - gutter_ys[0];
+    let d1 = gutter_ys[2] - gutter_ys[1];
+    assert!(
+        (d0 - d1).abs() < 0.001,
+        "gutter baselines must be evenly spaced (constant line_height); \
+         d0={d0}, d1={d1}"
+    );
+}
