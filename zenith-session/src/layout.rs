@@ -33,11 +33,16 @@ impl StorePaths {
         }
     }
 
+    /// The root directory holding all per-document history: `<root>/docs`.
+    pub fn docs_root(&self) -> PathBuf {
+        self.root.join("docs")
+    }
+
     /// Directory that contains all data for a given document.
     ///
     /// `<root>/docs/<doc_id>`
     pub fn doc_dir(&self, doc_id: &str) -> PathBuf {
-        self.root.join("docs").join(doc_id)
+        self.docs_root().join(doc_id)
     }
 
     /// Directory that holds immutable object blobs for a document.
@@ -75,6 +80,11 @@ mod tests {
 
     fn paths() -> StorePaths {
         StorePaths::new("/data")
+    }
+
+    #[test]
+    fn docs_root() {
+        assert_eq!(paths().docs_root(), PathBuf::from("/data/docs"));
     }
 
     #[test]

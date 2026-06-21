@@ -167,7 +167,7 @@ fn write_meta(fs: &impl Fs, paths: &StorePaths, meta: &DocMeta) -> Result<(), Se
     fs.write(&paths.meta_file(&meta.doc_id), &json)
 }
 
-fn read_meta(
+pub(crate) fn read_meta(
     fs: &impl Fs,
     paths: &StorePaths,
     doc_id: &str,
