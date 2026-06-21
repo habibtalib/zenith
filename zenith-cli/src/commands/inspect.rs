@@ -366,11 +366,21 @@ fn search_nodes(nodes: &[Node], id: &str) -> Option<NodeEntry> {
         if node_id == id {
             return Some(build_node_entry(node));
         }
-        // Recurse into containers.
+        // Recurse into Frame/Group children via node_children.
         if let Some(children) = node_children(node)
             && let Some(found) = search_nodes(children, id)
         {
             return Some(found);
+        }
+        // Recurse into table cell children (node_children returns None for Table).
+        if let Node::Table(t) = node {
+            for row in &t.rows {
+                for cell in &row.cells {
+                    if let Some(found) = search_nodes(&cell.children, id) {
+                        return Some(found);
+                    }
+                }
+            }
         }
     }
     None
@@ -795,5 +805,85 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.exit_code, 2);
+    }
+
+    // ── Table cell descent ────────────────────────────────────────────────────
+
+    // A doc with a table whose first cell contains a rect and second cell
+    // contains a text, so we can assert that inspect descends into cell children.
+    const TABLE_INSPECT_DOC: &str = r##"zenith version=1 {
+  project id="proj.t" name="Table Inspect"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.t" title="Table Inspect" {
+    page id="page.t" w=(px)640 h=(px)400 {
+      table id="tbl.1" x=(px)0 y=(px)0 w=(px)400 h=(px)200 {
+        column width=(px)200
+        column width=(px)200
+        row {
+          cell {
+            rect id="cell.rect.1" x=(px)0 y=(px)0 w=(px)50 h=(px)50
+          }
+          cell {
+            text id="cell.text.1" x=(px)0 y=(px)0 w=(px)100 h=(px)30 {
+              span "hi"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"##;
+
+    #[test]
+    fn find_node_inside_table_cell_returns_entry() {
+        let doc = KdlAdapter.parse(TABLE_INSPECT_DOC.as_bytes()).unwrap();
+        let found = find_node_tree(&doc.body.pages, "cell.rect.1");
+        assert!(
+            found.is_some(),
+            "cell.rect.1 inside a table cell must be findable"
+        );
+        let e = found.unwrap();
+        assert_eq!(e.id, "cell.rect.1");
+        assert_eq!(e.kind, "rect");
+    }
+
+    #[test]
+    fn find_text_inside_table_cell_returns_entry() {
+        let doc = KdlAdapter.parse(TABLE_INSPECT_DOC.as_bytes()).unwrap();
+        let found = find_node_tree(&doc.body.pages, "cell.text.1");
+        assert!(
+            found.is_some(),
+            "cell.text.1 inside a table cell must be findable"
+        );
+        let e = found.unwrap();
+        assert_eq!(e.id, "cell.text.1");
+        assert_eq!(e.kind, "text");
+    }
+
+    #[test]
+    fn run_node_flag_table_cell_child_found() {
+        // `zenith inspect --node cell.rect.1` must succeed and return that node.
+        let out = run(TABLE_INSPECT_DOC, Some("cell.rect.1"), false)
+            .expect("inspect of cell child must succeed");
+        assert!(
+            out.contains("cell.rect.1"),
+            "output must mention the node id; got: {out}"
+        );
+        assert!(
+            out.contains("rect"),
+            "output must mention the node kind; got: {out}"
+        );
+    }
+
+    #[test]
+    fn run_node_flag_table_cell_child_not_found_errors() {
+        // A nonexistent id inside a table must still return not-found.
+        let result = run(TABLE_INSPECT_DOC, Some("no.such.node"), false);
+        assert!(result.is_err(), "missing id must error");
+        let err = result.unwrap_err();
+        assert_eq!(err.exit_code, 2);
+        assert!(err.message.contains("no.such.node"));
     }
 }

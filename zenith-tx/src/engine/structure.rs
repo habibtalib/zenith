@@ -124,6 +124,16 @@ fn reorder_in(children: &mut [Node], id: &str, kind: ReorderKind) -> MoveOutcome
                 MoveOutcome::NotFound => {}
                 other => return other,
             },
+            Node::Table(t) => {
+                for row in &mut t.rows {
+                    for cell in &mut row.cells {
+                        match reorder_in(&mut cell.children, id, kind) {
+                            MoveOutcome::NotFound => {}
+                            other => return other,
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -252,6 +262,18 @@ fn remove_node_by_id(children: &mut Vec<Node>, id: &str) -> Option<Node> {
         let nested = match child {
             Node::Frame(f) => remove_node_by_id(&mut f.children, id),
             Node::Group(g) => remove_node_by_id(&mut g.children, id),
+            Node::Table(t) => {
+                let mut found = None;
+                'table: for row in &mut t.rows {
+                    for cell in &mut row.cells {
+                        if let Some(n) = remove_node_by_id(&mut cell.children, id) {
+                            found = Some(n);
+                            break 'table;
+                        }
+                    }
+                }
+                found
+            }
             _ => None,
         };
         if nested.is_some() {
@@ -532,13 +554,23 @@ fn duplicate_in_children(children: &mut Vec<Node>, id: &str, new_id: &str) -> bo
     // the first that reports success. No String clone per iteration — new_id is
     // a borrowed &str that is passed down without allocation.
     for child in children.iter_mut() {
-        let grandchildren = match child {
-            Node::Frame(f) => &mut f.children,
-            Node::Group(g) => &mut g.children,
-            _ => continue,
+        // Each container kind contributes one or more child lists to recurse into
+        // (a table contributes every cell's children). Collecting the mutable
+        // borrows first keeps the recursion uniform across node kinds.
+        let lists: Vec<&mut Vec<Node>> = match child {
+            Node::Frame(f) => vec![&mut f.children],
+            Node::Group(g) => vec![&mut g.children],
+            Node::Table(t) => t
+                .rows
+                .iter_mut()
+                .flat_map(|row| row.cells.iter_mut().map(|cell| &mut cell.children))
+                .collect(),
+            _ => Vec::new(),
         };
-        if duplicate_in_children(grandchildren, id, new_id) {
-            return true;
+        for list in lists {
+            if duplicate_in_children(list, id, new_id) {
+                return true;
+            }
         }
     }
 

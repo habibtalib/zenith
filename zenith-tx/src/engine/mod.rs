@@ -453,6 +453,11 @@ pub(super) fn subtree_contains(node: &Node, id: &str) -> bool {
     match node {
         Node::Frame(f) => f.children.iter().any(|c| subtree_contains(c, id)),
         Node::Group(g) => g.children.iter().any(|c| subtree_contains(c, id)),
+        Node::Table(t) => t.rows.iter().any(|r| {
+            r.cells
+                .iter()
+                .any(|c| c.children.iter().any(|ch| subtree_contains(ch, id)))
+        }),
         _ => false,
     }
 }
@@ -508,6 +513,15 @@ fn find_in_children_any_mut<'a>(children: &'a mut [Node], id: &str) -> Option<&'
             Node::Group(g) if g.children.iter().any(|c| subtree_contains(c, id)) => {
                 Some(Hit::Descend(i))
             }
+            Node::Table(t)
+                if t.rows.iter().any(|r| {
+                    r.cells
+                        .iter()
+                        .any(|c| c.children.iter().any(|ch| subtree_contains(ch, id)))
+                }) =>
+            {
+                Some(Hit::Descend(i))
+            }
             _ => None,
         }
     });
@@ -519,6 +533,16 @@ fn find_in_children_any_mut<'a>(children: &'a mut [Node], id: &str) -> Option<&'
         Some(Hit::Descend(i)) => match children.get_mut(i) {
             Some(Node::Frame(f)) => find_in_children_any_mut(&mut f.children, id),
             Some(Node::Group(g)) => find_in_children_any_mut(&mut g.children, id),
+            Some(Node::Table(t)) => {
+                for row in &mut t.rows {
+                    for cell in &mut row.cells {
+                        if let Some(found) = find_in_children_any_mut(&mut cell.children, id) {
+                            return Some(found);
+                        }
+                    }
+                }
+                None
+            }
             _ => None, // unreachable: phase-1 confirmed a container at i
         },
     }
@@ -530,13 +554,27 @@ pub(super) fn find_node_shared<'a>(children: &'a [Node], id: &str) -> Option<&'a
         if node_id_of(node) == Some(id) {
             return Some(node);
         }
-        let grandchildren = match node {
-            Node::Frame(f) => f.children.as_slice(),
-            Node::Group(g) => g.children.as_slice(),
-            _ => continue,
-        };
-        if let Some(found) = find_node_shared(grandchildren, id) {
-            return Some(found);
+        match node {
+            Node::Frame(f) => {
+                if let Some(found) = find_node_shared(&f.children, id) {
+                    return Some(found);
+                }
+            }
+            Node::Group(g) => {
+                if let Some(found) = find_node_shared(&g.children, id) {
+                    return Some(found);
+                }
+            }
+            Node::Table(t) => {
+                for row in &t.rows {
+                    for cell in &row.cells {
+                        if let Some(found) = find_node_shared(&cell.children, id) {
+                            return Some(found);
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
     None
