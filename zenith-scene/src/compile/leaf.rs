@@ -1099,35 +1099,95 @@ pub(super) fn compile_polyline(
     }
 }
 
-/// Compute the page-absolute anchor point on the edge of a `(x, y, w, h)` box.
+/// Which edge of a box an anchor sits on, expressed as the orientation the path
+/// must leave/enter through. `Horizontal` = a left/right edge → the path leaves
+/// horizontally; `Vertical` = a top/bottom edge → the path leaves vertically.
 ///
-/// Named anchors map to the edge centers; `"center"` is the box center.
-/// `"auto"` (the default for an absent / unrecognized anchor) chooses the edge
-/// by the dominant axis toward `toward` (the OTHER box's center): a larger
-/// horizontal delta picks left/right, otherwise top/bottom.
-fn edge_anchor(boxr: (f64, f64, f64, f64), anchor: &str, toward: (f64, f64)) -> (f64, f64) {
+/// Used by orthogonal routing (Unit 3) to guarantee the first/last segment is
+/// perpendicular to the box edge, so arrowheads land axis-aligned.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum AnchorSide {
+    Horizontal,
+    Vertical,
+}
+
+/// Compute the page-absolute anchor point on the edge of a `(x, y, w, h)` box,
+/// AND the orientation of that edge ([`AnchorSide`]).
+///
+/// Named anchors map to the edge centers; `"center"` is the box center (treated
+/// as `Horizontal`, a rare degenerate case). `"auto"` (the default for an absent
+/// / unrecognized anchor) chooses the edge by the dominant axis toward `toward`
+/// (the OTHER box's center): a larger horizontal delta picks left/right
+/// (`Horizontal`), otherwise top/bottom (`Vertical`).
+///
+/// The point math is identical to the pre-Unit-3 anchor resolution, so
+/// straight-route output is unchanged.
+fn resolve_anchor(
+    boxr: (f64, f64, f64, f64),
+    anchor: &str,
+    toward: (f64, f64),
+) -> ((f64, f64), AnchorSide) {
     let (x, y, w, h) = boxr;
     let cx = x + w / 2.0;
     let cy = y + h / 2.0;
     match anchor {
-        "top" => (cx, y),
-        "bottom" => (cx, y + h),
-        "left" => (x, cy),
-        "right" => (x + w, cy),
-        "center" => (cx, cy),
+        "top" => ((cx, y), AnchorSide::Vertical),
+        "bottom" => ((cx, y + h), AnchorSide::Vertical),
+        "left" => ((x, cy), AnchorSide::Horizontal),
+        "right" => ((x + w, cy), AnchorSide::Horizontal),
+        "center" => ((cx, cy), AnchorSide::Horizontal),
         // "auto" and any unrecognized value: dominant-axis edge toward `toward`.
         _ => {
             let dx = toward.0 - cx;
             let dy = toward.1 - cy;
             if dx.abs() >= dy.abs() {
-                if dx >= 0.0 { (x + w, cy) } else { (x, cy) }
+                let pt = if dx >= 0.0 { (x + w, cy) } else { (x, cy) };
+                (pt, AnchorSide::Horizontal)
             } else if dy >= 0.0 {
-                (cx, y + h)
+                ((cx, y + h), AnchorSide::Vertical)
             } else {
-                (cx, y)
+                ((cx, y), AnchorSide::Vertical)
             }
         }
     }
+}
+
+/// Build a flat right-angle (elbow) point list between two anchors, with the
+/// first segment perpendicular to `f`'s edge (`fs`) and the last perpendicular to
+/// `t`'s edge (`ts`). Returns 8 coords (4-point Z-route) when both anchors share
+/// an orientation, or 6 coords (3-point L-corner) when they differ.
+///
+/// Collinear/degenerate elbows (e.g. `mx == f.0`) are left as-is — zero-length
+/// sub-segments render harmlessly and are never special-cased.
+fn orthogonal_route(f: (f64, f64), fs: AnchorSide, t: (f64, f64), ts: AnchorSide) -> Vec<f64> {
+    match (fs, ts) {
+        // Both side edges → H–V–H Z-route, elbow at the mid x.
+        (AnchorSide::Horizontal, AnchorSide::Horizontal) => {
+            let mx = (f.0 + t.0) / 2.0;
+            vec![f.0, f.1, mx, f.1, mx, t.1, t.0, t.1]
+        }
+        // Both top/bottom edges → V–H–V Z-route, elbow at the mid y.
+        (AnchorSide::Vertical, AnchorSide::Vertical) => {
+            let my = (f.1 + t.1) / 2.0;
+            vec![f.0, f.1, f.0, my, t.0, my, t.0, t.1]
+        }
+        // Leaves F horizontally, enters T vertically → corner at (t.0, f.1).
+        (AnchorSide::Horizontal, AnchorSide::Vertical) => {
+            vec![f.0, f.1, t.0, f.1, t.0, t.1]
+        }
+        // Leaves F vertically, enters T horizontally → corner at (f.0, t.1).
+        (AnchorSide::Vertical, AnchorSide::Horizontal) => {
+            vec![f.0, f.1, f.0, t.1, t.0, t.1]
+        }
+    }
+}
+
+/// Bounds-safe read of the `i`-th `(x, y)` point from a flat `[x0,y0,x1,y1,…]`
+/// list. Returns `None` if the point is out of range (no panic, no indexing).
+fn point_at(pts: &[f64], i: usize) -> Option<(f64, f64)> {
+    let x = pts.get(i * 2)?;
+    let y = pts.get(i * 2 + 1)?;
+    Some((*x, *y))
 }
 
 /// Compile a `connector` leaf node — a semantic arrow whose endpoints are
@@ -1136,8 +1196,10 @@ fn edge_anchor(boxr: (f64, f64, f64, f64), anchor: &str, toward: (f64, f64)) -> 
 /// Unit 1 draws a STRAIGHT 2-point line between the resolved edge anchors. Unit 2
 /// adds filled-triangle arrowheads at the `to` end (`marker-end="arrow"`) and/or
 /// the `from` end (`marker-start="arrow"`), in the line's stroke color and inside
-/// the same rotation bracket. The `route="orthogonal"` mode (Unit 3) is stored +
-/// validated but NOT rendered here. When `from`/`to` is absent, or a target box is
+/// the same rotation bracket. Unit 3 adds `route="orthogonal"` — a right-angle
+/// elbow path (4-point Z-route or 3-point L-corner) instead of the straight
+/// diagonal — and orients arrowheads along the actual first/last routed segment
+/// so they land axis-aligned. When `from`/`to` is absent, or a target box is
 /// not in `node_boxes` (unresolved), nothing is emitted (graceful — validation
 /// warned); markers follow the same guards, so a skipped line skips its heads.
 #[allow(clippy::too_many_arguments)]
@@ -1174,11 +1236,16 @@ pub(super) fn compile_connector(
     // Resolve anchors: each end aims toward the OTHER box's center for "auto".
     let from_anchor = connector.from_anchor.as_deref().unwrap_or("auto");
     let to_anchor = connector.to_anchor.as_deref().unwrap_or("auto");
-    let (fx, fy) = edge_anchor(from_box, from_anchor, to_center);
-    let (tx, ty) = edge_anchor(to_box, to_anchor, from_center);
+    let (f_pt, f_side) = resolve_anchor(from_box, from_anchor, to_center);
+    let (t_pt, t_side) = resolve_anchor(to_box, to_anchor, from_center);
 
-    // Straight line: 2 points (Unit 1). Orthogonal routing is Unit 3.
-    let flat_points = vec![fx, fy, tx, ty];
+    // Route selection: `orthogonal` builds a right-angle elbow path; everything
+    // else (None / "straight" / unknown — validation already warned) is the
+    // straight 2-point line, byte-identical to Unit 1/2.
+    let flat_points = match connector.route.as_deref() {
+        Some("orthogonal") => orthogonal_route(f_pt, f_side, t_pt, t_side),
+        _ => vec![f_pt.0, f_pt.1, t_pt.0, t_pt.1],
+    };
 
     // STROKE — only emit when a stroke color is present (mirrors polyline: no
     // stroke token → nothing drawn). Style cascade for stroke + stroke-width.
@@ -1213,6 +1280,16 @@ pub(super) fn compile_connector(
         });
     }
 
+    // Derive marker endpoints from the ACTUAL routed path BEFORE the Vec is moved
+    // into the stroke command, so orthogonal arrowheads orient along the real
+    // last/first segment (axis-aligned), not the global anchor line. For a
+    // 2-point straight line these reduce to today's (tx,ty)/(fx,fy) endpoints.
+    let n = flat_points.len() / 2;
+    let end_tip = point_at(&flat_points, n.saturating_sub(1));
+    let end_from = point_at(&flat_points, n.saturating_sub(2));
+    let start_tip = point_at(&flat_points, 0);
+    let start_from = point_at(&flat_points, 1);
+
     commands.push(SceneCommand::StrokePolyline {
         points: flat_points,
         color,
@@ -1222,9 +1299,10 @@ pub(super) fn compile_connector(
         fill_even_odd: false,
     });
 
-    // ARROWHEAD MARKERS (Unit 2) — filled triangles in the SAME stroke color,
+    // ARROWHEAD MARKERS (Unit 2/3) — filled triangles in the SAME stroke color,
     // INSIDE the rotation bracket so they rotate with the line. The tip sits
-    // exactly on the endpoint; the base extends back along the line.
+    // exactly on the path endpoint; the base extends back along the adjacent
+    // segment. Fewer than 2 points → endpoints are `None` and markers are skipped.
     {
         let mut emit_head = |tip, from_pt| {
             if let Some(points) = arrowhead_points(tip, from_pt, stroke_width) {
@@ -1235,11 +1313,15 @@ pub(super) fn compile_connector(
                 });
             }
         };
-        if connector.marker_end.as_deref() == Some("arrow") {
-            emit_head((tx, ty), (fx, fy));
+        if connector.marker_end.as_deref() == Some("arrow")
+            && let (Some(tip), Some(from_pt)) = (end_tip, end_from)
+        {
+            emit_head(tip, from_pt);
         }
-        if connector.marker_start.as_deref() == Some("arrow") {
-            emit_head((fx, fy), (tx, ty));
+        if connector.marker_start.as_deref() == Some("arrow")
+            && let (Some(tip), Some(from_pt)) = (start_tip, start_from)
+        {
+            emit_head(tip, from_pt);
         }
     }
 
