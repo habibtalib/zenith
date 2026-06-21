@@ -38,8 +38,10 @@ pub fn list_versions(
 
 /// Record `content` as a new durable version. `label` names it (a named version
 /// is retained forever by the retention pass). `op_kind` is an optional category
-/// label. Deduplicates against the LATEST version: if `content` is byte-identical
-/// to it, returns `Unchanged` and appends nothing.
+/// label. UNNAMED (auto) versions deduplicate against the LATEST version: if
+/// `content` is byte-identical to it, the call returns `Unchanged` and appends
+/// nothing. A NAMED version (`label.is_some()`) is an explicit checkpoint and is
+/// ALWAYS recorded, even when its content matches the latest version.
 pub fn record_version(
     fs: &impl Fs,
     paths: &StorePaths,
@@ -53,8 +55,12 @@ pub fn record_version(
     let versions = read_records(fs, &vpath)?;
     let new_hash = object_hash(content);
 
-    // Dedup against the latest version (highest seq = last appended).
-    if let Some(last) = versions.last()
+    // Dedup auto (unnamed) versions against the latest version (highest seq =
+    // last appended). A NAMED version is an explicit checkpoint and is always
+    // recorded, even when its content matches the latest version — the object
+    // store still dedups the bytes, so only a lightweight record is added.
+    if label.is_none()
+        && let Some(last) = versions.last()
         && last.snapshot == new_hash
     {
         return Ok(VersionOutcome::Unchanged);
@@ -162,6 +168,32 @@ mod tests {
         assert_eq!(second, VersionOutcome::Unchanged);
         let versions = list_versions(&fs, &paths, "doc1").unwrap();
         assert_eq!(versions.len(), 1);
+    }
+
+    #[test]
+    fn named_version_not_deduped_when_content_matches() {
+        // Naming a checkpoint must always record a version, even when the content
+        // is identical to the latest auto-version (the label must not be dropped).
+        let (fs, paths) = setup();
+        let clock = clock_at(100);
+        record_version(&fs, &paths, &clock, "doc1", b"v1", None, None).unwrap();
+        let named =
+            record_version(&fs, &paths, &clock, "doc1", b"v1", Some("release-1"), None).unwrap();
+        assert_eq!(
+            named,
+            VersionOutcome::Recorded {
+                id: "v1".to_owned()
+            }
+        );
+        let versions = list_versions(&fs, &paths, "doc1").unwrap();
+        assert_eq!(
+            versions.len(),
+            2,
+            "named checkpoint must append a new record"
+        );
+        assert_eq!(versions[1].label, Some("release-1".to_owned()));
+        // Both records share the same underlying object (bytes deduped in store).
+        assert_eq!(versions[0].snapshot, versions[1].snapshot);
     }
 
     #[test]
