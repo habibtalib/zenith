@@ -812,6 +812,79 @@ fn separate_mode_stroke_count_unchanged() {
     );
 }
 
+/// Regression test for the header-style measurement bug: an AUTO column whose
+/// WIDEST cell is a header row with `header-style` (e.g. bold) must be sized
+/// to the BOLD-measured width, not the non-bold width. We prove this by
+/// building two documents that differ only in whether `style.bold` applies
+/// `font-weight=700` or `font-weight=400` to the header text. The header cell
+/// holds the widest text in the column ("Supercalifragilistic") while the body
+/// cell holds a shorter word. With the fix the bold-header column is strictly
+/// wider than the normal-weight-header column.
+#[test]
+fn header_style_bold_widens_auto_column() {
+    // Template: two-row AUTO-column table. header-rows=1, header-style="style.bold".
+    // The header cell has the longest text; body cell has a short word.
+    // style.bold sets font-weight to either 700 (bold) or 400 (normal) depending
+    // on the token value — only this differs between the two compiled documents.
+    fn make_src(weight: u32) -> String {
+        format!(
+            r##"zenith version=1 {{
+  project id="proj.bh" name="BH"
+  tokens format="zenith-token-v1" {{
+    token id="weight.val" type="fontWeight" value={weight}
+    token id="color.ink"  type="color" value="#000000"
+  }}
+  styles {{
+    style id="style.bold" {{
+      font-weight (token)"weight.val"
+    }}
+  }}
+  document id="doc.bh" title="BH" {{
+    page id="page.bh" w=(px)800 h=(px)400 {{
+      table id="t.bh" x=(px)0 y=(px)0 w=(px)800 h=(px)300 fill=(token)"color.ink" header-rows=1 header-style="style.bold" cell-padding=(px)0 gap=(px)0 {{
+        column
+        row {{
+          cell {{ text id="hdr" x=(px)0 y=(px)0 {{ span "Supercalifragilistic" }} }}
+        }}
+        row {{
+          cell {{ text id="bod" x=(px)0 y=(px)0 {{ span "Hi" }} }}
+        }}
+      }}
+    }}
+  }}
+}}
+"##
+        )
+    }
+
+    let result_bold = compile(&parse(&make_src(700)), &default_provider());
+    let result_norm = compile(&parse(&make_src(400)), &default_provider());
+
+    // The first body-row cell's FillRect width is the auto column width.
+    // Emission order: [0]=header cell fill, [1]=body cell fill.
+    let col_w = |result: &zenith_scene::CompileResult| -> f64 {
+        result
+            .scene
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                SceneCommand::FillRect { w, .. } => Some(*w),
+                _ => None,
+            })
+            .nth(1) // body-row (index 1) — its width is the resolved column width
+            .expect("body cell FillRect must exist")
+    };
+
+    let bold_col_w = col_w(&result_bold);
+    let norm_col_w = col_w(&result_norm);
+
+    assert!(
+        bold_col_w > norm_col_w,
+        "bold header-style must widen the AUTO column vs normal weight: \
+         bold={bold_col_w} normal={norm_col_w}"
+    );
+}
+
 // ── Multi-page table flow (unit U-D) ────────────────────────────────────────
 
 /// Count the `DrawGlyphRun` text strings on a compiled page, by collecting the
@@ -1079,8 +1152,14 @@ fn v_align_src(cell_attrs: &str) -> String {
 fn cell_v_align_shifts_text_vertically() {
     // glyph_runs[0] is the short cell's "Hi" (row-major: col 0 emits first).
     let top = compile(&parse(&v_align_src("")), &default_provider());
-    let middle = compile(&parse(&v_align_src("v-align=\"middle\"")), &default_provider());
-    let bottom = compile(&parse(&v_align_src("v-align=\"bottom\"")), &default_provider());
+    let middle = compile(
+        &parse(&v_align_src("v-align=\"middle\"")),
+        &default_provider(),
+    );
+    let bottom = compile(
+        &parse(&v_align_src("v-align=\"bottom\"")),
+        &default_provider(),
+    );
     let ty = glyph_runs(&top)[0].1;
     let my = glyph_runs(&middle)[0].1;
     let by = glyph_runs(&bottom)[0].1;

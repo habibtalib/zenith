@@ -266,6 +266,8 @@ pub(super) fn compute_table_layout(
     table_h: f64,
     env: &MeasureEnv,
     diagnostics: &mut Vec<Diagnostic>,
+    header_rows: usize,
+    header_style: Option<&str>,
 ) -> TableLayout {
     // ── Column widths (CONTENT-BASED auto-sizing) ────────────────────────
     let mut explicit_w: Vec<Option<f64>> = Vec::with_capacity(col_count);
@@ -287,7 +289,15 @@ pub(super) fn compute_table_layout(
     // Natural content width demanded for each AUTO column.
     let mut auto_natural: Vec<f64> = vec![0.0; col_count];
     for pc in placed {
-        let cell_natural = cell_natural_width(pc.cell, pad, env, diagnostics, &mut family_cache);
+        // Header cells measure with `header_style` applied so their bold/styled
+        // width matches what is rendered; non-header cells pass None.
+        let eff_hs = if pc.row < header_rows {
+            header_style
+        } else {
+            None
+        };
+        let cell_natural =
+            cell_natural_width(pc.cell, pad, env, diagnostics, &mut family_cache, eff_hs);
         let is_auto = |c: usize| explicit_w.get(c).is_some_and(|w| w.is_none());
         let auto_col_count = (pc.col..pc.col + pc.cs).filter(|&c| is_auto(c)).count();
         if auto_col_count == 0 {
@@ -344,9 +354,21 @@ pub(super) fn compute_table_layout(
         }
         span_w += gap * (pc.cs.saturating_sub(1)) as f64;
         let content_w = (span_w - 2.0 * pad).max(0.0);
+        let eff_hs = if pc.row < header_rows {
+            header_style
+        } else {
+            None
+        };
 
-        let cell_h =
-            cell_content_height(pc.cell, content_w, pad, env, diagnostics, &mut family_cache);
+        let cell_h = cell_content_height(
+            pc.cell,
+            content_w,
+            pad,
+            env,
+            diagnostics,
+            &mut family_cache,
+            eff_hs,
+        );
         let per_row = cell_h / pc.rs as f64;
         for dr in 0..pc.rs {
             if let Some(slot) = row_natural.get_mut(pc.row + dr) {
@@ -469,6 +491,10 @@ pub(super) fn compile_table(
         engine,
     };
 
+    // First `header_rows` rows are header rows (clamped to the row count); their
+    // text is measured AND rendered with `header_style`, so both agree.
+    let header_rows = (table.header_rows.unwrap_or(0) as usize).min(row_count);
+
     // ── Column widths + row heights (shared sizing math) ─────────────────
     // The SINGLE sizing implementation, also used by the multi-page flow
     // pre-pass for its fit decisions (see `compute_table_layout`).
@@ -487,6 +513,8 @@ pub(super) fn compile_table(
         table_h,
         &env,
         diagnostics,
+        header_rows,
+        table.header_style.as_deref(),
     );
 
     // Left edge of each column (content-box left = origin + pad).
@@ -515,11 +543,9 @@ pub(super) fn compile_table(
     // Populated during the cell loop below; empty (and unused) in separate mode.
     let mut edge_acc: BTreeMap<EdgeKey, EdgeStyle> = BTreeMap::new();
 
-    // Number of header rows: a placed cell is a header when its starting row
-    // index < header_rows. When header_rows is 0 / absent, no cell is a header
-    // and the output is byte-identical to the pre-header-styling code path.
-    let header_rows = table.header_rows.unwrap_or(0) as usize;
-
+    // (A placed cell is a header when its starting row index < `header_rows`,
+    // computed above. When header_rows is 0/absent, no cell is a header and the
+    // output is byte-identical to the pre-header-styling code path.)
     for pc in &placed {
         // Cell rect: from column `pc.col` left to the right edge of the last
         // spanned column (including interior gaps); similarly for rows.
@@ -628,20 +654,22 @@ fn cell_natural_width(
     env: &MeasureEnv,
     diagnostics: &mut Vec<Diagnostic>,
     family_cache: &mut BTreeMap<String, Vec<String>>,
+    header_style: Option<&str>,
 ) -> f64 {
     let mut widest = 0.0_f64;
     for child in &cell.children {
         let w = match child {
             Node::Text(t) => {
+                let eff = header_styled_text(t, header_style);
                 let families = cached_families(
-                    t,
+                    &eff,
                     env.resolved,
                     env.style_map,
                     env.fonts,
                     diagnostics,
                     family_cache,
                 );
-                measure_text_natural(t, families, env, diagnostics).unwrap_or(0.0)
+                measure_text_natural(&eff, families, env, diagnostics).unwrap_or(0.0)
             }
             other => child_declared_box(other).0.unwrap_or(0.0),
         };
@@ -662,26 +690,55 @@ fn cell_content_height(
     env: &MeasureEnv,
     diagnostics: &mut Vec<Diagnostic>,
     family_cache: &mut BTreeMap<String, Vec<String>>,
+    header_style: Option<&str>,
 ) -> f64 {
     let mut tallest = 0.0_f64;
     for child in &cell.children {
         let h = match child {
             Node::Text(t) => {
+                let eff = header_styled_text(t, header_style);
                 let families = cached_families(
-                    t,
+                    &eff,
                     env.resolved,
                     env.style_map,
                     env.fonts,
                     diagnostics,
                     family_cache,
                 );
-                measure_text_wrapped_height(t, content_w, families, env, diagnostics).unwrap_or(0.0)
+                measure_text_wrapped_height(&eff, content_w, families, env, diagnostics)
+                    .unwrap_or(0.0)
             }
             other => child_declared_box(other).1.unwrap_or(0.0),
         };
         tallest = tallest.max(h);
     }
     tallest + 2.0 * pad
+}
+
+/// Return the effective [`TextNode`] for measurement and rendering, applying the
+/// table `header_style` when appropriate.
+///
+/// `header_style` is the EFFECTIVE header style for this cell (the caller passes
+/// `None` for non-header cells), so this helper applies it whenever it is `Some`.
+///
+/// Returns `Cow::Borrowed(t)` (zero clone) when `header_style` is `None` or the
+/// text node already has its own `style` set. Returns `Cow::Owned(clone)` only
+/// when injecting (`header_style.is_some() && t.style.is_none()`), setting
+/// `clone.style = Some(header_style)`. Used by BOTH the measurement passes and
+/// the emit path so a styled (e.g. bold) header measures the width it renders at.
+fn header_styled_text<'a>(
+    t: &'a zenith_core::TextNode,
+    header_style: Option<&str>,
+) -> std::borrow::Cow<'a, zenith_core::TextNode> {
+    if let Some(style_id) = header_style
+        && t.style.is_none()
+    {
+        let mut cloned = t.clone();
+        cloned.style = Some(style_id.to_owned());
+        std::borrow::Cow::Owned(cloned)
+    } else {
+        std::borrow::Cow::Borrowed(t)
+    }
 }
 
 /// Resolve (and memoize) a text node's font families through [`resolve_text_families`].
@@ -848,26 +905,36 @@ fn emit_cell_children(
             };
             let eff_align: &str = t.align.as_deref().unwrap_or(h_align_text);
 
+            // Build the effective styled text (header-style injection via the
+            // shared helper so measurement and rendering always agree).
+            let eff_hs = if is_header {
+                table.header_style.as_deref()
+            } else {
+                None
+            };
+            let styled = header_styled_text(t, eff_hs);
+
             // Measure wrapped natural height at the effective wrap width.
             let families = cached_families(
-                t,
+                &styled,
                 resolved,
                 style_map,
                 fonts,
                 diagnostics,
                 &mut family_cache,
             );
-            let nat_h =
-                measure_text_wrapped_height(t, wrap_w, families, &env, diagnostics).unwrap_or(0.0);
+            let nat_h = measure_text_wrapped_height(&styled, wrap_w, families, &env, diagnostics)
+                .unwrap_or(0.0);
             let v_offset = match v_align {
                 "middle" => ((content_h - nat_h) / 2.0).max(0.0),
                 "bottom" => (content_h - nat_h).max(0.0),
                 _ => 0.0,
             };
 
-            // Build the effective child: clone only to override unset fields
-            // (author w/x/y/align win) and apply header-style injection.
-            let mut cloned = (**t).clone();
+            // Override unset geometry/align fields. Author-set w/x/y/align/style
+            // are always preserved (header_styled_text never overwrites style when
+            // the author already set one).
+            let mut cloned = styled.into_owned();
             if cloned.w.is_none() {
                 cloned.w = Some(super::util::px(wrap_w));
             }
@@ -879,9 +946,6 @@ fn emit_cell_children(
             }
             if cloned.align.is_none() {
                 cloned.align = Some(eff_align.to_string());
-            }
-            if is_header && table.header_style.is_some() && cloned.style.is_none() {
-                cloned.style = table.header_style.clone();
             }
             let effective_child = zenith_core::Node::Text(Box::new(cloned));
 

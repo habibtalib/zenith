@@ -255,6 +255,8 @@ fn distribute_one_flow(
                     member.h,
                     env,
                     diagnostics,
+                    header_rows,
+                    src.header_style.as_deref(),
                 );
                 let row_natural = &layout.row_natural;
 
