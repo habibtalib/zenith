@@ -1758,9 +1758,17 @@ fn emit_shape_label(
     };
     synth.y = Some(px(content_y + v_offset));
 
-    // Emit the label via the production text path, sharing the shape's ctx so
-    // opacity / rotation / clip propagate onto the glyphs. The returned content
-    // height is irrelevant here.
+    // Emit the label via the production text path. The synth's x/y are ALREADY
+    // absolute (the caller resolved `x_raw + ctx.dx`), so the translation must
+    // NOT be applied again — `compile_text` adds `ctx.dx/dy` itself. Zero the
+    // translation while preserving opacity/baseline-grid so the label still
+    // cascades correctly. Without this, a shape inside a group/instance has its
+    // label double-translated by the container offset.
+    let label_ctx = RenderCtx {
+        dx: 0.0,
+        dy: 0.0,
+        ..ctx
+    };
     let _ = compile_text(
         &synth,
         resolved,
@@ -1772,7 +1780,7 @@ fn emit_shape_label(
         chains,
         footnote_markers,
         node_boxes,
-        ctx,
+        label_ctx,
     );
 }
 

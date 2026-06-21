@@ -2857,6 +2857,81 @@ page id="page.shp" w=(px)640 h=(px)360 {
     );
 }
 
+/// Regression: a shape's owned label inside a translating container (group /
+/// instance) must NOT be double-translated by the container offset. The same
+/// shape placed at an absolute position must produce the SAME glyph origin as
+/// the shape placed at the equivalent group-local position inside a translated
+/// group. (Before the fix, the grouped label was offset by the container amount
+/// because `compile_text` re-applied `ctx.dx/dy` to already-absolute coords.)
+#[test]
+fn shape_label_in_group_is_not_double_translated() {
+    let glyph_pos = |src: &str| -> (f64, f64) {
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        result
+            .scene
+            .commands
+            .iter()
+            .find_map(|c| match c {
+                SceneCommand::DrawGlyphRun { x, y, .. } => Some((*x, *y)),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected a DrawGlyphRun"))
+    };
+
+    // Shape at absolute (140, 90).
+    let flat = r##"zenith version=1 {
+  project id="proj.shp" name="SHP"
+  tokens format="zenith-token-v1" {
+token id="color.fill" type="color" value="#dbeafe"
+token id="color.line" type="color" value="#1e3a8a"
+token id="size.stroke" type="dimension" value=(px)2
+token id="size.pad" type="dimension" value=(px)8
+  }
+  styles {}
+  document id="doc.shp" title="SHP" {
+page id="page.shp" w=(px)640 h=(px)360 {
+  shape id="s1" x=(px)140 y=(px)90 w=(px)200 h=(px)120 kind="process" fill=(token)"color.fill" stroke=(token)"color.line" stroke-width=(token)"size.stroke" padding=(token)"size.pad" {
+    span "Hi"
+  }
+}
+  }
+}
+"##;
+
+    // Same shape at group-local (40, 40) inside a group translated by (100, 50)
+    // → identical absolute position (140, 90).
+    let grouped = r##"zenith version=1 {
+  project id="proj.shp" name="SHP"
+  tokens format="zenith-token-v1" {
+token id="color.fill" type="color" value="#dbeafe"
+token id="color.line" type="color" value="#1e3a8a"
+token id="size.stroke" type="dimension" value=(px)2
+token id="size.pad" type="dimension" value=(px)8
+  }
+  styles {}
+  document id="doc.shp" title="SHP" {
+page id="page.shp" w=(px)640 h=(px)360 {
+  group id="g1" x=(px)100 y=(px)50 {
+    shape id="s1" x=(px)40 y=(px)40 w=(px)200 h=(px)120 kind="process" fill=(token)"color.fill" stroke=(token)"color.line" stroke-width=(token)"size.stroke" padding=(token)"size.pad" {
+      span "Hi"
+    }
+  }
+}
+  }
+}
+"##;
+
+    let (fx, fy) = glyph_pos(flat);
+    let (gx, gy) = glyph_pos(grouped);
+    assert!(
+        (fx - gx).abs() < 0.01 && (fy - gy).abs() < 0.01,
+        "grouped label must land at the same absolute position as the flat one \
+         (flat=({fx},{fy}), grouped=({gx},{gy})); a mismatch of the group offset \
+         (100,50) indicates double-translation"
+    );
+}
+
 /// A shape with EMPTY spans (no `span` child) still emits its background and
 /// NO glyph run — the U1 background-only behavior is preserved for unlabeled
 /// shapes.
