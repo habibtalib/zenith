@@ -158,6 +158,60 @@ pub fn current_content(
     Ok(Some(content))
 }
 
+/// Undo: move HEAD to its parent snapshot. Returns the content now at HEAD, or
+/// `None` if the session is empty or already at the root (nothing to undo). The
+/// record we left is pushed onto the redo stack so [`redo`] can return to it.
+pub fn undo(
+    fs: &impl Fs,
+    paths: &StorePaths,
+    doc_id: &str,
+) -> Result<Option<Vec<u8>>, SessionError> {
+    let mut state = load_state(fs, paths, doc_id)?;
+    let head_id = match state.head.as_deref() {
+        Some(h) => h,
+        None => return Ok(None),
+    };
+    let records = read_records(fs, &journal_path(paths, doc_id))?;
+    let rec = find_record(&records, head_id).ok_or_else(|| {
+        SessionError::new(format!("session HEAD points to unknown record: {head_id}"))
+    })?;
+    let parent = match rec.parent.clone() {
+        Some(p) => p,
+        None => return Ok(None), // at root; nothing to undo, HEAD unchanged
+    };
+    state.redo.push(head_id.to_owned());
+    state.head = Some(parent);
+    save_state(fs, paths, doc_id, &state)?;
+    current_content(fs, paths, doc_id)
+}
+
+/// Redo: move HEAD forward to the most-recently-undone snapshot. Returns the
+/// content now at HEAD, or `None` if the redo stack is empty.
+pub fn redo(
+    fs: &impl Fs,
+    paths: &StorePaths,
+    doc_id: &str,
+) -> Result<Option<Vec<u8>>, SessionError> {
+    let mut state = load_state(fs, paths, doc_id)?;
+    let target = match state.redo.pop() {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+    state.head = Some(target);
+    save_state(fs, paths, doc_id, &state)?;
+    current_content(fs, paths, doc_id)
+}
+
+/// Discard all Tier-1 session state for `doc_id` (called on workspace close).
+/// Idempotent: a no-op if no session exists. Durable Tier-2 history is unaffected.
+pub fn clear_session(fs: &impl Fs, paths: &StorePaths, doc_id: &str) -> Result<(), SessionError> {
+    let dir = paths.session_dir(doc_id);
+    if fs.exists(&dir) {
+        fs.remove(&dir)?;
+    }
+    Ok(())
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -284,5 +338,148 @@ mod tests {
         assert_eq!(r0.snapshot, r2.snapshot);
         // But they are distinct records with distinct ids.
         assert_ne!(r0.id, r2.id);
+    }
+
+    #[test]
+    fn undo_moves_to_parent() {
+        let (fs, paths, clock, rng) = setup();
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v1", None).unwrap(); // r0
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v2", None).unwrap(); // r1
+        let content = undo(&fs, &paths, "doc1").unwrap();
+        assert_eq!(content, Some(b"v1".to_vec()));
+        let state = load_state(&fs, &paths, "doc1").unwrap();
+        assert_eq!(state.head, Some("r0".to_string()));
+        assert_eq!(state.redo, vec!["r1".to_string()]);
+        assert_eq!(
+            current_content(&fs, &paths, "doc1").unwrap(),
+            Some(b"v1".to_vec())
+        );
+    }
+
+    #[test]
+    fn undo_at_root_returns_none_and_keeps_head() {
+        let (fs, paths, clock, rng) = setup();
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v1", None).unwrap(); // r0
+        let result = undo(&fs, &paths, "doc1").unwrap();
+        assert_eq!(result, None);
+        let state = load_state(&fs, &paths, "doc1").unwrap();
+        assert_eq!(state.head, Some("r0".to_string()));
+        assert!(state.redo.is_empty());
+    }
+
+    #[test]
+    fn undo_empty_session_is_none() {
+        let (fs, paths, _clock, _rng) = setup();
+        let result = undo(&fs, &paths, "doc1").unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn redo_returns_to_undone_state() {
+        let (fs, paths, clock, rng) = setup();
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v1", None).unwrap(); // r0
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v2", None).unwrap(); // r1
+        undo(&fs, &paths, "doc1").unwrap(); // back to r0
+        let content = redo(&fs, &paths, "doc1").unwrap();
+        assert_eq!(content, Some(b"v2".to_vec()));
+        let state = load_state(&fs, &paths, "doc1").unwrap();
+        assert_eq!(state.head, Some("r1".to_string()));
+        assert!(state.redo.is_empty());
+    }
+
+    #[test]
+    fn redo_without_undo_is_none() {
+        let (fs, paths, clock, rng) = setup();
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v1", None).unwrap(); // r0
+        let result = redo(&fs, &paths, "doc1").unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn undo_undo_undo_redo_undo_sequence() {
+        let (fs, paths, clock, rng) = setup();
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v1", None).unwrap(); // r0
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v2", None).unwrap(); // r1
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v3", None).unwrap(); // r2
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v4", None).unwrap(); // r3
+        // undo x3 → r0 (v1)
+        undo(&fs, &paths, "doc1").unwrap(); // r3 → r2
+        undo(&fs, &paths, "doc1").unwrap(); // r2 → r1
+        let after_third_undo = undo(&fs, &paths, "doc1").unwrap(); // r1 → r0
+        assert_eq!(after_third_undo, Some(b"v1".to_vec()));
+        // redo → r1 (v2)
+        let after_redo = redo(&fs, &paths, "doc1").unwrap();
+        assert_eq!(after_redo, Some(b"v2".to_vec()));
+        // undo → r0 (v1)
+        let after_final_undo = undo(&fs, &paths, "doc1").unwrap();
+        assert_eq!(after_final_undo, Some(b"v1".to_vec()));
+    }
+
+    #[test]
+    fn new_edit_after_undo_clears_redo_and_branches() {
+        let (fs, paths, clock, rng) = setup();
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v1", None).unwrap(); // r0
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v2", None).unwrap(); // r1
+        undo(&fs, &paths, "doc1").unwrap(); // back to r0; redo = [r1]
+        let outcome = record_state(&fs, &paths, &clock, &rng, "doc1", b"v3", None).unwrap(); // r2
+        assert_eq!(
+            outcome,
+            RecordOutcome::Recorded {
+                id: "r2".to_string()
+            }
+        );
+        assert_eq!(
+            current_content(&fs, &paths, "doc1").unwrap(),
+            Some(b"v3".to_vec())
+        );
+        // redo stack must be empty after a new record
+        let redo_result = redo(&fs, &paths, "doc1").unwrap();
+        assert_eq!(redo_result, None);
+        let state = load_state(&fs, &paths, "doc1").unwrap();
+        assert!(state.redo.is_empty());
+    }
+
+    #[test]
+    fn round_trip_external_change_is_undoable() {
+        let (fs, paths, clock, rng) = setup();
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v1", None).unwrap(); // r0
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v2", None).unwrap(); // r1
+        // Simulate an external revert: record the same bytes as r0 with op_kind "external".
+        let outcome =
+            record_state(&fs, &paths, &clock, &rng, "doc1", b"v1", Some("external")).unwrap(); // r2
+        let r2_id = match outcome {
+            RecordOutcome::Recorded { ref id } => id.clone(),
+            RecordOutcome::Unchanged => panic!("expected Recorded"),
+        };
+        // Verify op_kind and object dedup.
+        let jpath = journal_path(&paths, "doc1");
+        let records = read_records(&fs, &jpath).unwrap();
+        let r0 = find_record(&records, "r0").unwrap();
+        let r2 = find_record(&records, &r2_id).unwrap();
+        assert_eq!(r2.op_kind, Some("external".to_string()));
+        assert_eq!(r2.snapshot, r0.snapshot); // same bytes → same object hash
+        assert_eq!(
+            current_content(&fs, &paths, "doc1").unwrap(),
+            Some(b"v1".to_vec())
+        );
+        // undo r2 → r1 (v2)
+        let after_first_undo = undo(&fs, &paths, "doc1").unwrap();
+        assert_eq!(after_first_undo, Some(b"v2".to_vec()));
+        // undo r1 → r0 (v1)
+        let after_second_undo = undo(&fs, &paths, "doc1").unwrap();
+        assert_eq!(after_second_undo, Some(b"v1".to_vec()));
+    }
+
+    #[test]
+    fn clear_session_removes_all_state() {
+        let (fs, paths, clock, rng) = setup();
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v1", None).unwrap();
+        record_state(&fs, &paths, &clock, &rng, "doc1", b"v2", None).unwrap();
+        clear_session(&fs, &paths, "doc1").unwrap();
+        let state = load_state(&fs, &paths, "doc1").unwrap();
+        assert_eq!(state, SessionState::default());
+        assert_eq!(current_content(&fs, &paths, "doc1").unwrap(), None);
+        // Idempotent: second call is also Ok.
+        clear_session(&fs, &paths, "doc1").unwrap();
     }
 }

@@ -31,5 +31,7 @@ pub use error::SessionError;
 pub use identity::{DocMeta, Outcome, Reconciled, reconcile};
 pub use layout::StorePaths;
 pub use manifest::{HistoryRecord, append_record, read_records};
-pub use session::{RecordOutcome, SessionState, current_content, record_state};
+pub use session::{
+    RecordOutcome, SessionState, clear_session, current_content, record_state, redo, undo,
+};
 pub use store::{get_object, has_object, object_hash, put_object};
