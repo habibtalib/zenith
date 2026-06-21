@@ -464,6 +464,11 @@ pub(super) fn compile_table(
     // Populated during the cell loop below; empty (and unused) in separate mode.
     let mut edge_acc: BTreeMap<EdgeKey, EdgeStyle> = BTreeMap::new();
 
+    // Number of header rows: a placed cell is a header when its starting row
+    // index < header_rows. When header_rows is 0 / absent, no cell is a header
+    // and the output is byte-identical to the pre-header-styling code path.
+    let header_rows = table.header_rows.unwrap_or(0) as usize;
+
     for pc in &placed {
         // Cell rect: from column `pc.col` left to the right edge of the last
         // spanned column (including interior gaps); similarly for rows.
@@ -488,6 +493,8 @@ pub(super) fn compile_table(
             h: span_h.max(0.0),
         };
 
+        let is_header = pc.row < header_rows;
+
         if collapse_mode {
             // Accumulate this cell's four edges into the dedup map; fill and
             // content are still emitted immediately via emit_cell_no_border.
@@ -507,6 +514,7 @@ pub(super) fn compile_table(
                 chains,
                 field_ctx,
                 ctx,
+                is_header,
             );
             accumulate_cell_edges(
                 table,
@@ -534,6 +542,7 @@ pub(super) fn compile_table(
                 chains,
                 field_ctx,
                 ctx,
+                is_header,
             );
         }
     }
@@ -657,9 +666,19 @@ fn emit_cell_no_border(
     chains: &ChainAssignments,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
+    is_header: bool,
 ) {
-    // ── Background fill: cell.fill else table.fill ────────────────────────
-    let fill_prop: Option<&PropertyValue> = cell.fill.as_ref().or(table.fill.as_ref());
+    // ── Background fill ───────────────────────────────────────────────────
+    // Precedence: cell.fill > header_fill (header only) > table.fill.
+    // When is_header=false, the default falls back to table.fill directly —
+    // byte-identical to the pre-header code path.
+    let fill_prop: Option<&PropertyValue> = cell.fill.as_ref().or_else(|| {
+        if is_header {
+            table.header_fill.as_ref().or(table.fill.as_ref())
+        } else {
+            table.fill.as_ref()
+        }
+    });
     if let Some(prop) = fill_prop
         && let Some(mut color) = resolve_property_color(prop, resolved, diagnostics, &table.id)
     {
@@ -715,8 +734,28 @@ fn emit_cell_no_border(
             dy: content_y + dy_align,
             baseline_grid: ctx.baseline_grid,
         };
+        // Header text style injection: for a header cell's direct Node::Text
+        // children that have no own `style`, apply table.header_style as the
+        // style. Only direct children are affected in v0 — text nested inside
+        // a frame/group inside the cell is NOT patched here.
+        let effective_child: std::borrow::Cow<zenith_core::Node> =
+            if is_header && table.header_style.is_some() {
+                if let zenith_core::Node::Text(t) = child {
+                    if t.style.is_none() {
+                        let mut cloned = *t.clone();
+                        cloned.style = table.header_style.clone();
+                        std::borrow::Cow::Owned(zenith_core::Node::Text(Box::new(cloned)))
+                    } else {
+                        std::borrow::Cow::Borrowed(child)
+                    }
+                } else {
+                    std::borrow::Cow::Borrowed(child)
+                }
+            } else {
+                std::borrow::Cow::Borrowed(child)
+            };
         let _ = compile_node(
-            child,
+            &effective_child,
             resolved,
             style_map,
             components,
@@ -816,9 +855,19 @@ fn emit_cell(
     chains: &ChainAssignments,
     field_ctx: &FieldCtx,
     ctx: RenderCtx,
+    is_header: bool,
 ) {
-    // ── Background fill: cell.fill else table.fill (token color) ─────────
-    let fill_prop: Option<&PropertyValue> = cell.fill.as_ref().or(table.fill.as_ref());
+    // ── Background fill ───────────────────────────────────────────────────
+    // Precedence: cell.fill > header_fill (header only) > table.fill.
+    // When is_header=false, the default falls back to table.fill directly —
+    // byte-identical to the pre-header code path.
+    let fill_prop: Option<&PropertyValue> = cell.fill.as_ref().or_else(|| {
+        if is_header {
+            table.header_fill.as_ref().or(table.fill.as_ref())
+        } else {
+            table.fill.as_ref()
+        }
+    });
     if let Some(prop) = fill_prop
         && let Some(mut color) = resolve_property_color(prop, resolved, diagnostics, &table.id)
     {
@@ -922,8 +971,28 @@ fn emit_cell(
             dy: content_y + dy_align,
             baseline_grid: ctx.baseline_grid,
         };
+        // Header text style injection: for a header cell's direct Node::Text
+        // children that have no own `style`, apply table.header_style as the
+        // style. Only direct children are affected in v0 — text nested inside
+        // a frame/group inside the cell is NOT patched here.
+        let effective_child: std::borrow::Cow<zenith_core::Node> =
+            if is_header && table.header_style.is_some() {
+                if let zenith_core::Node::Text(t) = child {
+                    if t.style.is_none() {
+                        let mut cloned = *t.clone();
+                        cloned.style = table.header_style.clone();
+                        std::borrow::Cow::Owned(zenith_core::Node::Text(Box::new(cloned)))
+                    } else {
+                        std::borrow::Cow::Borrowed(child)
+                    }
+                } else {
+                    std::borrow::Cow::Borrowed(child)
+                }
+            } else {
+                std::borrow::Cow::Borrowed(child)
+            };
         let _ = compile_node(
-            child,
+            &effective_child,
             resolved,
             style_map,
             components,
