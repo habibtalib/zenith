@@ -1,0 +1,39 @@
+zenith version=1 {
+  project id="@zenith/flowchart" name="Zenith Flowchart Shapes"
+  libraries {
+    library id="@zenith/flowchart" version="1.0.0"
+  }
+  tokens format="zenith-token-v1" {
+    token id="lib.flow.fill" type="color" value="#dbeafe"
+    token id="lib.flow.term.fill" type="color" value="#dcfce7"
+    token id="lib.flow.dec.fill" type="color" value="#fef9c3"
+    token id="lib.flow.stroke" type="color" value="#334155"
+    token id="lib.flow.text" type="color" value="#0f172a"
+    token id="lib.flow.bw" type="dimension" value=(px)2
+    token id="lib.flow.r" type="dimension" value=(px)10
+    token id="lib.flow.pad" type="dimension" value=(px)14
+    token id="lib.flow.fs" type="dimension" value=(px)20
+    token id="lib.flow.ff" type="fontFamily" value="Noto Sans"
+  }
+  styles {
+    style id="lib.flow.label" {
+      font-family (token)"lib.flow.ff"
+      font-size (token)"lib.flow.fs"
+      fill (token)"lib.flow.text"
+    }
+  }
+  components {
+    component id="process" {
+      shape id="shape" kind="process" x=(px)0 y=(px)0 w=(px)200 h=(px)90 fill=(token)"lib.flow.fill" stroke=(token)"lib.flow.stroke" stroke-width=(token)"lib.flow.bw" radius=(token)"lib.flow.r" padding=(token)"lib.flow.pad" text-style="lib.flow.label" { span "Process" }
+    }
+    component id="decision" {
+      shape id="shape" kind="decision" x=(px)0 y=(px)0 w=(px)180 h=(px)160 fill=(token)"lib.flow.dec.fill" stroke=(token)"lib.flow.stroke" stroke-width=(token)"lib.flow.bw" padding=(token)"lib.flow.pad" text-style="lib.flow.label" { span "Decision?" }
+    }
+    component id="terminator" {
+      shape id="shape" kind="terminator" x=(px)0 y=(px)0 w=(px)200 h=(px)70 fill=(token)"lib.flow.term.fill" stroke=(token)"lib.flow.stroke" stroke-width=(token)"lib.flow.bw" padding=(token)"lib.flow.pad" text-style="lib.flow.label" { span "Start" }
+    }
+  }
+  document id="pack.preview" title="Flowchart pack preview" {
+    page id="pack.pg" name="Preview" w=(px)100 h=(px)100 {}
+  }
+}

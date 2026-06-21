@@ -37,6 +37,36 @@ pub enum Command {
 
     /// Mail-merge a `.zen` template with a CSV data file, writing one PNG per row.
     Merge(MergeArgs),
+
+    /// Inspect the library subsystem (preset + project packs).
+    Library(LibraryArgs),
+}
+
+/// Arguments for `zenith library`.
+#[derive(Debug, Args)]
+pub struct LibraryArgs {
+    #[command(subcommand)]
+    pub command: LibrarySub,
+}
+
+/// Subcommands of `zenith library`.
+#[derive(Debug, Subcommand)]
+pub enum LibrarySub {
+    /// List all resolved library packs (project + embedded presets) and items.
+    List(LibraryListArgs),
+}
+
+/// Arguments for `zenith library list`.
+#[derive(Debug, Args)]
+pub struct LibraryListArgs {
+    /// Project directory, or a `.zen` file whose parent is the project directory.
+    /// Project `libraries/*.zen` packs are scanned alongside embedded presets.
+    /// Defaults to the current working directory.
+    pub path: Option<PathBuf>,
+
+    /// Emit machine-readable JSON instead of a human-readable listing.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for `zenith validate`.

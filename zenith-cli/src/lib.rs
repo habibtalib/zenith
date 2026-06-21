@@ -18,6 +18,7 @@
 pub mod cli;
 pub mod commands;
 pub mod json_types;
+pub mod library;
 
 use std::io::Write as _;
 use std::process::ExitCode;
@@ -414,6 +415,18 @@ pub fn run() -> ExitCode {
             }
         }
 
+        Command::Library(args) => match args.command {
+            cli::LibrarySub::List(list_args) => {
+                // Resolve the project directory: if `path` names an existing
+                // file (e.g. a `.zen`), use its parent; if it names a directory,
+                // use it directly; if omitted, use the current working directory.
+                let project_dir = resolve_project_dir(list_args.path.as_deref());
+                let packs = library::resolve_packs(project_dir.as_deref());
+                println!("{}", commands::library::list(&packs, list_args.json));
+                ExitCode::SUCCESS
+            }
+        },
+
         Command::Tx(args) => {
             // Read document source.
             let doc_src = match read_file(&args.path) {
@@ -502,6 +515,32 @@ fn parse_spread_spec(spec: &str) -> Result<(usize, usize), String> {
         return Err(err());
     }
     Ok((a, b))
+}
+
+/// Resolve the project directory for the library subsystem from an optional
+/// `--path` argument.
+///
+/// - `None` → the current working directory (`.`).
+/// - a path to an existing FILE (e.g. a `.zen`) → its parent directory.
+/// - a path to an existing DIRECTORY → that directory.
+/// - a non-existent path → its parent if it has one, else the path itself
+///   (so a bare name like `proj.zen` still resolves to `.`).
+///
+/// Never panics; returns `None` only when no usable directory can be derived.
+fn resolve_project_dir(path: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    use std::path::Path;
+    match path {
+        None => Some(std::path::PathBuf::from(".")),
+        Some(p) if p.is_dir() => Some(p.to_path_buf()),
+        // An existing file (e.g. a `.zen`) or a bare/non-existent name: use the
+        // parent directory, falling back to `.` when there is none.
+        Some(p) => Some(
+            p.parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
+        ),
+    }
 }
 
 // ── I/O helpers ───────────────────────────────────────────────────────────────
