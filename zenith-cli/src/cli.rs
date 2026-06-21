@@ -55,6 +55,10 @@ pub enum Command {
 
     /// Restore the document to a past version.
     Restore(RestoreArgs),
+
+    /// Capture the document's current on-disk state into history as an external
+    /// change (e.g. after a GUI edit, hand-edit, or `git checkout`).
+    Sync(SyncArgs),
 }
 
 /// Arguments for `zenith library`.
@@ -289,4 +293,11 @@ pub struct RestoreArgs {
     pub path: PathBuf,
     /// Revision spec (e.g. a version id `v2`, `@head~1`, `@latest:named`, or a name).
     pub rev: String,
+}
+
+/// Arguments for `zenith sync`.
+#[derive(Debug, Args)]
+pub struct SyncArgs {
+    /// Path to the `.zen` document.
+    pub path: PathBuf,
 }

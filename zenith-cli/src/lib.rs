@@ -609,6 +609,21 @@ pub fn run() -> ExitCode {
             }
         },
 
+        Command::Sync(args) => match history::sync_external(&args.path) {
+            Ok(history::SyncOutcome::Captured { id }) => {
+                println!("captured external change as {id}");
+                ExitCode::SUCCESS
+            }
+            Ok(history::SyncOutcome::AlreadyInSync) => {
+                println!("already in sync");
+                ExitCode::SUCCESS
+            }
+            Err(msg) => {
+                eprintln!("{msg}");
+                ExitCode::from(2)
+            }
+        },
+
         Command::Tx(args) => {
             // Read document source.
             let doc_src = match read_file(&args.path) {

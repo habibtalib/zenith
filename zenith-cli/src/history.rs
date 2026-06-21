@@ -16,8 +16,8 @@ use std::path::Path;
 use zenith_core::{KdlAdapter, KdlSource as _};
 use zenith_session::adapter::{OsClock, OsFs, OsRng};
 use zenith_session::{
-    Outcome, StorePaths, VersionOutcome, current_content, list_versions, reconcile, record_state,
-    record_version, resolve_data_dir, resolve_version, version_content,
+    Outcome, RecordOutcome, StorePaths, VersionOutcome, current_content, list_versions, reconcile,
+    record_state, record_version, resolve_data_dir, resolve_version, version_content,
 };
 
 // ── Public result type ────────────────────────────────────────────────────────
@@ -345,6 +345,38 @@ pub fn name_version_in(paths: &StorePaths, doc_path: &Path, name: &str) -> Resul
             // returning the latest version id via a fresh resolve of "@head".
             resolve_version(&fs, paths, &doc_id, "@head").map_err(|e| e.message)
         }
+        Err(e) => Err(e.message),
+    }
+}
+
+// ── sync_external ─────────────────────────────────────────────────────────────
+
+/// Outcome of a [`sync_external`] or [`sync_external_in`] call.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SyncOutcome {
+    /// The on-disk state differed from HEAD and was captured as a new record.
+    Captured { id: String },
+    /// The on-disk state already matched HEAD; nothing to capture.
+    AlreadyInSync,
+}
+
+/// Capture the current on-disk content of `doc_path` into Tier-1 history as an
+/// external change, if it differs from the session HEAD. Resolves the real data dir.
+pub fn sync_external(doc_path: &Path) -> Result<SyncOutcome, String> {
+    let data_dir = resolve_data_dir().map_err(|e| e.message)?;
+    let paths = StorePaths::new(data_dir);
+    sync_external_in(&paths, doc_path)
+}
+
+/// Testable variant with an explicit store root.
+pub fn sync_external_in(paths: &StorePaths, doc_path: &Path) -> Result<SyncOutcome, String> {
+    let (bytes, doc_id) = read_doc_with_id(doc_path)?;
+    let fs = OsFs;
+    let clock = OsClock;
+    let rng = OsRng;
+    match record_state(&fs, paths, &clock, &rng, &doc_id, &bytes, Some("external")) {
+        Ok(RecordOutcome::Recorded { id }) => Ok(SyncOutcome::Captured { id }),
+        Ok(RecordOutcome::Unchanged) => Ok(SyncOutcome::AlreadyInSync),
         Err(e) => Err(e.message),
     }
 }
