@@ -1,12 +1,14 @@
-//! Table-node compilation: single-page tables with EXPLICIT/PROPORTIONAL
-//! column widths and SEPARATE borders only.
+//! Table-node compilation: single-page tables with EXPLICIT and CONTENT-BASED
+//! column widths, CONTENT-BASED row heights, and SEPARATE borders only.
 //!
 //! This unit lays a `table` out as a grid of cells inside its declared
 //! `[x, y, w, h]` box, honoring `colspan`/`rowspan` (HTML-table cell flow).
-//! Auto columns share the leftover width EQUALLY (content-based auto-sizing is
-//! a LATER unit); rows share the table height EQUALLY (content-based row height
-//! is a LATER unit); `border-collapse` is carried but only `"separate"` borders
-//! are drawn here.
+//! AUTO columns (a `column` with no `width`) size to their widest cell's
+//! measured natural content; rows size to their tallest cell's wrapped content
+//! height at the assigned column width. Both passes reuse the production
+//! text-shaping pipeline (`shape_words`/`pack_lines`) via the measurer helpers
+//! in [`super::text`]. `border-collapse` is carried but only `"separate"`
+//! borders are drawn here.
 //!
 //! Each cell emits, in order: an optional background `FillRect` (cell.fill or
 //! table.fill), then an optional border drawn as four independent `StrokeLine`s
@@ -18,7 +20,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use zenith_core::{
-    Diagnostic, FontProvider, PropertyValue, ResolvedToken, Style, TableNode, dim_to_px,
+    Diagnostic, FontProvider, Node, PropertyValue, ResolvedToken, Style, TableNode, dim_to_px,
 };
 use zenith_layout::RustybuzzEngine;
 
@@ -27,8 +29,68 @@ use crate::ir::SceneCommand;
 use super::chain::ChainAssignments;
 use super::field::FieldCtx;
 use super::paint::resolve_property_color;
+use super::text::{
+    MeasureEnv, measure_text_natural, measure_text_wrapped_height, resolve_text_families,
+};
 use super::util::resolve_property_dimension_px;
 use super::{ComponentMap, RenderCtx, compile_node};
+
+/// Lower bound (px) a shrunk AUTO column is clamped to, so proportional shrink
+/// to fit never collapses a column to zero width (which would hide its border).
+const MIN_AUTO_COL_W: f64 = 2.0;
+
+/// One placed cell after the HTML-table occupancy walk: its top-left grid
+/// position plus resolved column/row spans. Shared by the width, height, and
+/// emission passes so cell placement is byte-identical across all three.
+struct PlacedCell<'a> {
+    /// 0-based starting row.
+    row: usize,
+    /// 0-based starting column.
+    col: usize,
+    /// Column span (≥1, clamped to the grid).
+    cs: usize,
+    /// Row span (≥1, clamped to the grid).
+    rs: usize,
+    cell: &'a zenith_core::TableCell,
+}
+
+/// Walk the table's rows with a deterministic occupancy grid (HTML-table cell
+/// flow honoring `colspan`/`rowspan`) and return every placed cell in emission
+/// order. This is the SINGLE placement walk reused by the auto-width pass, the
+/// row-height pass, and the emit pass, so a cell occupies byte-identical slots
+/// in measurement and rendering.
+fn place_cells(table: &TableNode, col_count: usize, row_count: usize) -> Vec<PlacedCell<'_>> {
+    let mut placed: Vec<PlacedCell> = Vec::new();
+    let mut occupied: BTreeSet<(usize, usize)> = BTreeSet::new();
+
+    for (r, row) in table.rows.iter().enumerate() {
+        let mut col_cursor = 0usize;
+        for cell in &row.cells {
+            while col_cursor < col_count && occupied.contains(&(r, col_cursor)) {
+                col_cursor += 1;
+            }
+            if col_cursor >= col_count {
+                break;
+            }
+            let cs = (cell.colspan.max(1) as usize).min(col_count - col_cursor);
+            let rs = (cell.rowspan.max(1) as usize).min(row_count - r);
+            for dr in 0..rs {
+                for dc in 0..cs {
+                    occupied.insert((r + dr, col_cursor + dc));
+                }
+            }
+            placed.push(PlacedCell {
+                row: r,
+                col: col_cursor,
+                cs,
+                rs,
+                cell,
+            });
+            col_cursor += cs;
+        }
+    }
+    placed
+}
 
 /// Geometry of one placed cell in absolute page pixels (already including the
 /// table origin but NOT the cell-padding inset).
@@ -110,10 +172,17 @@ pub(super) fn compile_table(
         return;
     }
 
-    // ── Column widths ────────────────────────────────────────────────────
-    // Explicit `column.width` resolves to its px; AUTO columns (no width)
-    // share the LEFTOVER width EQUALLY. Content-based auto-sizing is a LATER
-    // unit — equal split is this unit's behavior.
+    // ── Cell placement (shared occupancy walk) ───────────────────────────
+    // Computed ONCE here and reused by the width pass, height pass, and emit
+    // pass so a cell occupies byte-identical slots throughout.
+    let placed = place_cells(table, col_count, row_count);
+
+    // ── Column widths (CONTENT-BASED auto-sizing) ────────────────────────
+    // Explicit `column.width` resolves to its px and is fixed. Each AUTO column
+    // (no width) sizes to the widest natural content of the cells that span it
+    // (a colspan>1 auto cell divides its natural width across the auto columns
+    // it covers). If the natural total overflows the table, only the AUTO
+    // columns shrink proportionally (explicit columns stay fixed).
     let mut explicit_w: Vec<Option<f64>> = Vec::with_capacity(col_count);
     for i in 0..col_count {
         let w = table
@@ -125,19 +194,77 @@ pub(super) fn compile_table(
         explicit_w.push(w);
     }
     let sum_explicit: f64 = explicit_w.iter().filter_map(|w| *w).sum();
-    let auto_count = explicit_w.iter().filter(|w| w.is_none()).count();
-    // Content box width = table width minus the two outer padding insets and
-    // the interior gaps (matches the frame content-box convention).
+
+    // Resolve the node-level font families ONCE per text node we measure (cached
+    // by node id) so repeated cells of the same node don't re-probe the provider
+    // or re-emit advisories.
+    let mut family_cache: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    // Shared shaping environment for the per-cell measurers.
+    let env = MeasureEnv {
+        resolved,
+        style_map,
+        fonts,
+        engine,
+    };
+
+    // Natural content width demanded for each AUTO column. Explicit columns keep
+    // their resolved px; auto columns accumulate the max demand.
+    let mut auto_natural: Vec<f64> = vec![0.0; col_count];
+    for pc in &placed {
+        // The natural content width this cell needs (widest child + insets).
+        let cell_natural = cell_natural_width(pc.cell, pad, &env, diagnostics, &mut family_cache);
+        // Which of the columns this cell spans are AUTO? Distribute the cell's
+        // natural width equally across them (mirrors the occupancy placement).
+        let is_auto = |c: usize| explicit_w.get(c).is_some_and(|w| w.is_none());
+        let auto_col_count = (pc.col..pc.col + pc.cs).filter(|&c| is_auto(c)).count();
+        if auto_col_count == 0 {
+            continue;
+        }
+        // Subtract the explicit columns the cell also spans from its demand, then
+        // split the remainder across the auto columns it covers.
+        let explicit_in_span: f64 = (pc.col..pc.col + pc.cs)
+            .filter_map(|c| explicit_w.get(c).copied().flatten())
+            .sum();
+        let span_gaps = gap * (pc.cs.saturating_sub(1)) as f64;
+        let auto_demand = (cell_natural - explicit_in_span - span_gaps).max(0.0);
+        let per_col = auto_demand / auto_col_count as f64;
+        for c in (pc.col..pc.col + pc.cs).filter(|&c| is_auto(c)) {
+            if let Some(slot) = auto_natural.get_mut(c) {
+                *slot = slot.max(per_col);
+            }
+        }
+    }
+
+    // Assemble natural column widths, then shrink AUTO columns to fit if needed.
     let total_gap_w = gap * (col_count.saturating_sub(1)) as f64;
-    let leftover = (table_w - sum_explicit - total_gap_w - 2.0 * pad).max(0.0);
-    let auto_w = if auto_count > 0 {
-        leftover / auto_count as f64
+    let avail_auto = (table_w - sum_explicit - total_gap_w - 2.0 * pad).max(0.0);
+    let sum_auto_natural: f64 = explicit_w
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| w.is_none())
+        .map(|(i, _)| auto_natural.get(i).copied().unwrap_or(0.0))
+        .sum();
+    // Shrink factor ≤ 1 applied to AUTO columns only when they overflow.
+    let auto_scale = if sum_auto_natural > avail_auto && sum_auto_natural > 0.0 {
+        avail_auto / sum_auto_natural
     } else {
-        0.0
+        1.0
     };
     let col_widths: Vec<f64> = explicit_w
         .iter()
-        .map(|w| w.unwrap_or(auto_w).max(0.0))
+        .enumerate()
+        .map(|(i, w)| match w {
+            Some(px) => px.max(0.0),
+            None => {
+                let nat = auto_natural.get(i).copied().unwrap_or(0.0) * auto_scale;
+                // Clamp shrunk columns to a small minimum (never below 0).
+                if auto_scale < 1.0 {
+                    nat.max(MIN_AUTO_COL_W)
+                } else {
+                    nat.max(0.0)
+                }
+            }
+        })
         .collect();
 
     // Left edge of each column (content-box left = origin + pad).
@@ -148,81 +275,188 @@ pub(super) fn compile_table(
         cursor += w + gap;
     }
 
-    // ── Row heights (equal split — content-based height is a LATER unit) ──
-    let total_gap_h = gap * (row_count.saturating_sub(1)) as f64;
-    let row_h = ((table_h - total_gap_h - 2.0 * pad) / row_count as f64).max(0.0);
-    let mut row_top: Vec<f64> = Vec::with_capacity(row_count);
-    let mut rcursor = origin_y + pad;
-    for _ in 0..row_count {
-        row_top.push(rcursor);
-        rcursor += row_h + gap;
-    }
+    // ── Row heights (CONTENT-BASED) ──────────────────────────────────────
+    // After column widths are final, each row's height is the max over its
+    // cells of the cell's wrapped content height at its assigned column width
+    // plus the two padding insets. A rowspan>1 cell distributes its measured
+    // height across the rows it covers (max per row), so totals stay
+    // consistent. If the natural total overflows `table_h`, rows shrink
+    // proportionally; if it underflows, rows stay top-aligned (no stretch).
+    let mut row_natural: Vec<f64> = vec![0.0; row_count];
+    for pc in &placed {
+        // Assigned content width for this cell = summed spanned column widths +
+        // interior gaps − the two padding insets.
+        let mut span_w = 0.0;
+        for c in pc.col..pc.col + pc.cs {
+            span_w += col_widths.get(c).copied().unwrap_or(0.0);
+        }
+        span_w += gap * (pc.cs.saturating_sub(1)) as f64;
+        let content_w = (span_w - 2.0 * pad).max(0.0);
 
-    // ── Cell placement (HTML-table flow with an occupancy grid) ──────────
-    // BTreeSet keyed by (row, col) for deterministic occupancy tracking.
-    let mut occupied: BTreeSet<(usize, usize)> = BTreeSet::new();
-
-    for (r, row) in table.rows.iter().enumerate() {
-        let mut col_cursor = 0usize;
-        for cell in &row.cells {
-            // Skip slots already covered by a previous cell's span.
-            while col_cursor < col_count && occupied.contains(&(r, col_cursor)) {
-                col_cursor += 1;
+        let cell_h = cell_content_height(
+            pc.cell,
+            content_w,
+            pad,
+            &env,
+            diagnostics,
+            &mut family_cache,
+        );
+        // Distribute across the spanned rows (max per row). `pc.rs` is ≥1 by
+        // construction in `place_cells`, so the division is always well-defined.
+        let per_row = cell_h / pc.rs as f64;
+        for dr in 0..pc.rs {
+            if let Some(slot) = row_natural.get_mut(pc.row + dr) {
+                *slot = slot.max(per_row);
             }
-            if col_cursor >= col_count {
-                // Overflowing cell (already diagnosed at validate time); skip.
-                break;
-            }
-            let cs = (cell.colspan.max(1) as usize).min(col_count - col_cursor);
-            let rs = (cell.rowspan.max(1) as usize).min(row_count - r);
-
-            // Cell rect: from column `col_cursor` left to the right edge of the
-            // last spanned column (including interior gaps); similarly for rows.
-            let left = col_left.get(col_cursor).copied().unwrap_or(origin_x + pad);
-            let mut span_w = 0.0;
-            for c in col_cursor..col_cursor + cs {
-                span_w += col_widths.get(c).copied().unwrap_or(0.0);
-            }
-            // Add interior gaps between the spanned columns.
-            span_w += gap * (cs.saturating_sub(1)) as f64;
-
-            let top = row_top.get(r).copied().unwrap_or(origin_y + pad);
-            let span_h = row_h * rs as f64 + gap * (rs.saturating_sub(1)) as f64;
-
-            let rect = CellRect {
-                x: left,
-                y: top,
-                w: span_w.max(0.0),
-                h: span_h.max(0.0),
-            };
-
-            emit_cell(
-                table,
-                cell,
-                &rect,
-                pad,
-                opacity,
-                resolved,
-                style_map,
-                components,
-                fonts,
-                engine,
-                commands,
-                diagnostics,
-                chains,
-                field_ctx,
-                ctx,
-            );
-
-            // Mark covered slots (clamped to the grid).
-            for dr in 0..rs {
-                for dc in 0..cs {
-                    occupied.insert((r + dr, col_cursor + dc));
-                }
-            }
-            col_cursor += cs;
         }
     }
+
+    let total_gap_h = gap * (row_count.saturating_sub(1)) as f64;
+    let avail_h = (table_h - total_gap_h - 2.0 * pad).max(0.0);
+    let sum_rows: f64 = row_natural.iter().sum();
+    let row_scale = if sum_rows > avail_h && sum_rows > 0.0 {
+        avail_h / sum_rows
+    } else {
+        1.0
+    };
+    let row_heights: Vec<f64> = row_natural
+        .iter()
+        .map(|h| (h * row_scale).max(0.0))
+        .collect();
+
+    let mut row_top: Vec<f64> = Vec::with_capacity(row_count);
+    let mut rcursor = origin_y + pad;
+    for h in &row_heights {
+        row_top.push(rcursor);
+        rcursor += h + gap;
+    }
+
+    // ── Cell emission (reusing the shared placement walk) ────────────────
+    for pc in &placed {
+        // Cell rect: from column `pc.col` left to the right edge of the last
+        // spanned column (including interior gaps); similarly for rows.
+        let left = col_left.get(pc.col).copied().unwrap_or(origin_x + pad);
+        let mut span_w = 0.0;
+        for c in pc.col..pc.col + pc.cs {
+            span_w += col_widths.get(c).copied().unwrap_or(0.0);
+        }
+        span_w += gap * (pc.cs.saturating_sub(1)) as f64;
+
+        let top = row_top.get(pc.row).copied().unwrap_or(origin_y + pad);
+        let mut span_h = 0.0;
+        for dr in 0..pc.rs {
+            span_h += row_heights.get(pc.row + dr).copied().unwrap_or(0.0);
+        }
+        span_h += gap * (pc.rs.saturating_sub(1)) as f64;
+
+        let rect = CellRect {
+            x: left,
+            y: top,
+            w: span_w.max(0.0),
+            h: span_h.max(0.0),
+        };
+
+        emit_cell(
+            table,
+            pc.cell,
+            &rect,
+            pad,
+            opacity,
+            resolved,
+            style_map,
+            components,
+            fonts,
+            engine,
+            commands,
+            diagnostics,
+            chains,
+            field_ctx,
+            ctx,
+        );
+    }
+}
+
+/// Natural (unwrapped) content width a cell demands, in pixels: the max over the
+/// cell's children of the child's natural width, plus the two cell-padding
+/// insets. A `Node::Text` child measures via the shared text pipeline; any other
+/// kind uses its declared box width (or 0). `family_cache` memoizes per-text-node
+/// family resolution so a repeated node id is not re-probed/re-diagnosed.
+fn cell_natural_width(
+    cell: &zenith_core::TableCell,
+    pad: f64,
+    env: &MeasureEnv,
+    diagnostics: &mut Vec<Diagnostic>,
+    family_cache: &mut BTreeMap<String, Vec<String>>,
+) -> f64 {
+    let mut widest = 0.0_f64;
+    for child in &cell.children {
+        let w = match child {
+            Node::Text(t) => {
+                let families = cached_families(
+                    t,
+                    env.resolved,
+                    env.style_map,
+                    env.fonts,
+                    diagnostics,
+                    family_cache,
+                );
+                measure_text_natural(t, families, env, diagnostics).unwrap_or(0.0)
+            }
+            other => child_declared_box(other).0.unwrap_or(0.0),
+        };
+        widest = widest.max(w);
+    }
+    widest + 2.0 * pad
+}
+
+/// Wrapped content height a cell demands at content width `content_w`, in pixels:
+/// the max over the cell's children of the child's height, plus the two
+/// cell-padding insets. A `Node::Text` child measures its wrapped block height at
+/// `content_w` via the shared pipeline; any other kind uses its declared box
+/// height (or 0).
+fn cell_content_height(
+    cell: &zenith_core::TableCell,
+    content_w: f64,
+    pad: f64,
+    env: &MeasureEnv,
+    diagnostics: &mut Vec<Diagnostic>,
+    family_cache: &mut BTreeMap<String, Vec<String>>,
+) -> f64 {
+    let mut tallest = 0.0_f64;
+    for child in &cell.children {
+        let h = match child {
+            Node::Text(t) => {
+                let families = cached_families(
+                    t,
+                    env.resolved,
+                    env.style_map,
+                    env.fonts,
+                    diagnostics,
+                    family_cache,
+                );
+                measure_text_wrapped_height(t, content_w, families, env, diagnostics).unwrap_or(0.0)
+            }
+            other => child_declared_box(other).1.unwrap_or(0.0),
+        };
+        tallest = tallest.max(h);
+    }
+    tallest + 2.0 * pad
+}
+
+/// Resolve (and memoize) a text node's font families through [`resolve_text_families`].
+/// The advisory inside that helper fires at most once per node id because a cache
+/// hit skips the resolution entirely.
+fn cached_families<'c>(
+    text: &zenith_core::TextNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
+    fonts: &dyn FontProvider,
+    diagnostics: &mut Vec<Diagnostic>,
+    family_cache: &'c mut BTreeMap<String, Vec<String>>,
+) -> &'c [String] {
+    family_cache
+        .entry(text.id.clone())
+        .or_insert_with(|| resolve_text_families(text, resolved, style_map, fonts, diagnostics))
 }
 
 /// Emit one cell: background fill, separate border, and clipped/aligned content.
