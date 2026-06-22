@@ -22,7 +22,7 @@ pub use zenith_core::{
     RectNode, SafeZone, SafeZoneType, SectionDef, Severity, ShapeNode, Style, StyleBlock,
     TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan, TocNode, Token, TokenBlock,
     TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownStyleProp, ValidationReport,
-    validate,
+    VariantDef, VariantOverride, validate,
 };
 pub use zenith_core::{KdlAdapter, KdlSource};
 
@@ -216,6 +216,7 @@ pub fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
         masters: Vec::new(),
         sections: Vec::new(),
         provenance: Vec::new(),
+        variants: Vec::new(),
         body: DocumentBody {
             id: "doc.main".to_owned(),
             title: None,
@@ -377,6 +378,13 @@ pub fn strip_spans(mut doc: Document) -> Document {
     // Provenance
     for prov in &mut doc.provenance {
         prov.source_span = None;
+    }
+    // Variants
+    for variant in &mut doc.variants {
+        variant.source_span = None;
+        for ov in &mut variant.overrides {
+            ov.source_span = None;
+        }
     }
     // Pages and nodes
     for page in &mut doc.body.pages {

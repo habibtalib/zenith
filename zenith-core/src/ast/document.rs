@@ -10,6 +10,7 @@ use super::style::StyleBlock;
 use super::token::TokenBlock;
 use super::value::Dimension;
 use super::value::PropertyValue;
+use super::variant::VariantDef;
 
 /// Metadata for the project.
 #[derive(Debug, Clone, PartialEq)]
@@ -311,6 +312,12 @@ pub struct Document {
     /// This is metadata about nodes — the engine round-trips and validates it but
     /// does not act on the link state.
     pub provenance: Vec<ProvenanceDef>,
+    /// Variant declarations; empty when the `variants` block is absent. Each
+    /// entry declares a named size/override variant derived from a source page
+    /// (`id`, `source`, `w`, `h`, optional `override` children). The engine
+    /// round-trips and validates these records but does NOT generate output for
+    /// them in unit V-1; generation is a later unit.
+    pub variants: Vec<VariantDef>,
     pub body: DocumentBody,
 }
 
@@ -438,6 +445,7 @@ mod parity_tests {
             masters: Vec::new(),
             sections: Vec::new(),
             provenance: Vec::new(),
+            variants: Vec::new(),
             body: DocumentBody {
                 id: "body".to_owned(),
                 title: None,

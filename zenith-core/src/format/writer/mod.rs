@@ -6,7 +6,7 @@
 //! Rules (from doc 08 and doc 16):
 //! - Two-space indentation per nesting level.
 //! - Root `zenith` node at column 0.
-//! - Child order under `zenith`: project, assets, libraries, tokens, styles, components, masters, sections, provenance, actions, document.
+//! - Child order under `zenith`: project, assets, libraries, tokens, styles, components, masters, sections, provenance, variants, actions, document.
 //! - Structural containers (`tokens`, `styles`, `document`, `page`) always emit
 //!   a brace block, even when empty.
 //! - Leaf nodes (`project`, a `rect` with no children) emit a single line.
@@ -32,7 +32,7 @@ use std::fmt::Write as _;
 use crate::ast::{
     ActionDef, AssetBlock, AssetDecl, ComponentDef, Dimension, Document, LibraryDef, MasterDef,
     ObjectPosition, Project, PropertyValue, ProvenanceDef, SectionDef, Unit, UnknownProperty,
-    UnknownValue,
+    UnknownValue, VariantDef,
 };
 use crate::error::FormatError;
 
@@ -275,7 +275,7 @@ fn write_document(doc: &Document, out: &mut String) {
     write_opt_str(out, "page-parity-start", &doc.page_parity_start);
     out.push_str(" {\n");
 
-    // Child order: project, assets, libraries, tokens, styles, components, masters, sections, provenance, actions, document.
+    // Child order: project, assets, libraries, tokens, styles, components, masters, sections, provenance, variants, actions, document.
     if let Some(proj) = &doc.project {
         write_project(proj, out, 1);
     }
@@ -287,6 +287,7 @@ fn write_document(doc: &Document, out: &mut String) {
     write_master_block(&doc.masters, out, 1);
     write_section_block(&doc.sections, out, 1);
     write_provenance_block(&doc.provenance, out, 1);
+    write_variants_block(&doc.variants, out, 1);
     write_action_block(&doc.actions, out, 1);
     write_document_body(&doc.body, out, 1);
 
@@ -560,6 +561,78 @@ fn write_provenance_block(provenance: &[ProvenanceDef], out: &mut String, depth:
             out.push_str(&fmt_unknown_property(prop));
         }
         out.push('\n');
+    }
+    indent(out, depth);
+    out.push_str("}\n");
+}
+
+// ---------------------------------------------------------------------------
+// Variants
+// ---------------------------------------------------------------------------
+
+/// Emit the `variants { … }` block.
+///
+/// Stable position: after `provenance`, before `actions`. Emitted ONLY when at
+/// least one variant is declared, so documents without variants keep their
+/// existing canonical form (and round-trip) unchanged. Each variant emits:
+///
+/// ```text
+/// variant id="…" source="…" w=(px)N h=(px)N {
+///   override node="…" visible=#false text="…" fill=…
+/// }
+/// ```
+///
+/// Optional override props (`visible`, `text`, `fill`) are omitted when `None`.
+/// Unknown props follow known ones in BTreeMap key order. Variants with no
+/// overrides still emit a brace block (consistent with other block nodes).
+/// Mirrors [`write_provenance_block`].
+fn write_variants_block(variants: &[VariantDef], out: &mut String, depth: usize) {
+    if variants.is_empty() {
+        return;
+    }
+    indent(out, depth);
+    out.push_str("variants {\n");
+    for def in variants {
+        indent(out, depth + 1);
+        out.push_str("variant id=\"");
+        out.push_str(&def.id);
+        out.push_str("\" source=\"");
+        out.push_str(&def.source);
+        out.push_str("\" w=");
+        out.push_str(&fmt_dimension(&def.w));
+        out.push_str(" h=");
+        out.push_str(&fmt_dimension(&def.h));
+        // Unknown props on the variant node itself, in sorted key order.
+        for (key, prop) in &def.unknown_props {
+            out.push(' ');
+            out.push_str(key);
+            out.push('=');
+            out.push_str(&fmt_unknown_property(prop));
+        }
+        out.push_str(" {\n");
+        for ov in &def.overrides {
+            indent(out, depth + 2);
+            out.push_str("override node=\"");
+            out.push_str(&ov.node);
+            out.push('"');
+            write_opt_bool(out, "visible", &ov.visible);
+            if let Some(t) = &ov.text {
+                out.push_str(" text=\"");
+                out.push_str(&escape_kdl_string(t));
+                out.push('"');
+            }
+            write_opt_property_value(out, "fill", &ov.fill);
+            // Unknown props on the override node, in sorted key order.
+            for (key, prop) in &ov.unknown_props {
+                out.push(' ');
+                out.push_str(key);
+                out.push('=');
+                out.push_str(&fmt_unknown_property(prop));
+            }
+            out.push('\n');
+        }
+        indent(out, depth + 1);
+        out.push_str("}\n");
     }
     indent(out, depth);
     out.push_str("}\n");

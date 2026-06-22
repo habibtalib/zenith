@@ -45,6 +45,7 @@ fn doc_with_assets(assets: Vec<AssetDecl>) -> Document {
         masters: Vec::new(),
         sections: Vec::new(),
         provenance: Vec::new(),
+        variants: Vec::new(),
         body: DocumentBody {
             id: "doc.asset-test".to_owned(),
             title: None,

@@ -10,6 +10,7 @@ pub mod span;
 pub mod style;
 pub mod token;
 pub mod value;
+pub mod variant;
 
 // Flat re-exports used throughout the crate.
 pub use action::ActionDef;
@@ -36,3 +37,4 @@ pub use token::{
     TokenType, TokenValue,
 };
 pub use value::{Dimension, PropertyValue, Unit, dim_to_px};
+pub use variant::{VariantDef, VariantOverride};

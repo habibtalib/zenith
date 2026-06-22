@@ -16,6 +16,7 @@ use crate::ast::{
     provenance::ProvenanceDef,
     style::StyleBlock,
     token::TokenBlock,
+    variant::{VariantDef, VariantOverride},
 };
 use crate::error::{ParseError, ParseErrorCode};
 
@@ -119,6 +120,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     let mut masters: Vec<MasterDef> = Vec::new();
     let mut sections: Vec<SectionDef> = Vec::new();
     let mut provenance: Vec<ProvenanceDef> = Vec::new();
+    let mut variants: Vec<VariantDef> = Vec::new();
     let mut body: Option<DocumentBody> = None;
 
     for child in children_doc.nodes() {
@@ -152,6 +154,9 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
             }
             "provenance" => {
                 provenance = transform_provenance(child)?;
+            }
+            "variants" => {
+                variants = transform_variants(child)?;
             }
             "document" => {
                 body = Some(transform_document_body(child)?);
@@ -192,6 +197,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
         masters,
         sections,
         provenance,
+        variants,
         body,
     })
 }
@@ -412,6 +418,96 @@ fn transform_provenance_def(node: &KdlNode) -> Result<ProvenanceDef, ParseError>
         library,
         item,
         linked,
+        source_span,
+        unknown_props,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Variants
+// ---------------------------------------------------------------------------
+
+const VARIANT_KNOWN_PROPS: &[&str] = &["id", "source", "w", "h"];
+const VARIANT_OVERRIDE_KNOWN_PROPS: &[&str] = &["node", "visible", "text", "fill"];
+
+/// Transform the document-level `variants { … }` block into a list of
+/// [`VariantDef`]. Each `variant id="…" source="…" w=(px)N h=(px)N { … }` is
+/// a block node; non-`variant` children inside the block are silently ignored
+/// (forward-compat). Mirrors [`transform_provenance`].
+fn transform_variants(node: &KdlNode) -> Result<Vec<VariantDef>, ParseError> {
+    let mut defs: Vec<VariantDef> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "variant" {
+                defs.push(transform_variant_def(child)?);
+            }
+        }
+    }
+    Ok(defs)
+}
+
+fn transform_variant_def(node: &KdlNode) -> Result<VariantDef, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+    let source = required_string_prop(node, "source")?.to_owned();
+
+    let w = node
+        .entry("w")
+        .ok_or_else(|| {
+            ParseError::spanless(
+                ParseErrorCode::InvalidPropertyValue,
+                format!("variant `{id}` is missing required property `w`"),
+            )
+        })
+        .and_then(|e| entry_to_dimension(e, "w"))?;
+
+    let h = node
+        .entry("h")
+        .ok_or_else(|| {
+            ParseError::spanless(
+                ParseErrorCode::InvalidPropertyValue,
+                format!("variant `{id}` is missing required property `h`"),
+            )
+        })
+        .and_then(|e| entry_to_dimension(e, "h"))?;
+
+    let unknown_props = collect_unknown_props(node, VARIANT_KNOWN_PROPS);
+    let source_span = node_span(node);
+
+    let mut overrides: Vec<VariantOverride> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "override" {
+                overrides.push(transform_variant_override(child)?);
+            }
+        }
+    }
+
+    Ok(VariantDef {
+        id,
+        source,
+        w,
+        h,
+        overrides,
+        source_span,
+        unknown_props,
+    })
+}
+
+fn transform_variant_override(node: &KdlNode) -> Result<VariantOverride, ParseError> {
+    let target_node = required_string_prop(node, "node")?.to_owned();
+    let visible = optional_bool_prop(node, "visible");
+    let text = optional_string_prop(node, "text").map(str::to_owned);
+    let fill = node
+        .entry("fill")
+        .and_then(|e| entry_to_property_value(e).ok());
+    let unknown_props = collect_unknown_props(node, VARIANT_OVERRIDE_KNOWN_PROPS);
+    let source_span = node_span(node);
+
+    Ok(VariantOverride {
+        node: target_node,
+        visible,
+        text,
+        fill,
         source_span,
         unknown_props,
     })

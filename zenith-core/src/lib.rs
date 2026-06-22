@@ -27,8 +27,8 @@ pub use ast::{
     RectNode, STYLE_RECOGNIZED_KEYS, SafeZone, SafeZoneType, SectionDef, ShadowLayerRef,
     ShadowLiteral, ShapeNode, Span, Style, StyleBlock, TableCell, TableColumn, TableNode, TableRow,
     TextNode, TextSpan, TocNode, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit,
-    UnknownNode, UnknownProperty, UnknownStyleProp, UnknownValue, anchor_xy,
-    canonicalize_style_key, dim_to_px, parse_anchor,
+    UnknownNode, UnknownProperty, UnknownStyleProp, UnknownValue, VariantDef, VariantOverride,
+    anchor_xy, canonicalize_style_key, dim_to_px, parse_anchor,
 };
 pub use color::{
     Cmyk, cmyk_to_hex, cmyk_to_srgb, contrast_ratio, parse_cmyk, parse_rgb, relative_luminance,
