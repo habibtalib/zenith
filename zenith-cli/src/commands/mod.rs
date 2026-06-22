@@ -35,3 +35,11 @@ pub(crate) fn format_diagnostic_line(d: &zenith_core::Diagnostic) -> String {
         .unwrap_or_default();
     format!("{}[{}]{}: {}", sev, d.code, subject, d.message)
 }
+
+/// Format a hard (Error-severity) diagnostic as `error[code]: message`.
+///
+/// Used in "filter for Error, then format" pipelines in merge, variant, and
+/// render.  Centralised here so the string shape has exactly one definition.
+pub(crate) fn format_error_diag(d: &zenith_core::Diagnostic) -> String {
+    format!("error[{}]: {}", d.code, d.message)
+}

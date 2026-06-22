@@ -716,6 +716,77 @@ pub fn run() -> ExitCode {
             ExitCode::from(outcome.exit_code)
         }
 
+        Command::Variant(args) => {
+            let doc_src = match read_file(&args.doc) {
+                Ok(s) => s,
+                Err(msg) => {
+                    eprintln!("{}", msg);
+                    return ExitCode::from(2);
+                }
+            };
+
+            // Derive the stem from the input filename (no extension).
+            let stem = args
+                .doc
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("doc");
+            let project_dir = args.doc.parent();
+
+            match commands::variant::run_variant(&doc_src, project_dir, &args.out_dir, stem) {
+                Ok(report) => {
+                    let failed = report.failed();
+                    if args.json {
+                        println!(
+                            "{}",
+                            serialize_pretty(&commands::variant::to_json_output(&report))
+                        );
+                    } else {
+                        println!(
+                            "generated {} variant(s) to '{}'",
+                            report.generated(),
+                            args.out_dir.display()
+                        );
+                        for r in &failed {
+                            eprintln!("variant {}: {}", r.id, r.failure.as_deref().unwrap_or(""));
+                        }
+                    }
+                    if let Some(manifest_path) = &args.manifest {
+                        let manifest = commands::variant::build_manifest(&doc_src, &report);
+                        let manifest_json = serialize_pretty(&manifest);
+                        if let Some(parent) = manifest_path.parent()
+                            && !parent.as_os_str().is_empty()
+                            && let Err(e) = std::fs::create_dir_all(parent)
+                        {
+                            eprintln!(
+                                "error creating manifest directory '{}': {}",
+                                parent.display(),
+                                e
+                            );
+                            return ExitCode::from(2);
+                        }
+                        if let Err(e) = std::fs::write(manifest_path, manifest_json.as_bytes()) {
+                            eprintln!(
+                                "error writing manifest '{}': {}",
+                                manifest_path.display(),
+                                e
+                            );
+                            return ExitCode::from(2);
+                        }
+                    }
+                    if failed.is_empty() {
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::from(1u8)
+                    }
+                }
+                Err(e) => {
+                    eprintln!("{}", e.message);
+                    ExitCode::from(e.exit_code)
+                }
+            }
+        }
+
         Command::Update(args) => match selfupdate::run(args.pre, args.version.as_deref()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(msg) => {

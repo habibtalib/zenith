@@ -51,7 +51,7 @@ pub(super) fn parse_validate(src: &str) -> Result<Document, RenderCmdErr> {
             .diagnostics
             .iter()
             .filter(|d| d.severity == zenith_core::Severity::Error)
-            .map(|d| format!("error[{}]: {}", d.code, d.message))
+            .map(crate::commands::format_error_diag)
             .collect();
         return Err(RenderCmdErr::new(msgs.join("\n"), 1));
     }

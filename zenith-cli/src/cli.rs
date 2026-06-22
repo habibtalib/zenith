@@ -60,8 +60,31 @@ pub enum Command {
     /// change (e.g. after a GUI edit, hand-edit, or `git checkout`).
     Sync(SyncArgs),
 
+    /// Expand all variant definitions in a `.zen` document, writing one PNG + .zen per variant.
+    Variant(VariantArgs),
+
     /// Update the installed `zenith` binary to a published release.
     Update(UpdateArgs),
+}
+
+/// Arguments for `zenith variant`.
+#[derive(Debug, Args)]
+pub struct VariantArgs {
+    /// Input `.zen` document containing a `variants` block.
+    pub doc: PathBuf,
+
+    /// Directory to write one `.zen` + one `.png` per generated variant into.
+    #[arg(long, value_name = "DIR")]
+    pub out_dir: PathBuf,
+
+    /// Emit a machine-readable JSON batch report (per-variant provenance).
+    #[arg(long)]
+    pub json: bool,
+
+    /// Write a deterministic generation manifest (JSON) to this path for CI
+    /// reproducibility.  Independent of --json.
+    #[arg(long, value_name = "PATH")]
+    pub manifest: Option<PathBuf>,
 }
 
 /// Arguments for `zenith update`.

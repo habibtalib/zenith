@@ -555,7 +555,7 @@ pub fn run(
             let hard: Vec<String> = missing_diags
                 .iter()
                 .filter(|d| d.severity == Severity::Error)
-                .map(|d| format!("error[{}]: {}", d.code, d.message))
+                .map(crate::commands::format_error_diag)
                 .collect();
             if !hard.is_empty() {
                 push_failure(
@@ -622,7 +622,7 @@ pub fn run(
                 .diagnostics
                 .iter()
                 .filter(|d| d.severity == Severity::Error)
-                .map(|d| format!("error[{}]: {}", d.code, d.message))
+                .map(crate::commands::format_error_diag)
                 .collect();
             if !hard_diags.is_empty() {
                 page_failures.push(format!(

@@ -1,0 +1,15 @@
+//! Variant generation: pure engine (V-3) and CLI command wiring (V-4).
+//!
+//! - [`engine`] — the pure in-memory variant expansion engine.
+//! - [`run`]    — the CLI entry point: file I/O, rendering, manifest, output.
+//!
+//! Module root is wiring only: re-exports + submodule declarations.
+
+mod engine;
+mod run;
+
+pub use engine::{VariantExpansion, VariantOutcome, VariantResult, expand_variants};
+pub use run::{
+    VariantCmdErr, VariantOutputs, VariantReport, VariantResultRecord, build_manifest, run_variant,
+    to_json_output,
+};

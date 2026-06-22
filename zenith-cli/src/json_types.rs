@@ -127,3 +127,48 @@ pub struct MergeManifest {
     pub name_by: Option<String>,
     pub rows: Vec<ManifestRow>,
 }
+
+// ── Variant JSON types ────────────────────────────────────────────────────────
+
+/// Per-variant result in the `variant --json` envelope.
+#[derive(Debug, Serialize)]
+pub struct VariantResultJson {
+    pub id: String,
+    pub source: String,
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outputs_zen: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outputs_png: Option<String>,
+    pub diagnostics: Vec<DiagnosticJson>,
+}
+
+/// Top-level JSON envelope for `variant --json`.
+#[derive(Debug, Serialize)]
+pub struct VariantOutput {
+    pub schema: &'static str,
+    pub total_variants: usize,
+    pub generated: usize,
+    pub failed: usize,
+    pub variants: Vec<VariantResultJson>,
+}
+
+/// One target entry in the variant generation manifest (successful variants only).
+#[derive(Debug, Serialize)]
+pub struct VariantManifestTarget {
+    pub id: String,
+    pub source: String,
+    pub outputs_zen: String,
+    pub outputs_png: String,
+}
+
+/// Deterministic generation manifest for `zenith variant --manifest`.
+#[derive(Debug, Serialize)]
+pub struct VariantManifest {
+    pub schema: &'static str,
+    /// Manifest format version. Bumped only when the manifest structure changes
+    /// (never on a routine crate release), so identical inputs stay byte-identical.
+    pub generator: &'static str,
+    pub source_sha256: String,
+    pub targets: Vec<VariantManifestTarget>,
+}
