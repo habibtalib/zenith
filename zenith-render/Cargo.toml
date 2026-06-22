@@ -2,12 +2,18 @@
 name = "zenith-render"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 publish.workspace = true
+description = "Zenith CPU PNG (tiny-skia) and vector PDF rendering backends."
 
 [dependencies]
-zenith-core = { path = "../zenith-core" }
-zenith-scene = { path = "../zenith-scene" }
+zenith-core = { workspace = true }
+zenith-scene = { workspace = true }
 jpeg-decoder = "0.3"
 miniz_oxide = "0.8"
 pdf-writer = "0.14"
@@ -16,7 +22,7 @@ ttf-parser = "0.25"
 resvg = "0.36"
 
 [dev-dependencies]
-zenith-layout = { path = "../zenith-layout" }
+zenith-layout = { workspace = true }
 tiny-skia = "0.11"
 
 [lints]

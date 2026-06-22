@@ -20,6 +20,7 @@ pub mod commands;
 pub mod history;
 pub mod json_types;
 pub mod library;
+pub mod selfupdate;
 
 use std::io::Write as _;
 use std::process::ExitCode;
@@ -714,6 +715,14 @@ pub fn run() -> ExitCode {
 
             ExitCode::from(outcome.exit_code)
         }
+
+        Command::Update(args) => match selfupdate::run(args.pre, args.version.as_deref()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(msg) => {
+                eprintln!("error: {msg}");
+                ExitCode::from(2)
+            }
+        },
     }
 }
 

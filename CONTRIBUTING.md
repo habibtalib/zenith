@@ -66,10 +66,10 @@ masks, a brand kit) that `zenith library add` materializes into a document. A pa
   self-contained;
 - it includes a stub `document { page … {} }` (the parser requires one; the resolver ignores it).
 
-`assets/libraries/zenith-flowchart.zen` is the canonical worked example.
+`zenith-cli/assets/libraries/zenith-flowchart.zen` is the canonical worked example.
 
 Resolution is deterministic: **project packs first, then embedded presets**, sorted by id. A
-project pack *shadows* an embedded preset of the same id. `library add` copies the chosen item
+project pack _shadows_ an embedded preset of the same id. `library add` copies the chosen item
 plus its dependencies (dedup by id, with a `library.dependency_conflict` warning on a clash) and
 records `libraries` + `provenance` entries in the target.
 
@@ -96,15 +96,15 @@ project directory. No rebuild is needed — project packs are read from disk.
 
 Built-in presets are embedded in the binary. To add one:
 
-1. Add `assets/libraries/<name>.zen` (the pack), following the format above and the existing
-   presets. Use a `@zenith/<name>` id.
-2. Register it in `EMBEDDED_PACKS` in `zenith-cli/src/library.rs` (an `include_str!` of your new
-   file), keeping the list ordered.
+1. Add `zenith-cli/assets/libraries/<name>.zen` (the pack), following the format above and the
+   existing presets. Use a `@zenith/<name>` id.
+2. Register it in `EMBEDDED_PACKS` in `zenith-cli/src/library/registry.rs` (an `include_str!` of
+   your new file), keeping the list ordered.
 3. Add a test that `resolve_packs(None)` exposes the new pack and that `library add` materializes
    one of its items cleanly (no diagnostics, ids namespaced).
 
 Keep preset assets redistributable and the dependency graph C-free; bundled fonts/images must
-carry a license that permits redistribution (see `assets/fonts/LICENSE.txt` for the Noto example).
+carry a license that permits redistribution (see `zenith-core/assets/fonts/LICENSE.txt` for the Noto example).
 
 ## Adding a Node Kind, Op, or Diagnostic
 
@@ -126,4 +126,4 @@ carry a license that permits redistribution (see `assets/fonts/LICENSE.txt` for 
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the repository's [MIT License](LICENSE).
+By contributing, you agree that your contributions are licensed under the repository's [Apache-2.0 License](LICENSE).

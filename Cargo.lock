@@ -1253,26 +1253,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
-name = "zenith-cli"
-version = "0.0.0"
-dependencies = [
- "clap",
- "csv",
- "imagesize",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "tiny-skia",
- "zenith-core",
- "zenith-layout",
- "zenith-render",
- "zenith-scene",
- "zenith-session",
- "zenith-tx",
-]
-
-[[package]]
 name = "zenith-core"
 version = "0.0.0"
 dependencies = [
@@ -1325,6 +1305,26 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+]
+
+[[package]]
+name = "zenith-tool"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "csv",
+ "imagesize",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tiny-skia",
+ "zenith-core",
+ "zenith-layout",
+ "zenith-render",
+ "zenith-scene",
+ "zenith-session",
+ "zenith-tx",
 ]
 
 [[package]]

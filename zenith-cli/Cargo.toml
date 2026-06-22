@@ -1,17 +1,36 @@
 [package]
-name = "zenith-cli"
+# Published to crates.io as `zenith-tool` (the plain `zenith`/`zenith-cli`
+# names are already taken by unrelated crates). The installed binary is still
+# `zenith`; the crate directory stays `zenith-cli`.
+name = "zenith-tool"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 publish.workspace = true
+description = "The Zenith command-line interface (the `zenith` binary) for the design-document toolchain."
+
+# The package publishes as `zenith-tool`, but the library target keeps the
+# `zenith_cli` name so `main.rs` and the integration tests import it unchanged.
+[lib]
+name = "zenith_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zenith"
+path = "src/main.rs"
 
 [dependencies]
-zenith-core = { path = "../zenith-core" }
-zenith-layout = { path = "../zenith-layout" }
-zenith-tx = { path = "../zenith-tx" }
-zenith-scene = { path = "../zenith-scene" }
-zenith-render = { path = "../zenith-render" }
-zenith-session = { path = "../zenith-session" }
+zenith-core = { workspace = true }
+zenith-layout = { workspace = true }
+zenith-tx = { workspace = true }
+zenith-scene = { workspace = true }
+zenith-render = { workspace = true }
+zenith-session = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

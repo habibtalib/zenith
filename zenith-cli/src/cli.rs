@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 /// Zenith — design-document toolchain.
 #[derive(Debug, Parser)]
-#[command(name = "zenith", about = "Zenith design-document toolchain")]
+#[command(name = "zenith", version, about = "Zenith design-document toolchain")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -59,6 +59,21 @@ pub enum Command {
     /// Capture the document's current on-disk state into history as an external
     /// change (e.g. after a GUI edit, hand-edit, or `git checkout`).
     Sync(SyncArgs),
+
+    /// Update the installed `zenith` binary to a published release.
+    Update(UpdateArgs),
+}
+
+/// Arguments for `zenith update`.
+#[derive(Debug, Args)]
+pub struct UpdateArgs {
+    /// Install the latest prerelease instead of the latest stable release.
+    #[arg(long)]
+    pub pre: bool,
+
+    /// Install a specific version (e.g. `v0.1.0` or `0.1.0`) instead of the latest.
+    #[arg(long, value_name = "VERSION")]
+    pub version: Option<String>,
 }
 
 /// Arguments for `zenith library`.

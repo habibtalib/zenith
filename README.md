@@ -17,7 +17,7 @@ Plain-text <strong>.zen</strong> design files that you can read, diff, review, v
 </p>
 
 <p>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
   <a href="https://doc.rust-lang.org/edition-guide/rust-2024/index.html"><img src="https://img.shields.io/badge/edition-2024-purple" alt="Edition 2024"></a>
   <img src="https://img.shields.io/badge/unsafe-forbidden-green" alt="Unsafe: forbidden">
   <img src="https://img.shields.io/badge/deps-C--free-green" alt="C-free dependencies">
@@ -199,7 +199,7 @@ zenith sync poster.zen                        # capture an out-of-band change (G
 There are two tiers. **Undo/redo** walk an ephemeral session timeline — fast, local, for
 in-progress work. **Named versions** are durable, content-addressed checkpoints (SHA-256 +
 DEFLATE) retained until you remove them; `restore` can jump to any of them. `sync` is how an edit
-made *outside* the engine gets folded back in so the history stays complete. History recording is
+made _outside_ the engine gets folded back in so the history stays complete. History recording is
 best-effort: if it can't write, your file still saves — the edit is never blocked.
 
 ## Works in your repo
@@ -221,6 +221,64 @@ It is the place for reusable Zenith examples: `.zen` source, rendered outputs, v
 
 Only put files in the showcase if you have the rights to share them and you allow others to reuse the submitted source, outputs, and assets under the declared license. Private, client, portfolio-only, or custom-licensed work should be linked from the showcase's external gallery instead; licensing for external work stays with the owner.
 
+## Install
+
+> Releases are published from version tags. Until the first `vX.Y.Z` tag is cut, the commands below have nothing to download yet — see [Status](#status).
+
+### Install script
+
+The recommended way to install the `zenith` CLI is the install script, which detects your platform and downloads the matching prebuilt binary from GitHub Releases.
+
+**Linux / macOS**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.ps1 | iex
+```
+
+Set `ZENITH_INSTALL_DIR` to change the install location (default `~/.local/bin`):
+
+```bash
+ZENITH_INSTALL_DIR=/usr/local/bin \
+  curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh
+```
+
+### With cargo
+
+```bash
+cargo install zenith-tool    # from crates.io (installs the `zenith` binary)
+cargo install --git https://github.com/farhan-syah/zenith zenith-tool   # from source
+```
+
+The library crates (`zenith-core`, `zenith-layout`, `zenith-scene`, `zenith-render`, `zenith-tx`, `zenith-session`) are published under their own names for Rust projects that want to build on the engine directly.
+
+### Prebuilt binaries
+
+Download directly from [GitHub Releases](https://github.com/farhan-syah/zenith/releases):
+
+| Platform | Architecture  | Asset                                 |
+| :------- | :------------ | :------------------------------------ |
+| Linux    | x86_64        | `zenith-<version>-linux-x64.tar.gz`   |
+| Linux    | aarch64       | `zenith-<version>-linux-arm64.tar.gz` |
+| macOS    | x86_64        | `zenith-<version>-macos-x64.tar.gz`   |
+| macOS    | Apple Silicon | `zenith-<version>-macos-arm64.tar.gz` |
+| Windows  | x86_64        | `zenith-<version>-windows-x64.zip`    |
+
+### Update
+
+```bash
+zenith update                   # latest stable release
+zenith update --pre             # latest prerelease
+zenith update --version <tag>   # a specific release tag, e.g. the ones on the Releases page
+```
+
+Verify with `zenith --version`.
+
 ## Status
 
 🚧 **Early, pre-`0.1`.** The author → validate → edit → render pipeline works end-to-end: parsing, the diagnostic set, the transaction engine, PNG/PDF rendering, local history, the library subsystem, and variable-data merge are all implemented and tested. The format, wire types, and command surface may still change before `0.1`. Nothing here is stable yet, and there's no published build to download.
@@ -231,6 +289,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how to work on the engine, and [AGENT
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
-</content>
-</invoke>
+Apache-2.0. See [LICENSE](LICENSE).

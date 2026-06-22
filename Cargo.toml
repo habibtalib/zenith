@@ -13,8 +13,25 @@ members = [
 [workspace.package]
 version = "0.0.0"
 edition = "2024"
-license = "MIT"
-publish = false
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/farhan-syah/zenith"
+homepage = "https://github.com/farhan-syah/zenith"
+description = "Zenith — a deterministic, agent-native design-document format and engine."
+keywords = ["design", "deterministic", "kdl", "rendering", "agent"]
+categories = ["rendering", "command-line-utilities", "visualization"]
+publish = true
+
+# Internal crates are referenced through the workspace so a single version is
+# stamped at release time (see .github/workflows/release.yml). The `version`
+# requirement is what ships to crates.io; the `path` is used for local builds.
+[workspace.dependencies]
+zenith-core = { version = "0.0.0", path = "zenith-core" }
+zenith-layout = { version = "0.0.0", path = "zenith-layout" }
+zenith-scene = { version = "0.0.0", path = "zenith-scene" }
+zenith-render = { version = "0.0.0", path = "zenith-render" }
+zenith-tx = { version = "0.0.0", path = "zenith-tx" }
+zenith-session = { version = "0.0.0", path = "zenith-session" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
