@@ -104,3 +104,26 @@ pub struct MergeOutput {
     pub failed: usize,
     pub rows: Vec<MergeRowResult>,
 }
+
+/// One row entry in the generation manifest (successful rows only).
+#[derive(Debug, Serialize)]
+pub struct ManifestRow {
+    pub row: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub outputs: Vec<String>,
+}
+
+/// Deterministic generation manifest for `zenith merge --manifest`.
+#[derive(Debug, Serialize)]
+pub struct MergeManifest {
+    pub schema: &'static str,
+    /// Manifest format version. Bumped only when the manifest structure changes
+    /// (never on a routine crate release), so identical inputs stay byte-identical.
+    pub generator: &'static str,
+    pub source_sha256: String,
+    pub data_sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_by: Option<String>,
+    pub rows: Vec<ManifestRow>,
+}

@@ -208,6 +208,11 @@ pub struct MergeArgs {
     /// Emit a machine-readable JSON batch report (per-row provenance).
     #[arg(long)]
     pub json: bool,
+
+    /// Write a deterministic generation manifest (JSON) to this path for CI
+    /// reproducibility. Independent of --json.
+    #[arg(long, value_name = "PATH")]
+    pub manifest: Option<PathBuf>,
 }
 
 /// Arguments for `zenith render`.

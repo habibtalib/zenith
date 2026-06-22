@@ -727,6 +727,45 @@ fn page_filename(stem: &str, page_index: usize, page_count: usize) -> String {
     }
 }
 
+/// Build a deterministic generation manifest from the merge inputs and report.
+/// Inputs are hashed as bytes; NO timestamps, absolute paths, or crate version
+/// are embedded, so identical inputs yield a byte-identical manifest. Only
+/// successfully-written rows are included (failed rows produced no output and
+/// their messages may vary across runs).
+pub fn build_manifest(
+    doc_src: &str,
+    csv_src: &str,
+    name_by: Option<&str>,
+    report: &MergeReport,
+) -> crate::json_types::MergeManifest {
+    use sha2::{Digest, Sha256};
+    // Format version of the manifest schema itself. Bump ONLY when the manifest
+    // structure changes — never on a routine crate release (that would break
+    // CI byte-identical comparison).
+    const MANIFEST_FORMAT_VERSION: &str = "1";
+
+    let source_sha256 = format!("{:x}", Sha256::digest(doc_src.as_bytes()));
+    let data_sha256 = format!("{:x}", Sha256::digest(csv_src.as_bytes()));
+    let rows = report
+        .rows
+        .iter()
+        .filter(|r| r.failure.is_none())
+        .map(|r| crate::json_types::ManifestRow {
+            row: r.row,
+            key: r.key.clone(),
+            outputs: r.outputs.clone(),
+        })
+        .collect();
+    crate::json_types::MergeManifest {
+        schema: "zenith-merge-manifest-v1",
+        generator: MANIFEST_FORMAT_VERSION,
+        source_sha256,
+        data_sha256,
+        name_by: name_by.map(str::to_owned),
+        rows,
+    }
+}
+
 /// Convert a completed [`MergeReport`] into the JSON-serialisable envelope.
 pub fn to_json_output(report: &MergeReport) -> MergeOutput {
     let n_written = report.rows.iter().filter(|r| r.failure.is_none()).count();

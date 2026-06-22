@@ -710,3 +710,129 @@ fn json_batch_report_mixed_run() {
         "row 1 page 1 must not have been written"
     );
 }
+
+// ── (l) Generation manifest — deterministic and structurally correct ──────────
+
+/// Build the manifest twice from the same inputs and assert field-by-field
+/// equality (reproducibility), correct sha256 format, correct structural
+/// fields, and that only successful rows appear.
+///
+/// Note: `serde_json` and `sha2` are direct dependencies of zenith-cli but are
+/// not listed as dev-dependencies for the integration test crate, so they are
+/// not in scope here.  We verify reproducibility by field-equality of two
+/// independently-built manifests and hash format (64 lowercase hex chars)
+/// rather than by re-computing the hash independently.
+#[test]
+fn manifest_is_deterministic_and_correct() {
+    let csv = "name,title\nAlice,Engineer\nBob,Designer\n";
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let report =
+        merge_run(TEMPLATE_DOC, csv, None, tmp.path(), Some("name")).expect("merge must succeed");
+
+    // Build twice — all fields must match (reproducibility).
+    let m1 = zenith_cli::commands::merge::build_manifest(TEMPLATE_DOC, csv, Some("name"), &report);
+    let m2 = zenith_cli::commands::merge::build_manifest(TEMPLATE_DOC, csv, Some("name"), &report);
+
+    assert_eq!(
+        m1.source_sha256, m2.source_sha256,
+        "source_sha256 must be identical across two calls with the same input"
+    );
+    assert_eq!(
+        m1.data_sha256, m2.data_sha256,
+        "data_sha256 must be identical across two calls with the same input"
+    );
+    assert_eq!(m1.schema, m2.schema);
+    assert_eq!(m1.generator, m2.generator);
+    assert_eq!(m1.name_by, m2.name_by);
+    assert_eq!(m1.rows.len(), m2.rows.len());
+
+    // Hashes must be 64-char lowercase hex (SHA-256 output).
+    assert_eq!(
+        m1.source_sha256.len(),
+        64,
+        "source_sha256 must be a 64-char hex string"
+    );
+    assert!(
+        m1.source_sha256
+            .chars()
+            .all(|c| matches!(c, '0'..='9' | 'a'..='f')),
+        "source_sha256 must be lowercase hex; got: {}",
+        m1.source_sha256
+    );
+    assert_eq!(
+        m1.data_sha256.len(),
+        64,
+        "data_sha256 must be a 64-char hex string"
+    );
+    assert!(
+        m1.data_sha256
+            .chars()
+            .all(|c| matches!(c, '0'..='9' | 'a'..='f')),
+        "data_sha256 must be lowercase hex; got: {}",
+        m1.data_sha256
+    );
+
+    // Different inputs must produce different hashes.
+    let m_other = zenith_cli::commands::merge::build_manifest(
+        TEMPLATE_DOC,
+        "name,title\nCarol,PM\n",
+        Some("name"),
+        &report,
+    );
+    assert_ne!(
+        m1.data_sha256, m_other.data_sha256,
+        "different CSV inputs must produce different data_sha256"
+    );
+
+    // Schema and name_by.
+    assert_eq!(m1.schema, "zenith-merge-manifest-v1");
+    assert_eq!(m1.name_by, Some("name".to_owned()));
+
+    // Only successful rows are included (both rows succeed here).
+    assert_eq!(m1.rows.len(), 2, "both rows must appear in the manifest");
+
+    // Row 0: key == "Alice", outputs == ["Alice.png"].
+    assert_eq!(m1.rows[0].row, 0);
+    assert_eq!(m1.rows[0].key.as_deref(), Some("Alice"));
+    assert_eq!(m1.rows[0].outputs, vec!["Alice.png"]);
+
+    // Row 1: key == "Bob", outputs == ["Bob.png"].
+    assert_eq!(m1.rows[1].row, 1);
+    assert_eq!(m1.rows[1].key.as_deref(), Some("Bob"));
+    assert_eq!(m1.rows[1].outputs, vec!["Bob.png"]);
+
+    // A failed row must NOT appear in the manifest.
+    // Use the mixed-result template to produce one failure.
+    let csv_mixed =
+        "name\nalice\nThe quick brown fox jumps over the lazy dog and keeps on going forever\n";
+    let tmp2 = tempfile::TempDir::new().expect("tempdir2");
+    let report_mixed = merge_run(
+        TWO_PAGE_OVERFLOW_FIT_TEMPLATE,
+        csv_mixed,
+        None,
+        tmp2.path(),
+        None,
+    )
+    .expect("merge run must not error");
+    assert_eq!(
+        report_mixed.failed().len(),
+        1,
+        "sanity: one row must fail in the mixed run"
+    );
+    let m_mixed = zenith_cli::commands::merge::build_manifest(
+        TWO_PAGE_OVERFLOW_FIT_TEMPLATE,
+        csv_mixed,
+        None,
+        &report_mixed,
+    );
+    assert_eq!(
+        m_mixed.rows.len(),
+        1,
+        "only the successful row must appear in the manifest"
+    );
+    assert_eq!(m_mixed.rows[0].row, 0, "the successful row must be row 0");
+    assert_eq!(
+        m_mixed.name_by, None,
+        "name_by must be None when not supplied"
+    );
+}

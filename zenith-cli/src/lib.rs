@@ -411,6 +411,34 @@ pub fn run() -> ExitCode {
                             eprintln!("row {}: {}", r.row + 1, r.failure.as_deref().unwrap_or(""));
                         }
                     }
+                    if let Some(manifest_path) = &args.manifest {
+                        let manifest = commands::merge::build_manifest(
+                            &doc_src,
+                            &csv_src,
+                            args.name_by.as_deref(),
+                            &report,
+                        );
+                        let manifest_json = serialize_pretty(&manifest);
+                        if let Some(parent) = manifest_path.parent()
+                            && !parent.as_os_str().is_empty()
+                            && let Err(e) = std::fs::create_dir_all(parent)
+                        {
+                            eprintln!(
+                                "error creating manifest directory '{}': {}",
+                                parent.display(),
+                                e
+                            );
+                            return ExitCode::from(2);
+                        }
+                        if let Err(e) = std::fs::write(manifest_path, manifest_json.as_bytes()) {
+                            eprintln!(
+                                "error writing manifest '{}': {}",
+                                manifest_path.display(),
+                                e
+                            );
+                            return ExitCode::from(2);
+                        }
+                    }
                     let n_failed = report.rows.iter().filter(|r| r.failure.is_some()).count();
                     if n_failed == 0 {
                         ExitCode::SUCCESS
