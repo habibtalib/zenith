@@ -61,6 +61,46 @@ fn valid_recipes_block_is_clean() {
     );
 }
 
+// ── Recipe palette references count as token usage ───────────────────────────
+
+/// A color token referenced ONLY by a recipe `palette` (and by no node visual
+/// property or style) must NOT be flagged `token.unused` — the palette is a real
+/// token reference.
+#[test]
+fn palette_reference_counts_as_token_usage() {
+    let src = r##"zenith version=1 {
+  project id="proj.use" name="USE"
+  tokens format="zenith-token-v1" {
+    token id="color.only.palette" type="color" value="#abcdef"
+  }
+  styles {
+  }
+  recipes {
+    recipe id="recipe.p" kind="aurora" {
+      palette token="color.only.palette"
+    }
+  }
+  document id="doc.use" title="USE" {
+    page id="page.use" w=(px)400 h=(px)300 {
+      rect id="r" x=(px)0 y=(px)0 w=(px)50 h=(px)50
+    }
+  }
+}
+"##;
+    let report = parse_and_validate(src);
+    let unused: Vec<&str> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "token.unused")
+        .map(|d| d.message.as_str())
+        .collect();
+    assert!(
+        unused.is_empty(),
+        "a token referenced only by a recipe palette must not be token.unused; got {:?}",
+        unused
+    );
+}
+
 /// A recipe whose `bounds` names a real node id (not a page id) must also be
 /// clean — bounds may reference any page or node id.
 #[test]

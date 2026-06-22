@@ -710,6 +710,15 @@ pub fn validate(doc: &Document) -> ValidationReport {
         }
     }
 
+    // A recipe `palette` entry is a token reference too (the generator recolors
+    // through it), so count palette ids as usage — a token used only by a recipe
+    // palette must not be flagged `token.unused`.
+    for recipe in &doc.recipes {
+        for token_id in &recipe.palette {
+            referenced_token_ids.insert(token_id.clone());
+        }
+    }
+
     // ── Step 3: unused token check ────────────────────────────────────────
     // Every token id that appears in `doc.tokens` but is not in
     // `referenced_token_ids` → advisory `token.unused`.
