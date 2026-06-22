@@ -6,6 +6,7 @@ pub mod document;
 pub mod library;
 pub mod node;
 pub mod provenance;
+pub mod recipe;
 pub mod span;
 pub mod style;
 pub mod token;
@@ -27,6 +28,7 @@ pub use node::{
     TextSpan, TocNode, UnknownNode, UnknownProperty, UnknownValue, anchor_xy, parse_anchor,
 };
 pub use provenance::ProvenanceDef;
+pub use recipe::{RecipeDef, RecipeParam};
 pub use span::Span;
 pub use style::{
     STYLE_RECOGNIZED_KEYS, Style, StyleBlock, UnknownStyleProp, canonicalize_style_key,

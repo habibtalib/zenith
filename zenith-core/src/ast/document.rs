@@ -6,6 +6,7 @@ use super::asset::AssetBlock;
 use super::library::LibraryDef;
 use super::node::Node;
 use super::provenance::ProvenanceDef;
+use super::recipe::RecipeDef;
 use super::style::StyleBlock;
 use super::token::TokenBlock;
 use super::value::Dimension;
@@ -318,6 +319,12 @@ pub struct Document {
     /// round-trips and validates these records but does NOT generate output for
     /// them in unit V-1; generation is a later unit.
     pub variants: Vec<VariantDef>,
+    /// Recipe declarations; empty when the `recipes` block is absent. Each
+    /// entry declares a named generative recipe (`id`, `kind`, optional
+    /// `seed`/`generator`/`bounds`/`detached`, optional `param`/`palette`/
+    /// `expanded` children). The engine round-trips and validates these records
+    /// but does NOT act on them in unit RC-1; expansion is a later unit.
+    pub recipes: Vec<RecipeDef>,
     pub body: DocumentBody,
 }
 
@@ -446,6 +453,7 @@ mod parity_tests {
             sections: Vec::new(),
             provenance: Vec::new(),
             variants: Vec::new(),
+            recipes: Vec::new(),
             body: DocumentBody {
                 id: "body".to_owned(),
                 title: None,

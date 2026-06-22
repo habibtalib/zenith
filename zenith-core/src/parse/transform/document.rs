@@ -14,6 +14,7 @@ use crate::ast::{
     library::LibraryDef,
     node::Node,
     provenance::ProvenanceDef,
+    recipe::{RecipeDef, RecipeParam},
     style::StyleBlock,
     token::TokenBlock,
     variant::{VariantDef, VariantOverride},
@@ -121,6 +122,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     let mut sections: Vec<SectionDef> = Vec::new();
     let mut provenance: Vec<ProvenanceDef> = Vec::new();
     let mut variants: Vec<VariantDef> = Vec::new();
+    let mut recipes: Vec<RecipeDef> = Vec::new();
     let mut body: Option<DocumentBody> = None;
 
     for child in children_doc.nodes() {
@@ -157,6 +159,9 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
             }
             "variants" => {
                 variants = transform_variants(child)?;
+            }
+            "recipes" => {
+                recipes = transform_recipes(child)?;
             }
             "document" => {
                 body = Some(transform_document_body(child)?);
@@ -198,6 +203,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
         sections,
         provenance,
         variants,
+        recipes,
         body,
     })
 }
@@ -508,6 +514,108 @@ fn transform_variant_override(node: &KdlNode) -> Result<VariantOverride, ParseEr
         visible,
         text,
         fill,
+        source_span,
+        unknown_props,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Recipes
+// ---------------------------------------------------------------------------
+
+const RECIPE_KNOWN_PROPS: &[&str] = &["id", "kind", "seed", "generator", "bounds", "detached"];
+const RECIPE_PARAM_KNOWN_PROPS: &[&str] = &["name", "value"];
+
+/// Transform the document-level `recipes { … }` block into a list of
+/// [`RecipeDef`]. Each `recipe id="…" kind="…" …` is a block node; non-`recipe`
+/// children inside the block are silently ignored (forward-compat). Mirrors
+/// [`transform_variants`].
+fn transform_recipes(node: &KdlNode) -> Result<Vec<RecipeDef>, ParseError> {
+    let mut defs: Vec<RecipeDef> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "recipe" {
+                defs.push(transform_recipe_def(child)?);
+            }
+        }
+    }
+    Ok(defs)
+}
+
+fn transform_recipe_def(node: &KdlNode) -> Result<RecipeDef, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+    let kind = required_string_prop(node, "kind")?.to_owned();
+
+    // Optional integer seed: read KdlValue::Integer directly as i64 (not u32,
+    // since negative seeds are valid). Non-integer or absent values yield None.
+    let seed = node.get("seed").and_then(|v| {
+        if let KdlValue::Integer(n) = v {
+            i64::try_from(*n).ok()
+        } else {
+            None
+        }
+    });
+
+    let generator = optional_string_prop(node, "generator").map(str::to_owned);
+    let bounds = optional_string_prop(node, "bounds").map(str::to_owned);
+    let detached = optional_bool_prop(node, "detached");
+
+    let unknown_props = collect_unknown_props(node, RECIPE_KNOWN_PROPS);
+    let source_span = node_span(node);
+
+    let mut params: Vec<RecipeParam> = Vec::new();
+    let mut palette: Vec<String> = Vec::new();
+    let mut expanded: Vec<String> = Vec::new();
+
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            match child.name().value() {
+                "param" => {
+                    params.push(transform_recipe_param(child)?);
+                }
+                "palette" => {
+                    palette.push(required_string_prop(child, "token")?.to_owned());
+                }
+                "expanded" => {
+                    expanded.push(required_string_prop(child, "node")?.to_owned());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(RecipeDef {
+        id,
+        kind,
+        seed,
+        generator,
+        bounds,
+        detached,
+        params,
+        palette,
+        expanded,
+        source_span,
+        unknown_props,
+    })
+}
+
+fn transform_recipe_param(node: &KdlNode) -> Result<RecipeParam, ParseError> {
+    let name = required_string_prop(node, "name")?.to_owned();
+    let value = node
+        .entry("value")
+        .ok_or_else(|| {
+            ParseError::spanless(
+                ParseErrorCode::InvalidPropertyValue,
+                format!("recipe `param` `{name}` is missing required property `value`"),
+            )
+        })
+        .and_then(entry_to_property_value)?;
+    let unknown_props = collect_unknown_props(node, RECIPE_PARAM_KNOWN_PROPS);
+    let source_span = node_span(node);
+
+    Ok(RecipeParam {
+        name,
+        value,
         source_span,
         unknown_props,
     })

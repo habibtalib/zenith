@@ -6,7 +6,7 @@
 //! Rules (from doc 08 and doc 16):
 //! - Two-space indentation per nesting level.
 //! - Root `zenith` node at column 0.
-//! - Child order under `zenith`: project, assets, libraries, tokens, styles, components, masters, sections, provenance, variants, actions, document.
+//! - Child order under `zenith`: project, assets, libraries, tokens, styles, components, masters, sections, provenance, variants, recipes, actions, document.
 //! - Structural containers (`tokens`, `styles`, `document`, `page`) always emit
 //!   a brace block, even when empty.
 //! - Leaf nodes (`project`, a `rect` with no children) emit a single line.
@@ -31,8 +31,8 @@ use std::fmt::Write as _;
 
 use crate::ast::{
     ActionDef, AssetBlock, AssetDecl, ComponentDef, Dimension, Document, LibraryDef, MasterDef,
-    ObjectPosition, Project, PropertyValue, ProvenanceDef, SectionDef, Unit, UnknownProperty,
-    UnknownValue, VariantDef,
+    ObjectPosition, Project, PropertyValue, ProvenanceDef, RecipeDef, RecipeParam, SectionDef,
+    Unit, UnknownProperty, UnknownValue, VariantDef,
 };
 use crate::error::FormatError;
 
@@ -275,7 +275,7 @@ fn write_document(doc: &Document, out: &mut String) {
     write_opt_str(out, "page-parity-start", &doc.page_parity_start);
     out.push_str(" {\n");
 
-    // Child order: project, assets, libraries, tokens, styles, components, masters, sections, provenance, variants, actions, document.
+    // Child order: project, assets, libraries, tokens, styles, components, masters, sections, provenance, variants, recipes, actions, document.
     if let Some(proj) = &doc.project {
         write_project(proj, out, 1);
     }
@@ -288,6 +288,7 @@ fn write_document(doc: &Document, out: &mut String) {
     write_section_block(&doc.sections, out, 1);
     write_provenance_block(&doc.provenance, out, 1);
     write_variants_block(&doc.variants, out, 1);
+    write_recipes_block(&doc.recipes, out, 1);
     write_action_block(&doc.actions, out, 1);
     write_document_body(&doc.body, out, 1);
 
@@ -636,6 +637,102 @@ fn write_variants_block(variants: &[VariantDef], out: &mut String, depth: usize)
     }
     indent(out, depth);
     out.push_str("}\n");
+}
+
+// ---------------------------------------------------------------------------
+// Recipes
+// ---------------------------------------------------------------------------
+
+/// Emit the `recipes { … }` block.
+///
+/// Stable position: after `variants`, before `actions`. Emitted ONLY when at
+/// least one recipe is declared, so documents without recipes keep their
+/// existing canonical form (and round-trip) unchanged. Each recipe emits:
+///
+/// ```text
+/// recipe id="…" kind="…" seed=N generator="…" bounds="…" detached=#false {
+///   param name="…" value=…
+///   palette token="…"
+///   expanded node="…"
+/// }
+/// ```
+///
+/// Optional props (`seed`, `generator`, `bounds`, `detached`) are omitted when
+/// `None`. Unknown props follow known ones in BTreeMap key order. Free-form
+/// string fields (`generator`, `bounds`) pass through the same `escape_kdl_string`
+/// guard as `variants` uses for `text`. Mirrors [`write_variants_block`].
+fn write_recipes_block(recipes: &[RecipeDef], out: &mut String, depth: usize) {
+    if recipes.is_empty() {
+        return;
+    }
+    indent(out, depth);
+    out.push_str("recipes {\n");
+    for def in recipes {
+        indent(out, depth + 1);
+        out.push_str("recipe id=\"");
+        out.push_str(&def.id);
+        out.push_str("\" kind=\"");
+        out.push_str(&escape_kdl_string(&def.kind));
+        out.push('"');
+        if let Some(seed) = def.seed {
+            out.push_str(" seed=");
+            let _ = write!(out, "{seed}");
+        }
+        if let Some(generator) = &def.generator {
+            out.push_str(" generator=\"");
+            out.push_str(&escape_kdl_string(generator));
+            out.push('"');
+        }
+        if let Some(bounds) = &def.bounds {
+            out.push_str(" bounds=\"");
+            out.push_str(&escape_kdl_string(bounds));
+            out.push('"');
+        }
+        write_opt_bool(out, "detached", &def.detached);
+        // Unknown props on the recipe node itself, in sorted key order.
+        for (key, prop) in &def.unknown_props {
+            out.push(' ');
+            out.push_str(key);
+            out.push('=');
+            out.push_str(&fmt_unknown_property(prop));
+        }
+        out.push_str(" {\n");
+        for param in &def.params {
+            write_recipe_param(param, out, depth + 2);
+        }
+        for token_id in &def.palette {
+            indent(out, depth + 2);
+            out.push_str("palette token=\"");
+            out.push_str(token_id);
+            out.push_str("\"\n");
+        }
+        for node_id in &def.expanded {
+            indent(out, depth + 2);
+            out.push_str("expanded node=\"");
+            out.push_str(node_id);
+            out.push_str("\"\n");
+        }
+        indent(out, depth + 1);
+        out.push_str("}\n");
+    }
+    indent(out, depth);
+    out.push_str("}\n");
+}
+
+fn write_recipe_param(param: &RecipeParam, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("param name=\"");
+    out.push_str(&param.name);
+    out.push_str("\" value=");
+    out.push_str(&fmt_property_value(&param.value));
+    // Unknown props on the param node, in sorted key order.
+    for (key, prop) in &param.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_property(prop));
+    }
+    out.push('\n');
 }
 
 // ---------------------------------------------------------------------------
