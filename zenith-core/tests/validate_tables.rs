@@ -1,9 +1,14 @@
-//! `table` validation tests (moved verbatim from the former single-file
-//! `validate/check/tests.rs`; test bodies unchanged).
+//! Integration tests: tables validation.
+//!
+//! Test bodies moved verbatim from the former in-`src` `validate/check/tests/`
+//! concern files; only import paths changed (`crate::`/`super::common` ->
+//! `zenith_core::`/`common`).
 
 use std::collections::BTreeMap;
 
-use super::common::*;
+mod common;
+
+use common::*;
 
 // ── Table validation ──────────────────────────────────────────────────
 
@@ -221,8 +226,8 @@ fn table_cell_unknown_property_warns() {
     let mut unknown_props = BTreeMap::new();
     unknown_props.insert(
         "future-cell-prop".to_owned(),
-        crate::ast::node::UnknownProperty {
-            value: crate::ast::node::UnknownValue::String("yes".to_owned()),
+        zenith_core::UnknownProperty {
+            value: zenith_core::UnknownValue::String("yes".to_owned()),
             ty: None,
         },
     );
@@ -265,8 +270,8 @@ fn table_row_unknown_property_warns() {
     let mut row_unknown_props = BTreeMap::new();
     row_unknown_props.insert(
         "future-row-prop".to_owned(),
-        crate::ast::node::UnknownProperty {
-            value: crate::ast::node::UnknownValue::Integer(7),
+        zenith_core::UnknownProperty {
+            value: zenith_core::UnknownValue::Integer(7),
             ty: None,
         },
     );
@@ -292,8 +297,8 @@ fn table_column_unknown_property_warns() {
     let mut col_unknown_props = BTreeMap::new();
     col_unknown_props.insert(
         "future-col-prop".to_owned(),
-        crate::ast::node::UnknownProperty {
-            value: crate::ast::node::UnknownValue::Bool(true),
+        zenith_core::UnknownProperty {
+            value: zenith_core::UnknownValue::Bool(true),
             ty: None,
         },
     );

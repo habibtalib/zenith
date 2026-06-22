@@ -1,9 +1,14 @@
-//! `nodes_basic` validation tests (moved verbatim from the former single-file
-//! `validate/check/tests.rs`; test bodies unchanged).
+//! Integration tests: nodes validation.
+//!
+//! Test bodies moved verbatim from the former in-`src` `validate/check/tests/`
+//! concern files; only import paths changed (`crate::`/`super::common` ->
+//! `zenith_core::`/`common`).
 
 use std::collections::BTreeMap;
 
-use super::common::*;
+mod common;
+
+use common::*;
 
 // ── Test 1: clean minimal doc has no errors ───────────────────────────
 
@@ -491,8 +496,8 @@ fn unknown_property_on_rect_produces_warning() {
     let mut unknown_props = BTreeMap::new();
     unknown_props.insert(
         "magic-glow".to_owned(),
-        crate::ast::node::UnknownProperty {
-            value: crate::ast::node::UnknownValue::String("true".to_owned()),
+        zenith_core::UnknownProperty {
+            value: zenith_core::UnknownValue::String("true".to_owned()),
             ty: None,
         },
     );

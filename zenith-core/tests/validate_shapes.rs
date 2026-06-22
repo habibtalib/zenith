@@ -1,9 +1,14 @@
-//! `polygon_connector` validation tests (moved verbatim from the former single-file
-//! `validate/check/tests.rs`; test bodies unchanged).
+//! Integration tests: shapes validation.
+//!
+//! Test bodies moved verbatim from the former in-`src` `validate/check/tests/`
+//! concern files; only import paths changed (`crate::`/`super::common` ->
+//! `zenith_core::`/`common`).
 
 use std::collections::BTreeMap;
 
-use super::common::*;
+mod common;
+
+use common::*;
 
 // ══════════════════════════════════════════════════════════════════════
 // Polygon / Polyline validation tests

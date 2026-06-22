@@ -1,9 +1,14 @@
-//! `contrast` validation tests (moved verbatim from the former single-file
-//! `validate/check/tests.rs`; test bodies unchanged).
+//! Integration tests: contrast validation.
+//!
+//! Test bodies moved verbatim from the former in-`src` `validate/check/tests/`
+//! concern files; only import paths changed (`crate::`/`super::common` ->
+//! `zenith_core::`/`common`).
 
 use std::collections::BTreeMap;
 
-use super::common::*;
+mod common;
+
+use common::*;
 
 // ══════════════════════════════════════════════════════════════════════
 // WCAG 2.2 contrast advisory tests
@@ -62,7 +67,7 @@ fn text_with_fill_and_size(
     font_size_token: Option<&str>,
     font_weight_token: Option<&str>,
 ) -> Node {
-    Node::Text(Box::new(crate::ast::node::TextNode {
+    Node::Text(Box::new(zenith_core::TextNode {
         shadow: None,
         filter: None,
         mask: None,
@@ -278,7 +283,7 @@ fn no_page_background_skips_contrast_check() {
 
 /// Build a text node with an explicit fill token AND a `contrast-bg` hint token.
 fn text_with_fill_and_contrast_bg(id: &str, fill_token: &str, contrast_bg_token: &str) -> Node {
-    Node::Text(Box::new(crate::ast::node::TextNode {
+    Node::Text(Box::new(zenith_core::TextNode {
         shadow: None,
         filter: None,
         mask: None,

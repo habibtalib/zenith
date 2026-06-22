@@ -1,35 +1,33 @@
-//! Shared builder helpers for the `validate/check` test suite.
+//! Shared builder helpers for the `validate` integration test suite.
 //!
-//! Moved verbatim from the former single-file `validate/check/tests.rs`; the
-//! body of every builder is unchanged. Tests live in sibling submodules and
-//! pull these in via `use super::common::*;`. The AST/diagnostic types the test
-//! bodies construct are re-exported here so a single glob import suffices.
+//! Moved verbatim from the former in-`src` `validate/check/tests/common.rs`; the
+//! body of every builder is unchanged. The AST/diagnostic types the test bodies
+//! construct are re-exported here (via the crate's public surface) so a single
+//! glob import suffices in each test binary.
+//!
+//! `tests/common/mod.rs` is compiled into EVERY integration-test binary, but
+//! each binary only exercises a subset of these helpers — so the unused ones
+//! trip `dead_code`/`unused_imports` in the binaries that don't call them. This
+//! is the canonical shared-test-helper situation (see the Rust book, "Submodules
+//! in Integration Tests"): the per-binary false positives are suppressed here.
+#![allow(dead_code, unused_imports)]
 
 use std::collections::BTreeMap;
 
-pub(super) use crate::ast::action::ActionDef;
-pub(super) use crate::ast::asset::{AssetBlock, AssetDecl, AssetKind};
-pub(super) use crate::ast::document::{
-    Document, DocumentBody, Fold, MasterDef, Page, SafeZone, SafeZoneType, SectionDef,
+pub use zenith_core::ast::document::Fold;
+pub use zenith_core::{
+    ActionDef, AssetBlock, AssetDecl, AssetKind, CodeNode, ConnectorNode, Dimension, Document,
+    DocumentBody, EllipseNode, FieldNode, FrameNode, GroupNode, ImageNode, LibraryDef, LineNode,
+    MasterDef, Node, Page, Point, PolygonNode, PolylineNode, PropertyValue, ProvenanceDef,
+    RectNode, SafeZone, SafeZoneType, SectionDef, Severity, ShapeNode, Style, StyleBlock,
+    TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan, TocNode, Token, TokenBlock,
+    TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownStyleProp, ValidationReport,
+    validate,
 };
-pub(super) use crate::ast::library::LibraryDef;
-pub(super) use crate::ast::node::ImageNode;
-pub(super) use crate::ast::node::{
-    CodeNode, ConnectorNode, EllipseNode, FieldNode, FrameNode, GroupNode, LineNode, Node, Point,
-    PolygonNode, PolylineNode, RectNode, ShapeNode, TableCell, TableColumn, TableNode, TableRow,
-    TextNode, TextSpan, TocNode, UnknownNode,
-};
-pub(super) use crate::ast::provenance::ProvenanceDef;
-pub(super) use crate::ast::style::{Style, StyleBlock, UnknownStyleProp};
-pub(super) use crate::ast::token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue};
-pub(super) use crate::ast::value::{Dimension, PropertyValue, Unit};
-pub(super) use crate::diagnostics::Severity;
-pub(super) use crate::validate::check::ValidationReport;
-pub(super) use crate::validate::validate;
 
 // ── Builder helpers ────────────────────────────────────────────────────────
 
-pub(super) fn color_token(id: &str) -> Token {
+pub fn color_token(id: &str) -> Token {
     Token {
         id: id.to_owned(),
         token_type: TokenType::Color,
@@ -38,7 +36,7 @@ pub(super) fn color_token(id: &str) -> Token {
     }
 }
 
-pub(super) fn dim_token(id: &str) -> Token {
+pub fn dim_token(id: &str) -> Token {
     Token {
         id: id.to_owned(),
         token_type: TokenType::Dimension,
@@ -50,7 +48,7 @@ pub(super) fn dim_token(id: &str) -> Token {
     }
 }
 
-pub(super) fn font_family_token(id: &str) -> Token {
+pub fn font_family_token(id: &str) -> Token {
     Token {
         id: id.to_owned(),
         token_type: TokenType::FontFamily,
@@ -59,18 +57,18 @@ pub(super) fn font_family_token(id: &str) -> Token {
     }
 }
 
-pub(super) fn px(v: f64) -> Dimension {
+pub fn px(v: f64) -> Dimension {
     Dimension {
         value: v,
         unit: Unit::Px,
     }
 }
 
-pub(super) fn token_ref(id: &str) -> PropertyValue {
+pub fn token_ref(id: &str) -> PropertyValue {
     PropertyValue::TokenRef(id.to_owned())
 }
 
-pub(super) fn minimal_rect(id: &str, fill: Option<PropertyValue>) -> Node {
+pub fn minimal_rect(id: &str, fill: Option<PropertyValue>) -> Node {
     Node::Rect(Box::new(RectNode {
         shadow: None,
         filter: None,
@@ -115,7 +113,7 @@ pub(super) fn minimal_rect(id: &str, fill: Option<PropertyValue>) -> Node {
     }))
 }
 
-pub(super) fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
+pub fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
     Node::Text(Box::new(TextNode {
         shadow: None,
         filter: None,
@@ -164,7 +162,7 @@ pub(super) fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
     }))
 }
 
-pub(super) fn minimal_page(id: &str, children: Vec<Node>) -> Page {
+pub fn minimal_page(id: &str, children: Vec<Node>) -> Page {
     Page {
         id: id.to_owned(),
         name: None,
@@ -186,7 +184,7 @@ pub(super) fn minimal_page(id: &str, children: Vec<Node>) -> Page {
     }
 }
 
-pub(super) fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
+pub fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
     Document {
         version: 1,
         colorspace: None,
@@ -221,16 +219,16 @@ pub(super) fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
     }
 }
 
-pub(super) fn has_code(report: &ValidationReport, code: &str) -> bool {
+pub fn has_code(report: &ValidationReport, code: &str) -> bool {
     report.diagnostics.iter().any(|d| d.code == code)
 }
 
-pub(super) fn codes(report: &ValidationReport) -> Vec<&str> {
+pub fn codes(report: &ValidationReport) -> Vec<&str> {
     report.diagnostics.iter().map(|d| d.code.as_str()).collect()
 }
 
 /// Build an unknown node with the given id and children (no unknown props).
-pub(super) fn unknown_node(kind: &str, id: Option<&str>, children: Vec<Node>) -> Node {
+pub fn unknown_node(kind: &str, id: Option<&str>, children: Vec<Node>) -> Node {
     Node::Unknown(Box::new(UnknownNode {
         kind: kind.to_owned(),
         id: id.map(str::to_owned),
@@ -241,7 +239,7 @@ pub(super) fn unknown_node(kind: &str, id: Option<&str>, children: Vec<Node>) ->
 }
 
 /// Helper: build a page with a given width/height (px) and children.
-pub(super) fn bounded_page(id: &str, w: f64, h: f64, children: Vec<Node>) -> Page {
+pub fn bounded_page(id: &str, w: f64, h: f64, children: Vec<Node>) -> Page {
     Page {
         id: id.to_owned(),
         name: None,
@@ -264,7 +262,7 @@ pub(super) fn bounded_page(id: &str, w: f64, h: f64, children: Vec<Node>) -> Pag
 }
 
 /// Helper: rect at (x, y, w, h) in px, no fill.
-pub(super) fn rect_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
+pub fn rect_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
     Node::Rect(Box::new(RectNode {
         shadow: None,
         filter: None,
@@ -310,7 +308,7 @@ pub(super) fn rect_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
 }
 
 /// Build a color token with a specific hex value.
-pub(super) fn color_token_hex(id: &str, hex: &str) -> Token {
+pub fn color_token_hex(id: &str, hex: &str) -> Token {
     Token {
         id: id.to_owned(),
         token_type: TokenType::Color,

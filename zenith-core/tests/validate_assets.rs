@@ -1,9 +1,14 @@
-//! `assets_image` validation tests (moved verbatim from the former single-file
-//! `validate/check/tests.rs`; test bodies unchanged).
+//! Integration tests: assets validation.
+//!
+//! Test bodies moved verbatim from the former in-`src` `validate/check/tests/`
+//! concern files; only import paths changed (`crate::`/`super::common` ->
+//! `zenith_core::`/`common`).
 
 use std::collections::BTreeMap;
 
-use super::common::*;
+mod common;
+
+use common::*;
 
 // ══════════════════════════════════════════════════════════════════════
 // Asset validation tests
@@ -190,8 +195,8 @@ fn asset_unknown_property_produces_warning() {
     let mut unknown_props = BTreeMap::new();
     unknown_props.insert(
         "dpi".to_owned(),
-        crate::ast::node::UnknownProperty {
-            value: crate::ast::node::UnknownValue::Integer(96),
+        zenith_core::UnknownProperty {
+            value: zenith_core::UnknownValue::Integer(96),
             ty: None,
         },
     );

@@ -44,9 +44,6 @@ mod report;
 mod safezone;
 mod visual;
 
-#[cfg(test)]
-mod tests;
-
 // ── Public surface ────────────────────────────────────────────────────────────
 // `validate` and `ValidationReport` are the crate's public validate API,
 // re-exported up through `validate/mod.rs` → `lib.rs`. `register_id` lives in

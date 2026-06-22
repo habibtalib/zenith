@@ -1,9 +1,14 @@
-//! `group_frame` validation tests (moved verbatim from the former single-file
-//! `validate/check/tests.rs`; test bodies unchanged).
+//! Integration tests: containers validation.
+//!
+//! Test bodies moved verbatim from the former in-`src` `validate/check/tests/`
+//! concern files; only import paths changed (`crate::`/`super::common` ->
+//! `zenith_core::`/`common`).
 
 use std::collections::BTreeMap;
 
-use super::common::*;
+mod common;
+
+use common::*;
 
 // ── Group helpers ─────────────────────────────────────────────────────
 
@@ -151,8 +156,8 @@ fn group_unknown_property_warns() {
     let mut unknown_props = BTreeMap::new();
     unknown_props.insert(
         "future-blend".to_owned(),
-        crate::ast::node::UnknownProperty {
-            value: crate::ast::node::UnknownValue::String("multiply".to_owned()),
+        zenith_core::UnknownProperty {
+            value: zenith_core::UnknownValue::String("multiply".to_owned()),
             ty: None,
         },
     );
@@ -634,8 +639,8 @@ fn frame_unknown_property_warns() {
     let mut unknown_props = BTreeMap::new();
     unknown_props.insert(
         "future-scroll".to_owned(),
-        crate::ast::node::UnknownProperty {
-            value: crate::ast::node::UnknownValue::Bool(true),
+        zenith_core::UnknownProperty {
+            value: zenith_core::UnknownValue::Bool(true),
             ty: None,
         },
     );
