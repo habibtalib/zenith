@@ -212,6 +212,37 @@ fn unresolved_footnote_ref_is_warning() {
 }
 
 #[test]
+fn unresolved_footnote_ref_on_shape_label_is_warning() {
+    // A shape label carries `Vec<TextSpan>` just like a text node, so a dangling
+    // `footnote-ref` on a shape-label span must be cross-checked too.
+    let src = r##"zenith version=1 {
+  project id="p" name="P"
+  tokens format="zenith-token-v1" {
+  }
+  styles {}
+  document id="d" {
+    page id="pg" w=(px)400 h=(px)600 {
+      shape id="badge" x=(px)10 y=(px)10 w=(px)120 h=(px)60 kind="process" {
+        span "Dangling" footnote-ref="fn.missing"
+      }
+    }
+  }
+}
+"##;
+    let doc = <zenith_core::KdlAdapter as zenith_core::KdlSource>::parse(
+        &zenith_core::KdlAdapter,
+        src.as_bytes(),
+    )
+    .expect("parse");
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "footnote.unresolved_ref"),
+        "a shape-label span footnote-ref to a missing footnote must warn; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
 fn resolved_footnote_ref_does_not_warn_and_id_is_unique() {
     let src = r##"zenith version=1 {
   project id="p" name="P"

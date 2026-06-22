@@ -115,6 +115,33 @@ pub(in crate::validate::check) fn check_footnote_refs(
         }
     }
 
+    // Cross-check every `footnote_ref`-bearing span on a node (text labels and
+    // shape labels both carry `Vec<TextSpan>`) against the page's footnote ids.
+    fn check_spans(
+        kind: &str,
+        node_id: &str,
+        spans: &[crate::ast::node::TextSpan],
+        source_span: Option<crate::ast::Span>,
+        footnote_ids: &BTreeSet<&str>,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        for span in spans {
+            if let Some(fref) = &span.footnote_ref
+                && !footnote_ids.contains(fref.as_str())
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "footnote.unresolved_ref",
+                    format!(
+                        "{kind} '{node_id}': span footnote-ref '{fref}' matches no footnote \
+                         on this page"
+                    ),
+                    source_span,
+                    Some(node_id.to_owned()),
+                ));
+            }
+        }
+    }
+
     fn walk(
         children: &[crate::ast::node::Node],
         footnote_ids: &BTreeSet<&str>,
@@ -123,24 +150,22 @@ pub(in crate::validate::check) fn check_footnote_refs(
         use crate::ast::node::Node;
         for child in children {
             match child {
-                Node::Text(t) => {
-                    for span in &t.spans {
-                        if let Some(fref) = &span.footnote_ref
-                            && !footnote_ids.contains(fref.as_str())
-                        {
-                            diagnostics.push(Diagnostic::warning(
-                                "footnote.unresolved_ref",
-                                format!(
-                                    "text '{}': span footnote-ref '{}' matches no footnote \
-                                     on this page",
-                                    t.id, fref
-                                ),
-                                t.source_span,
-                                Some(t.id.clone()),
-                            ));
-                        }
-                    }
-                }
+                Node::Text(t) => check_spans(
+                    "text",
+                    &t.id,
+                    &t.spans,
+                    t.source_span,
+                    footnote_ids,
+                    diagnostics,
+                ),
+                Node::Shape(s) => check_spans(
+                    "shape",
+                    &s.id,
+                    &s.spans,
+                    s.source_span,
+                    footnote_ids,
+                    diagnostics,
+                ),
                 Node::Frame(f) => walk(&f.children, footnote_ids, diagnostics),
                 Node::Group(g) => walk(&g.children, footnote_ids, diagnostics),
                 Node::Table(t) => {
@@ -161,7 +186,6 @@ pub(in crate::validate::check) fn check_footnote_refs(
                 | Node::Field(_)
                 | Node::Toc(_)
                 | Node::Footnote(_)
-                | Node::Shape(_)
                 | Node::Connector(_)
                 | Node::Unknown(_) => {}
             }
