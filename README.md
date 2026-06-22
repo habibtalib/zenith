@@ -189,7 +189,9 @@ Run `zenith <command> --help` for flags. Every command supports `--json` for mac
 | **Edit**     | `tx` (typed transactions, dry-run by default)                          |
 | **Variants** | `merge` (CSV mail-merge, `--manifest`)                                 |
 | **Library**  | `library list` · `library add`                                         |
+| **Theme**    | `theme new` (synthesize a token pack from brand colours)               |
 | **History**  | `history` · `undo` · `redo` · `version` · `restore` · `sync`           |
+| **Agent**    | `plugin install` · `plugin uninstall` · `plugin list`                  |
 
 ## History & versions
 
@@ -294,6 +296,54 @@ zenith update --version <tag>   # a specific release tag, e.g. the ones on the R
 ```
 
 Verify with `zenith --version`.
+
+## Use with your coding agent
+
+Zenith ships a skill that teaches AI coding agents how to drive the CLI — the agentic
+author → validate → render → edit loop, design recipes, and the token/brand discipline that
+`--help` can't carry. Install it for whatever agents you use:
+
+```bash
+zenith plugin install                  # auto-detect installed agents, install for your user
+zenith plugin install --claude --codex # choose specific agents
+zenith plugin install --all            # every supported agent
+zenith plugin install --claude --scope project   # into ./ for one repo
+zenith plugin list                     # see what's installed where
+```
+
+Claude Code, Codex, and OpenCode get the full folder skill (reference packs, templates, and
+themes); other agents (Cursor, Windsurf, Aider, Zed, Gemini, Copilot, Continue, Kiro,
+Antigravity) get a single self-contained rule file that points back at the self-documenting
+CLI. Writes are idempotent — re-run any time to update, or `zenith plugin uninstall` to remove.
+
+### MCP server (remote / CI / server agents)
+
+For agents that discover capabilities through the Model Context Protocol — or for CI and
+server pipelines — Zenith runs as an MCP server over stdio, exposing `validate`, `inspect`,
+`tokens`, `fmt`, `render`, `tx`, `merge`, and `theme` as tools:
+
+```bash
+zenith mcp
+```
+
+Point any MCP-aware client at it:
+
+```json
+{
+  "mcpServers": {
+    "zenith": { "command": "zenith", "args": ["mcp"] }
+  }
+}
+```
+
+> **Local agents should prefer the CLI + skill**, not MCP. Running `zenith` directly (taught by
+> `zenith plugin install`) is faster and cheaper on tokens than routing every call through MCP.
+> Reach for the MCP server when the agent can't run a local binary — remote hosts, CI, or
+> hosted/production services where you want the full read+write surface behind a protocol.
+
+The repo ships a [`server.json`](./server.json) (MCP registry manifest); the release workflow
+publishes it to the [MCP registry](https://registry.modelcontextprotocol.io) on each stable tag
+(via GitHub OIDC — no token needed), so Zenith stays discoverable from MCP directories.
 
 ## Status
 
