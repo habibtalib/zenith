@@ -49,7 +49,7 @@ use zenith_core::{
 };
 use zenith_layout::RustybuzzEngine;
 
-use super::table::{compute_table_layout, place_cells};
+use super::table::{GridDims, compute_table_layout, place_cells};
 use super::text::MeasureEnv;
 use super::util::resolve_property_dimension_px;
 
@@ -130,7 +130,21 @@ fn collect_flows<'a>(
             }
             Node::Frame(f) => collect_flows(&f.children, resolved, members),
             Node::Group(g) => collect_flows(&g.children, resolved, members),
-            _ => {}
+            Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Text(_)
+            | Node::Code(_)
+            | Node::Image(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Toc(_)
+            | Node::Shape(_)
+            | Node::Connector(_)
+            | Node::Unknown(_) => {}
         }
     }
 }
@@ -165,7 +179,7 @@ pub(super) fn resolve_table_flows<'a>(
 
     let mut assignments: TableFlowAssignments = BTreeMap::new();
     for flow_members in members.values() {
-        distribute_one_flow(flow_members, &env, diagnostics, &mut assignments);
+        distribute_one_flow(flow_members, env, diagnostics, &mut assignments);
     }
     assignments
 }
@@ -206,7 +220,7 @@ fn rowspan_extent(body: &[TableRow], i: usize, remaining: usize) -> usize {
 /// [`TableFlowAssignment`] per member into `assignments`.
 fn distribute_one_flow(
     flow_members: &[Member<'_>],
-    env: &MeasureEnv,
+    env: MeasureEnv,
     diagnostics: &mut Vec<Diagnostic>,
     assignments: &mut TableFlowAssignments,
 ) {
@@ -247,12 +261,14 @@ fn distribute_one_flow(
                 let layout = compute_table_layout(
                     &columns,
                     &placed,
-                    col_count,
-                    row_count,
-                    member.gap,
-                    member.pad,
-                    member.w,
-                    member.h,
+                    GridDims {
+                        col_count,
+                        row_count,
+                        gap: member.gap,
+                        pad: member.pad,
+                        table_w: member.w,
+                        table_h: member.h,
+                    },
                     env,
                     diagnostics,
                     header_rows,
@@ -270,12 +286,14 @@ fn distribute_one_flow(
                 greedy_take(
                     remaining_body,
                     row_natural,
-                    header_rows,
-                    member.gap,
-                    avail,
+                    GreedyCtx {
+                        header_rows,
+                        gap: member.gap,
+                        avail,
+                        table_id: &src.id,
+                        source_span: src.source_span,
+                    },
                     &mut used,
-                    &src.id,
-                    src.source_span,
                     diagnostics,
                 )
             }
@@ -297,27 +315,42 @@ fn distribute_one_flow(
     }
 }
 
+/// Scalar inputs for [`greedy_take`]: the header-row offset into the candidate
+/// layout, the inter-row gap, the member's available body height, and the source
+/// table id / span used for the overflow advisory. Bundled into one `Copy` value
+/// so the greedy walk stays under the argument-count lint without suppression.
+#[derive(Clone, Copy)]
+struct GreedyCtx<'a> {
+    header_rows: usize,
+    gap: f64,
+    avail: f64,
+    table_id: &'a str,
+    source_span: Option<zenith_core::Span>,
+}
+
 /// Greedily accumulate whole rowspan groups of `body` into a non-last member.
 ///
 /// `row_natural` is the natural per-row height of the candidate layout
-/// `header ++ body` (so body row `j` is at index `header_rows + j`). Groups are
-/// added while their height keeps `used <= avail`. Termination + non-empty
+/// `header ++ body` (so body row `j` is at index `gc.header_rows + j`). Groups are
+/// added while their height keeps `used <= gc.avail`. Termination + non-empty
 /// guarantee: if not even the FIRST group fits, that group is taken anyway (so a
 /// member never stalls the flow with a zero slice) and a `table.flow_overflow`
 /// advisory is emitted. Returns the number of body rows taken (≥1 when body is
 /// non-empty, capped at `body.len()`).
-#[allow(clippy::too_many_arguments)]
 fn greedy_take(
     body: &[TableRow],
     row_natural: &[f64],
-    header_rows: usize,
-    gap: f64,
-    avail: f64,
+    gc: GreedyCtx<'_>,
     used: &mut f64,
-    table_id: &str,
-    source_span: Option<zenith_core::Span>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> usize {
+    let GreedyCtx {
+        header_rows,
+        gap,
+        avail,
+        table_id,
+        source_span,
+    } = gc;
     let mut taken = 0usize;
     while taken < body.len() {
         let remaining = body.len() - taken;

@@ -355,7 +355,7 @@ fn emit_shape_label(
         &synth,
         content_w,
         &families,
-        &MeasureEnv {
+        MeasureEnv {
             resolved,
             style_map,
             fonts,

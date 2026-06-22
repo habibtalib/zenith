@@ -134,6 +134,10 @@ fn build_resolved_spans(
 /// Shared shaping environment for the text-measurement helpers, grouped so the
 /// measurers stay under the argument-count lint. All fields are borrows held for
 /// the duration of a single measure call.
+///
+/// Every field is a borrow, so the struct is itself `Copy` and is passed BY
+/// VALUE (no `&MeasureEnv`) through the measurement helpers and their callers.
+#[derive(Clone, Copy)]
 pub(in crate::compile) struct MeasureEnv<'a> {
     pub(in crate::compile) resolved: &'a BTreeMap<String, ResolvedToken>,
     pub(in crate::compile) style_map: &'a BTreeMap<&'a str, &'a Style>,
@@ -150,7 +154,7 @@ pub(in crate::compile) struct MeasureEnv<'a> {
 pub(in crate::compile) fn measure_text_natural(
     text: &TextNode,
     families: &[String],
-    env: &MeasureEnv,
+    env: MeasureEnv,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<f64> {
     let (spans, font_size, base_weight) = build_resolved_spans(text, env.resolved, env.style_map);
@@ -200,7 +204,7 @@ pub(in crate::compile) fn measure_text_wrapped_height(
     text: &TextNode,
     box_w: f64,
     families: &[String],
-    env: &MeasureEnv,
+    env: MeasureEnv,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<f64> {
     let (spans, font_size, base_weight) = build_resolved_spans(text, env.resolved, env.style_map);

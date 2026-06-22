@@ -53,7 +53,7 @@ use leaf::{
     compile_polygon, compile_polyline, compile_rect, compile_shape,
 };
 use paint::{resolve_property_color, resolve_property_gradient};
-use table::compile_table;
+use table::{TableEmitCtx, compile_table};
 use table_flow::{TableFlowAssignments, resolve_table_flows};
 use text::{TextCompileEnv, compile_code, compile_text};
 use toc::resolve_toc_to_text;
@@ -773,18 +773,20 @@ pub(super) fn compile_node(
         ),
         Node::Table(table) => {
             compile_table(
-                table,
-                resolved,
-                style_map,
-                components,
-                fonts,
-                engine,
+                TableEmitCtx {
+                    table,
+                    resolved,
+                    style_map,
+                    components,
+                    fonts,
+                    engine,
+                    chains,
+                    flows,
+                    anchors,
+                    field_ctx,
+                },
                 commands,
                 diagnostics,
-                chains,
-                flows,
-                anchors,
-                field_ctx,
                 ctx,
             );
             0.0
