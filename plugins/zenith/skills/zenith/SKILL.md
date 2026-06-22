@@ -109,6 +109,7 @@ Read only the pack you need for the current sub-task (progressive disclosure). E
 | Page setup, anchors, safe zones, frames, grids, spreads                                             | `references/layout.md`                                     |
 | Bringing in a photo/illustration asset and composing around it                                      | `references/images.md`                                     |
 | Defining or applying a brand/identity, or per-project style                                         | `references/brand.md`                                      |
+| Generating many variants from one template + data (mail-merge, localization, personalization)       | `references/variants.md`                                   |
 
 ## Project configuration (brand / identity / style)
 

@@ -12,6 +12,7 @@ Plain-text <strong>.zen</strong> design files that you can read, diff, review, v
   <a href="#quick-start"><strong>Quick start</strong></a> 
   <a href="#what-it-does"><strong>Features</strong></a> 
   <a href="#how-it-works"><strong>How it works</strong></a>
+  <a href="#variants-mail-merge"><strong>Variants</strong></a>
   <a href="#command-surface"><strong>Commands</strong></a>
   <a href="#showcase"><strong>Showcase</strong></a>
 </p>
@@ -161,6 +162,21 @@ zenith version=1 {
 ```
 
 See [`examples/`](./examples) for runnable `.zen` files covering shapes, rich text, code blocks, images, frames/groups, multi-page documents and styles, plus the richer features — `gradient`, `shadow`, `blur`, `filter`, `mask`, `table`, `flowchart` (shapes + connectors), and `anchors`.
+
+## Variants (mail-merge)
+
+One template plus a CSV becomes **one rendered design per row** — for localized posts, personalized graphics, certificates, or campaign variants. Mark the variable text/image nodes with `role="data.<column>"` (the columns are the CSV header), then merge:
+
+```kdl
+# in poster.zen — bind the headline to the CSV "name" column:
+text id="hero.name" role="data.name" x=(px)60 y=(px)160 w=(px)680 h=(px)90 fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.heading" { span "Name" }
+```
+
+```bash
+zenith merge poster.zen people.csv --out-dir out/ --name-by name --manifest manifest.json
+```
+
+Every row renders independently and deterministically. `--name-by` names files by a column (`Alice.png`, `Bob.png`); `--manifest` writes a byte-reproducible batch record (template + data hashes and per-row provenance) for CI. Image columns work too — a `role="data.logo"` image node swaps its asset path per row.
 
 ## Command surface
 

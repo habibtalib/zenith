@@ -26,8 +26,9 @@ curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/ins
   - `references/recipes.md` — gradients, aurora, glass, topographic, motifs, grain, shadows
   - `references/color.md` · `typography.md` · `layout.md` · `images.md` · `brand.md`
   - `references/themes.md` · `theme-from-brand.md` — ready-made themes + `zenith theme new`
+  - `references/variants.md` — `zenith merge` (mail-merge / localization / batch variants)
   - `templates/` — starter `.zen`, project brand brief, brand-kit pack
-- **Commands** — `/zenith-new`, `/zenith-check`, `/zenith-render`, `/zenith-brand`
+- **Commands** — `/zenith-new`, `/zenith-check`, `/zenith-render`, `/zenith-brand`, `/zenith-merge`
 
 The skill drives the `zenith` CLI directly (cross-platform); it ships no helper scripts. A
 "contact sheet" is `zenith render <file> --all-pages <dir>`; scaffolding is a copy of a
