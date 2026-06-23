@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use zenith_core::{ConnectorNode, Diagnostic, ResolvedToken, Style};
 
-use crate::ir::{SceneCommand, StrokeAlign};
+use crate::ir::{Paint, SceneCommand, StrokeAlign};
 
 use super::super::RenderCtx;
 use super::super::paint::resolve_property_color;
@@ -239,7 +239,7 @@ pub(in crate::compile) fn compile_connector(
             if let Some(points) = arrowhead_points(tip, from_pt, stroke_width) {
                 commands.push(SceneCommand::FillPolygon {
                     points,
-                    color,
+                    paint: Paint::solid(color),
                     even_odd: false,
                 });
             }
