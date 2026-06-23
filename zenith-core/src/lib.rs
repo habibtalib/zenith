@@ -15,6 +15,7 @@ pub mod format;
 pub mod parse;
 pub mod theme;
 pub mod tokens;
+pub mod util;
 pub mod validate;
 
 // Curated flat re-exports for the most-used public surface.
@@ -43,4 +44,5 @@ pub use tokens::{
     ResolvedShadow, ResolvedShadowLayer, ResolvedToken, ResolvedValue, SyntaxTheme, TokenKind,
     TokenResolution, builtin_color, is_supported, resolve_tokens, scan, token_id_for_kind,
 };
+pub use util::hash_unit;
 pub use validate::{ValidationReport, validate};

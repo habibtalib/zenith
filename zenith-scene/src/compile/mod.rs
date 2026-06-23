@@ -25,6 +25,7 @@ mod footnote;
 mod image;
 mod leaf;
 mod paint;
+mod pattern;
 mod table;
 mod table_flow;
 mod text;
@@ -55,6 +56,7 @@ use leaf::{
     compile_polygon, compile_polyline, compile_rect, compile_shape,
 };
 use paint::{resolve_property_color, resolve_property_gradient};
+use pattern::compile_pattern;
 use table::{TableEmitCtx, compile_table};
 use table_flow::resolve_table_flows;
 use text::{TextCompileEnv, compile_code, compile_text};
@@ -817,10 +819,7 @@ pub(in crate::compile) fn compile_node(
             );
             0.0
         }
-        Node::Pattern(_) => {
-            // pattern expansion is not yet implemented; the node renders nothing.
-            0.0
-        }
+        Node::Pattern(p) => compile_pattern(p, cx, commands, diagnostics, ctx),
         Node::Footnote(_) => {
             // Footnotes are NON-flowing page furniture: they carry no x/y/w/h
             // and are NOT rendered in the normal z-order dispatch. The page-level
