@@ -65,4 +65,5 @@ zenith validate examples/<name>.zen --json
 | Example | Source | Output |
 | ------- | ------ | ------ |
 | Flowchart (shapes + connectors) | [`flowchart.zen`](flowchart.zen) | ![flowchart](flowchart.png) |
+| Connector auto-routing (orthogonal, line-jumps) | [`connector-routing.zen`](connector-routing.zen) | ![connector-routing](connector-routing.png) |
 | Table | [`table.zen`](table.zen) | ![table](table.png) |

@@ -184,6 +184,11 @@ fn stack_zen_renders_to_valid_png() {
 }
 
 #[test]
+fn connector_routing_zen_renders_to_valid_png() {
+    assert_example_renders("connector-routing");
+}
+
+#[test]
 fn styled_zen_renders_to_valid_png() {
     assert_example_renders("styled");
 }
