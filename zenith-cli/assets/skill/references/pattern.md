@@ -1,5 +1,8 @@
 # Pattern node — procedural tiling
 
+> Attribute names, types, and required/optional status: `zenith schema node pattern`. This
+> reference covers semantic gotchas, layout rules, and the `detach_pattern` workflow.
+
 The `pattern` node tiles **one motif** (a single child node template) across a bounds box,
 producing a repeating layout without manual node authoring. It is deterministic: same inputs →
 identical bytes out on any machine. Two kinds are supported: `grid` (row-major, evenly-spaced
@@ -14,22 +17,18 @@ cells with optional jitter) and `scatter` (pseudo-random positions driven by a s
 
 ## Attributes
 
-| Attribute  | Type      | Required / default                           | Notes                                                              |
-| ---------- | --------- | -------------------------------------------- | ------------------------------------------------------------------ |
-| `id`       | string    | **Required**                                 | Stable unique id. Subject to the normal `id.duplicate` check.     |
-| `kind`     | string    | **Required**                                 | `"grid"` or `"scatter"`. Any other value → `pattern.unknown_kind`. |
-| `x`        | dimension | Optional, default `(px)0`                   | Left edge of the bounds box.                                       |
-| `y`        | dimension | Optional, default `(px)0`                   | Top edge of the bounds box.                                        |
-| `w`        | dimension | **Required** (must resolve to positive px)  | Width of the bounds box. The bounds box **clips** instances.       |
-| `h`        | dimension | **Required** (must resolve to positive px)  | Height of the bounds box. Both `w` and `h` must be positive or nothing renders. |
-| `spacing`  | dimension | **Required when `kind="grid"`**             | Cell pitch as a **literal** `(px)N` dimension — **not** a token ref (a `(token)"…"` value is ignored and fires `pattern.grid_missing_spacing`). ≤0 → `pattern.invalid_spacing`. Missing on grid → `pattern.grid_missing_spacing`. |
-| `count`    | i64       | **Required when `kind="scatter"`**           | Number of instances. ≤0 → `pattern.invalid_count`. Missing on scatter → `pattern.scatter_missing_count`. |
-| `seed`     | i64       | Optional, default `0`                        | Pins jitter/scatter layout deterministically. Change to get a different-but-repeatable arrangement. |
-| `jitter`   | f64       | Optional, default `0.0`, range `0.0..=1.0`  | **Grid only.** Positional noise as a fraction of `spacing` per axis (x/y uncorrelated, seed-derived). Out-of-range → WARNING `pattern.jitter_out_of_range` (clamped; still renders). Ignored by scatter. |
+Run `zenith schema node pattern` for the full attribute list, types, and required/optional status.
+Key semantic rules the schema does not convey:
 
-The pattern's `fill`, `radius`, `stroke`, and `stroke-width` paint a background panel (see above);
-the other visual props (`shadow`, `blur`, `mask`, per-corner radii, `blend-mode`) are validated for
-token usage but currently inert.
+- **`spacing` must be a `(px)N` literal** — not a `(token)"…"` reference. A token value is
+  silently ignored and fires `pattern.grid_missing_spacing`. Tune density by adjusting the
+  literal value directly.
+- **`jitter` is `0.0..=1.0`** — a fraction of `spacing` per axis (x and y are uncorrelated,
+  seed-derived). Out-of-range is a Warning and is clamped; the output still renders.
+- **Background panel** — the pattern's own `fill`, `radius`, `stroke`, and `stroke-width` paint a
+  background rectangle sized to the bounds box, *behind* all motif instances. The other visual
+  props (`shadow`, `blur`, `mask`, per-corner radii, `blend-mode`) are accepted and token-validated
+  but are **inert** for now.
 
 ---
 

@@ -5,42 +5,11 @@ deterministically. This varies **dimensions** (and small per-target tweaks). It 
 `zenith merge`, which varies **content** across CSV rows (see `references/variants.md`). Reach for
 `variant` for "the same design at 4 sizes"; reach for `merge` for "this design for 200 people".
 
-## The `variants` block
-
-Declare it at the document level (additive — absent means byte-identical output). Each `variant`
-names a `source` (the canonical page id) and the target `w`/`h`, with optional per-node `override`s:
-
-```kdl
-variants {
-  variant id="square" source="page.main" w=(px)1080 h=(px)1080 {
-    override node="qr"       visible=#false
-    override node="legal"    text="© 2026 Acme"
-    override node="headline" fill=(token)"color.brand"
-  }
-  variant id="story" source="page.main" w=(px)1080 h=(px)1920 {
-  }
-}
-```
-
-- `override` props map 1:1 to typed transaction ops and are intentionally small:
-  - `visible=#true|#false` — show/hide the target node
-  - `text="…"` — replace a text node's content
-  - `fill=(token)"…"` — re-fill (token id only; Zenith is token-first)
-- A variant with no overrides (`story` above) is just a resize.
-- Generated page ids are deterministic: `<source>.<variant-id>`.
-
-## The command
+For the `variants` block syntax, `override` props, and all command flags, run:
 
 ```bash
-zenith variant <doc.zen> --out-dir out/ [--json] [--manifest manifest.json]
+zenith variant --help
 ```
-
-- `--out-dir <DIR>` (required) — writes `<stem>-<id>.zen` (a native, reviewable page) **and**
-  `<stem>-<id>.png` per variant.
-- `--json` — machine-readable batch report (per-variant provenance).
-- `--manifest <PATH>` — deterministic generation manifest (`schema: zenith-variant-manifest-v1`):
-  SHA-256 of the input, targets in id order, no absolute paths or timestamps → **byte-reproducible**
-  in CI.
 
 ## Why it's reliable
 

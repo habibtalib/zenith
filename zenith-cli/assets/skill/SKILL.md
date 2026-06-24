@@ -28,18 +28,25 @@ user wants the result as source they can review, version, and re-render.
 for that, then compose the resulting asset into a `.zen` document — see
 `references/images.md`); pure backend/code tasks; or editing existing raster files.
 
-## First: confirm the tool, and let the CLI document itself
+## The CLI is the source of truth
+
+The CLI is self-documenting and **authoritative** for node/attribute/op syntax. Always reach for
+it before this skill:
 
 ```bash
-zenith --version        # if missing, see https://github.com/farhan-syah/zenith#install
-zenith --help           # the command list + the loop, in the tool itself
-zenith <command> --help # exact flags, plus an EXAMPLE, for any command
+zenith --version                  # if missing, see https://github.com/farhan-syah/zenith#install
+zenith --help                     # command list + the loop, in the tool itself
+zenith <command> --help           # exact flags and an EXAMPLE for any command
+zenith schema nodes               # all node kinds
+zenith schema node <kind>         # attributes, types, and required/optional for one kind
+zenith schema ops                 # all transaction op names
+zenith schema op <name>           # fields, types, and semantics for one op
+zenith validate <file> --json     # actionable diagnostics ("did you mean?", raw-literal hints, fit font-size)
 ```
 
-The CLI is the source of truth for _what commands exist and what flags they take_ — it is
-self-documenting, so **read `zenith --help` and `zenith <command> --help` instead of guessing
-flags or relying on this file for syntax.** This skill covers what help can't: the workflow
-loop, design recipes, and the token/brand discipline below.
+**Do not look up attribute names or op fields in this skill** — `zenith schema` emits them
+directly, with types and required/optional status. This skill holds what the CLI can't: conceptual
+guidance, design workflow, recipes, gotchas, and judgment calls.
 
 If `zenith` is not installed, tell the user the one-line installer
 (`curl -fsSL https://raw.githubusercontent.com/farhan-syah/zenith/main/scripts/install.sh | sh`)
@@ -80,9 +87,10 @@ These make designs editable, on-brand, and reproducible — and keep the agentic
   text or layout into a flattened picture. See `references/images.md`.
 - **Determinism.** Same source + backend → same bytes. No reliance on time/randomness. If you
   generate many nodes procedurally, record the parameters/seed in a note so it is replayable.
-- **Verify syntax against reality, not memory.** Exact node/attribute syntax lives in the
-  repo's `examples/*.zen` and `zenith <command> --help`. When unsure of a property, read an
-  example or run `zenith inspect <file>` — then validate. Do not invent syntax.
+- **Verify syntax against reality, not memory.** Exact node/attribute syntax lives in
+  `zenith schema node <kind>` (authoritative) and the repo's `examples/*.zen`. When unsure of a
+  property, run `zenith schema node <kind>` or read an example — then validate. Do not invent
+  syntax.
 
 ## Command surface
 
@@ -102,14 +110,18 @@ example). Every command supports `--json`. The groups, in brief: **author** (`va
 Read only the pack you need for the current sub-task (progressive disclosure). Each lives in
 `references/` next to this file.
 
-| The task involves…                                                                                    | Read                                                       |
+| The task involves…                                                                                    | Read / command                                             |
 | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Node/attribute names, types, required/optional status                                                 | `zenith schema node <kind>` · `zenith schema nodes`        |
+| Transaction op fields and semantics                                                                   | `zenith schema op <name>` · `zenith schema ops`            |
+| Command flags and usage                                                                               | `zenith <cmd> --help`                                      |
+| Syntax errors, type mismatches, "did you mean?" — act on the diagnostic                              | `zenith validate <file> --json`                            |
 | The full agent run: scratch experiments, multiple candidates, select, promote, clean up, provenance   | `references/agentic-workflow.md`                           |
 | Backgrounds, gradients, glows, patterns, motifs, texture/grain, "make it look premium"                | `references/recipes.md`                                    |
 | Procedural grid/scatter tiling — the `pattern` node or the `detach_pattern` op                        | `references/pattern.md`                                    |
 | Recording a generated motif as a `recipes` block (provenance, seed/params, recipe `tx` ops)           | `references/recipes-model.md`                              |
 | Picking or applying a ready-made visual theme (palette + shape language)                              | `references/themes.md` + `themes/*.zen`                    |
-| Generating a theme from a brand (logo, website, brand colours)                                        | `references/theme-from-brand.md` (uses `zenith theme new`) |
+| Generating a theme from a brand (logo, website, brand colors)                                         | `references/themes.md` → `zenith theme new --help`         |
 | Color systems, palettes, sRGB vs CMYK, gradient tokens                                                | `references/color.md`                                      |
 | Text, fonts, spans, wrapping, hyphenation, contrast                                                   | `references/typography.md`                                 |
 | Page setup, anchors, safe zones, frames, grids, spreads                                               | `references/layout.md`                                     |
@@ -117,6 +129,7 @@ Read only the pack you need for the current sub-task (progressive disclosure). E
 | Defining or applying a brand/identity, or per-project style                                           | `references/brand.md`                                      |
 | Same design at many **sizes/formats** (square/story/banner) — the `variants` block + `zenith variant` | `references/format-variants.md`                            |
 | Many outputs from one template + **data** rows (mail-merge, localization, personalization)            | `references/variants.md` (`zenith merge`)                  |
+| Reporting a Zenith bug or feature request (the `gh` feedback loop)                                    | `references/reporting-issues.md`                           |
 
 ## Project configuration (brand / identity / style)
 

@@ -1,5 +1,9 @@
 # Layout — pages, anchors, frames, spreads
 
+> For the full attribute list and types for any node kind, run `zenith schema node <kind>` (e.g.
+> `zenith schema node page`, `zenith schema node frame`). This reference covers the semantic
+> rules, anchor precedence, and gotchas that the schema does not convey.
+
 ## Pages
 
 ```kdl

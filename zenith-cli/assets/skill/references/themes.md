@@ -53,9 +53,8 @@ Dark themes:
 
 Light/dark pairing suggestions: `sorbet`↔`pine`, `cobalt`↔`harbor`, `prism`↔`sunset`.
 
-(More themes are added over time; list the `themes/` dir to see the current set. To make a
-theme from a brand the user provides — logo, website, brand docs — see
-`references/theme-from-brand.md`.)
+(More themes are added over time; list the `themes/` dir to see the current set. To generate a
+theme from brand colors — logo, website, or brand docs — run `zenith theme new --help`.)
 
 ## Using a theme
 

@@ -34,20 +34,11 @@ Alice,assets/alice.png
 Bob,assets/bob.png
 ```
 
-## The command
+For the full command flags (including `--name-by`, `--manifest`, `--json`), run:
 
 ```bash
-zenith merge <template.zen> <data.csv> --out-dir out/ \
-    [--name-by <column>] [--json] [--manifest manifest.json]
+zenith merge --help
 ```
-
-- `--out-dir <DIR>` (required) — one PNG per row is written here.
-- `--name-by <COL>` — name each file by that column's value (e.g. `Alice.png`); default
-  `row-NNNN.png`.
-- `--json` — machine-readable batch report (per-row provenance: which row → which file).
-- `--manifest <PATH>` — a deterministic generation manifest (schema `zenith-merge-manifest-v1`)
-  recording the template `source_sha256`, the `data_sha256`, `name_by`, and per-row keys. Commit
-  or archive it for **CI-reproducible** batches — same template + same data → same outputs.
 
 ## Workflow
 
