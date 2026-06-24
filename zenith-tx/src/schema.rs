@@ -777,6 +777,34 @@ pub fn op_fields(name: &str) -> Option<&'static [OpFieldSchema]> {
             }];
             Some(F)
         }
+        "promote_candidate" => {
+            static F: &[OpFieldSchema] = &[
+                OpFieldSchema {
+                    name: "source_page",
+                    ty: "node id",
+                    required: true,
+                },
+                OpFieldSchema {
+                    name: "target_page",
+                    ty: "node id",
+                    required: true,
+                },
+                OpFieldSchema {
+                    name: "id_suffix",
+                    ty: "string",
+                    required: true,
+                },
+            ];
+            Some(F)
+        }
+        "finalize_run" => {
+            static F: &[OpFieldSchema] = &[OpFieldSchema {
+                name: "run_pages",
+                ty: "node-id[]",
+                required: true,
+            }];
+            Some(F)
+        }
         _ => None,
     }
 }
@@ -867,6 +895,12 @@ pub fn op_example(name: &str) -> Option<&'static str> {
         }
         "delete_recipe" => Some(r#"{"op":"delete_recipe","id":"recipe.scatter"}"#),
         "detach_pattern" => Some(r#"{"op":"detach_pattern","node":"dots"}"#),
+        "promote_candidate" => Some(
+            r#"{"op":"promote_candidate","source_page":"page.scratch.hero.02","target_page":"page.hero","id_suffix":".final"}"#,
+        ),
+        "finalize_run" => Some(
+            r#"{"op":"finalize_run","run_pages":["page.scratch.hero.01","page.scratch.hero.02"]}"#,
+        ),
         _ => None,
     }
 }
@@ -1541,6 +1575,20 @@ mod tests {
                 "detach_pattern",
                 Op::DetachPattern {
                     node: "dots".into(),
+                },
+            ),
+            (
+                "promote_candidate",
+                Op::PromoteCandidate {
+                    source_page: "page.scratch.hero.02".into(),
+                    target_page: "page.hero".into(),
+                    id_suffix: ".final".into(),
+                },
+            ),
+            (
+                "finalize_run",
+                Op::FinalizeRun {
+                    run_pages: vec!["page.scratch.hero.01".into()],
                 },
             ),
         ];
