@@ -18,6 +18,7 @@
 //! - [`revspec`] — revision-spec resolver: map a human/agent revspec string to a record id
 //! - [`session`] — Tier-1 ephemeral session: snapshot DAG with HEAD + redo stack
 //! - [`store`] — content-addressed object store (SHA-256 + DEFLATE)
+//! - [`previews`] — [`PreviewRecord`] schema and append-only preview-artifact log
 //! - [`runs`] — [`RunRecord`] schema and append-only agent-run provenance log
 //! - [`tier2`] — Tier-2 durable version history: bounded flat list in `versions.jsonl`
 
@@ -30,6 +31,7 @@ pub mod global;
 pub mod identity;
 pub mod layout;
 pub mod manifest;
+pub mod previews;
 pub mod retention;
 pub mod revspec;
 pub mod runs;
@@ -45,6 +47,7 @@ pub use global::{GlobalCapReport, enforce_global_cap};
 pub use identity::{DocMeta, Outcome, Reconciled, reconcile};
 pub use layout::StorePaths;
 pub use manifest::{CheckpointMeta, HistoryRecord, append_record, read_records};
+pub use previews::{PreviewCritique, PreviewRecord, append_preview, read_previews};
 pub use retention::{
     CapReport, MaintainReport, RetentionPolicy, ThinReport, apply_caps, apply_thinning, maintain,
     thin_versions,
