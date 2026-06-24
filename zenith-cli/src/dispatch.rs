@@ -555,6 +555,12 @@ pub fn run() -> ExitCode {
 
         Command::Mcp(_) => ExitCode::from(mcp::run()),
 
+        Command::Fonts(args) => {
+            let (output, code) = commands::fonts::list(args.json);
+            println!("{}", output);
+            ExitCode::from(code)
+        }
+
         Command::Schema(args) => {
             let json = args.json;
             let (output, code) = match args.command {

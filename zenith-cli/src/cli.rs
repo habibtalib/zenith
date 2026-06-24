@@ -188,6 +188,25 @@ pub enum Command {
     /// faster and cheaper on tokens than going through MCP.
     Mcp(McpArgs),
 
+    /// List fonts available to the renderer — bundled (portable) and local/system.
+    ///
+    /// Discovers fonts in two clearly-separated sections:
+    ///
+    ///   Bundled (portable) — fonts shipped in the binary. Using these keeps
+    ///   renders byte-identical across machines.
+    ///
+    ///   Local / system (this machine only) — fonts in OS font directories.
+    ///   Using these is NOT portable: renders may differ on another machine,
+    ///   and they trip a `font.local` advisory.
+    ///
+    /// Uses the same discovery code as the renderer so there is no drift.
+    /// Scanning reads every system font file on disk, so the command may take a
+    /// moment on machines with many fonts installed (similar to `fc-list`).
+    #[command(after_help = "EXAMPLES:\n  \
+zenith fonts            # human-readable, two-section listing\n  \
+zenith fonts --json     # machine-readable JSON ({ \"schema\": \"zenith-fonts-v1\", ... })")]
+    Fonts(FontsArgs),
+
     /// Describe the Zenith document schema (node kinds, attributes, tx ops, and non-node surfaces).
     ///
     /// Self-describing source of truth for agents and tooling. Reports every
@@ -411,6 +430,14 @@ pub struct FmtArgs {
     pub path: PathBuf,
 
     /// Emit machine-readable JSON reporting `changed` and `hash`.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `zenith fonts`.
+#[derive(Debug, Args)]
+pub struct FontsArgs {
+    /// Emit machine-readable JSON instead of a human-readable listing.
     #[arg(long)]
     pub json: bool,
 }

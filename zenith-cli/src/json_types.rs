@@ -324,6 +324,21 @@ pub struct SchemaDiagnosticsOutput {
     pub codes: Vec<SchemaDiagnosticCode>,
 }
 
+// ── Fonts JSON types ──────────────────────────────────────────────────────────
+
+/// Top-level JSON envelope for `zenith fonts --json`.
+#[derive(Debug, Serialize)]
+pub struct FontsOutput {
+    pub schema: &'static str,
+    /// Family names bundled in the binary (lowercase, sorted). These are portable:
+    /// any machine with this Zenith binary will resolve them identically.
+    pub bundled: Vec<String>,
+    /// Family names found on this machine only (lowercase, sorted), after excluding
+    /// any family already in `bundled`. Using these trips a `font.local` advisory
+    /// and renders may differ on another machine.
+    pub local: Vec<String>,
+}
+
 // ── Recipe inspect JSON types ─────────────────────────────────────────────────
 
 /// A single `param` entry within a [`RecipeInspectJson`].
