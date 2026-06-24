@@ -25,7 +25,7 @@ name and let it resolve to deterministic geometry (identical bytes to the hand-p
 An explicitly-authored `x` or `y` always wins over the anchor-derived value **per axis**, and the
 node's `w`/`h` must be present (px) for derivation.
 
-Nine-point names (see `examples/anchors.zen`):
+Nine-point names:
 `top-left top-center top-right center-left center center-right bottom-left bottom-center bottom-right`.
 
 ```kdl
@@ -104,17 +104,17 @@ rect id="card" anchor-sibling="title" anchor-edge="below" anchor-gap=(px)8 ancho
 ## Frames (clipping) and groups
 
 - `frame id x y w h { … }` clips its children to its box — use it for image windows, cards,
-  and any "nothing escapes this region" layout (`examples/frame.zen`).
+  and any "nothing escapes this region" layout. Run `zenith schema node frame` for attributes.
 - `group id { … }` bundles nodes logically (no clip) so a whole motif moves/dims/deletes as a
-  unit (`examples/group.zen`). Opacity and transforms cascade through groups/frames.
+  unit. Opacity and transforms cascade through groups/frames. Run `zenith schema node group`.
 - A group may declare `protected-region id x y w h` children — advisory, non-rendering text-safe
   rectangles (the group-level analogue of a page `safe-zone`). They emit nothing; agents/external
   tools consult them to avoid placing text over reserved areas (UI chrome, logos). Optional `label`.
 
 ## Dividers and rules
 
-`line x1 y1 x2 y2 stroke=(token) stroke-width=(token)` for separators/rules
-(`examples/line.zen`).
+`line x1 y1 x2 y2 stroke=(token) stroke-width=(token)` for separators/rules.
+Run `zenith schema node line` for the full attribute list.
 
 ## Multi-size variants
 

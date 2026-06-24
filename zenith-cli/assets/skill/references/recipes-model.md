@@ -61,8 +61,8 @@ Errors mirror token ops: `tx.duplicate_id`, `tx.unknown_recipe`.
 
 ## Workflow
 
-1. Build the motif by composing primitives (gradients, filters, patterns — see `examples/*.zen`),
-   giving the generated nodes stable ids.
+1. Build the motif by composing primitives (gradients, filters, patterns — run `zenith schema node
+   <kind>` for each primitive type), giving the generated nodes stable ids.
 2. Record a `recipe` capturing `kind`, `seed`, `generator`, `param`s, the `palette` tokens, and the
    `expanded` node ids — so the look is reproducible and re-tunable, not a one-off.
 3. `zenith validate`, then `zenith inspect` to confirm the recipe and its nodes.
@@ -70,4 +70,4 @@ Errors mirror token ops: `tx.duplicate_id`, `tx.unknown_recipe`.
 > Note: the `pattern` node (grid and scatter tiling) **is now shipped** — see
 > `references/pattern.md` for attributes, diagnostics, and the `detach_pattern` op. Procedural
 > **noise/grain** is also shipped, as a `noise` filter kind (`noise seed=.. scale=.. amount=..`
-> inside a `filter` token); see `examples/noise.zen`.
+> inside a `filter` token); see `zenith schema node filter`.

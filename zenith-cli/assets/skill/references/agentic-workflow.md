@@ -6,7 +6,7 @@ The `.zen` holds ONLY final content. Process state — scratch candidates, their
 — lives in the app-managed store keyed by the document's `doc-id`, reachable through the
 `zenith workspace` commands. You never hand-edit it.
 
-> Op fields: `zenith schema op <name>`, `zenith tx --help`, `examples/*.tx.json`.
+> Op fields: `zenith schema op <name>`, `zenith tx --help`.
 > Attributes: `zenith schema node <kind>` / `zenith schema page`.
 > Store commands: `zenith workspace --help`.
 

@@ -25,8 +25,8 @@ banners, book/magazine pages, diagrams/flowcharts, ads, or on-brand variants —
 user wants the result as source they can review, version, and re-render.
 
 **Don't use it for**: generating a photographic/illustrative _picture_ (use an image model
-for that, then compose the resulting asset into a `.zen` document — see `examples/image.zen` and
-`zenith schema node image`); pure backend/code tasks; or editing existing raster files.
+for that, then compose the resulting asset into a `.zen` document — see `zenith schema node image`);
+pure backend/code tasks; or editing existing raster files.
 
 ## The CLI is the source of truth
 
@@ -42,6 +42,10 @@ zenith schema node <kind>         # attributes, types, and required/optional for
 zenith schema ops                 # all transaction op names
 zenith schema op <name>           # fields, types, and semantics for one op
 zenith validate <file> --json     # actionable diagnostics ("did you mean?", raw-literal hints, fit font-size)
+zenith schema tokens              # all token types
+zenith schema token <type>        # exact value form + example for one token type
+zenith schema diagnostics         # governable diagnostic codes
+zenith fonts                      # list Bundled vs Local/system font families
 ```
 
 **Do not look up attribute names or op fields in this skill** — `zenith schema` emits them
@@ -78,19 +82,23 @@ These make designs editable, on-brand, and reproducible — and keep the agentic
   the right node. Anonymous node soup cannot be edited later.
 - **Tokenize everything.** Colors, fonts, sizes, gradients, shadows go through `token`s and
   are referenced with `(token)"id"`. Never embed raw hex/sizes in nodes — a palette/brand
-  swap must be a token-value change, not a geometry rewrite.
+  swap must be a token-value change, not a geometry rewrite. Token values use KDL typed
+  literals: `(px)28`, numeric weight `700`, color `"#hex"` — not CSS strings like `"28px"` or
+  `"900"`. Gradients, shadows, filters, and masks use child nodes inside the token, not a
+  bare `value=`. Run `zenith schema token <type>` (or `zenith schema tokens`) for the exact
+  value form and a working example per token type.
 - **Group semantically.** Put related layers in `group`/`frame` with a stable id so a whole
   motif can be moved, dimmed (`set_opacity`), or removed in one operation.
 - **Validate before render, render before finalize.** Hard diagnostics block finalization.
+  Suppress a known-OK advisory or gate CI with a `diagnostics` policy — see `references/diagnostics.md`.
 - **Keep real-object pixels external.** Photos/illustrations from an image model are declared
   as `assets` (with `sha256` for lockable provenance) and placed as `image` nodes — never bake
-  text or layout into a flattened picture. See `examples/image.zen` and `zenith schema node image`.
+  text or layout into a flattened picture. See `zenith schema node image`.
 - **Determinism.** Same source + backend → same bytes. No reliance on time/randomness. If you
   generate many nodes procedurally, record the parameters/seed in a note so it is replayable.
 - **Verify syntax against reality, not memory.** Exact node/attribute syntax lives in
-  `zenith schema node <kind>` (authoritative) and the repo's `examples/*.zen`. When unsure of a
-  property, run `zenith schema node <kind>` or read an example — then validate. Do not invent
-  syntax.
+  `zenith schema node <kind>` (authoritative). When unsure of a property, run `zenith schema node
+  <kind>` — then validate. Do not invent syntax.
 
 ## Command surface
 
@@ -99,9 +107,10 @@ example). Most commands support `--json` for machine-readable output. The groups
 **author** (`new` — scaffold a fresh document; `validate`, `fmt`, `tokens`, `inspect`), **render**
 (`render`), **edit** (`tx` — typed, dry-run by default), **variants** (`variant` — size/format
 variants from one page; `merge` — CSV data mail-merge), **library** (`library list`/`add`),
-**theme** (`theme new`), **workspace** (`workspace scratch`/`candidate`/`promote`/`finalize`/`bundle`/
-`unbundle` — store-backed scratch candidates), and **history** (`history`, `undo`, `redo`, `version`,
-`restore`, `sync`). Do not memorize flags from this file — ask the CLI.
+**theme** (`theme new`), **fonts** (`fonts` — list Bundled vs Local/system families), **workspace**
+(`workspace scratch`/`candidate`/`promote`/`finalize`/`bundle`/`unbundle` — store-backed scratch
+candidates), and **history** (`history`, `undo`, `redo`, `version`, `restore`, `sync`). Do not
+memorize flags from this file — ask the CLI.
 
 > Two different "variant" tools — don't confuse them: `zenith variant` varies **size/format**
 > (one design → square/story/banner), `zenith merge` varies **content** (one template → many
@@ -123,11 +132,13 @@ Read only the pack you need for the current sub-task (progressive disclosure). E
 | Recording a generated motif as a `recipes` block (provenance, seed/params, recipe `tx` ops)           | `references/recipes-model.md`                              |
 | Picking or applying a ready-made visual theme (palette + shape language)                              | `references/themes.md` + `themes/*.zen`                    |
 | Generating a theme from a brand (logo, website, brand colors)                                         | `references/themes.md` → `zenith theme new --help`         |
-| Color, gradients, glows, texture, typography, "make it premium" — visual effects                      | `zenith schema` for attributes + `examples/*.zen` for runnable patterns + design judgment |
+| Color, gradients, glows, texture, typography, "make it premium" — visual effects                      | `zenith schema node <kind>` · `zenith schema token <type>` + design judgment |
 | Page setup, anchors, safe zones, frames, grids, spreads                                               | `references/layout.md`                                     |
-| Bringing in a photo/illustration asset and composing around it                                        | `examples/image.zen` + `zenith schema node image`         |
+| Bringing in a photo/illustration asset and composing around it                                        | `zenith schema node image` · `zenith schema node asset`    |
 | Defining or applying a brand/identity, or per-project style                                           | `references/brand.md`                                      |
 | Many outputs from one design — **sizes/formats** (`zenith variant`) or **data** rows (`zenith merge`) | `references/variants.md`                                   |
+| Diagnostic policy (`allow`/`deny`/`warn` codes, CI gating, config files, CLI flags)                   | `references/diagnostics.md` + `zenith schema diagnostics`  |
+| Local/system fonts, portability, deterministic rendering, `font.local` advisory                        | `references/diagnostics.md` · `zenith fonts`               |
 | Reporting a Zenith bug or feature request (the `gh` feedback loop)                                    | `references/reporting-issues.md`                           |
 
 ## Project configuration (brand / identity / style)

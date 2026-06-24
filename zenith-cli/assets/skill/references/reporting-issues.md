@@ -11,7 +11,7 @@ First rule out your own authoring errors:
 1. Re-read `zenith schema node <kind>` — confirm the attribute exists and you have the right type.
 2. Read the `zenith validate` diagnostic in full — it tells you the fix ("did you mean?",
    raw-literal hints, fit font-size suggestions). Act on it before concluding it's a bug.
-3. Check `examples/` for a working reference.
+3. Run `zenith schema token <type>` to verify token value forms (KDL typed literals, not CSS strings).
 
 If any of those point to a usage error, fix it — don't file.
 
@@ -29,8 +29,7 @@ Judge from the hands-on failure, not from description alone:
 ## Flow (follow this order strictly)
 
 **1. Reproduce minimally.** Confirm it's a real engine gap — not a usage error — using
-`zenith schema`, `zenith validate`, and `examples/`. Reduce to the smallest `.zen` that triggers
-it.
+`zenith schema` and `zenith validate`. Reduce to the smallest `.zen` that triggers it.
 
 **2. Check the version.** The bug may already be fixed:
 
