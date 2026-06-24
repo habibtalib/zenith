@@ -12,12 +12,14 @@
 //! - `render` — single-file rendering for rule-format agents.
 //! - `install` / `uninstall` — idempotent writes / removals.
 //! - `detect` — which agents are present / already installed.
+//! - `path_check` — whether the `zenith` binary is reachable on `PATH`.
 //! - `run` — orchestration entry points used by `lib.rs`.
 
 pub mod agent;
 pub mod assets;
 pub mod detect;
 pub mod install;
+pub mod path_check;
 pub mod paths;
 pub mod render;
 pub mod run;

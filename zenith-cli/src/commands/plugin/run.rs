@@ -6,6 +6,7 @@ use std::path::Path;
 use super::agent::{ALL_AGENTS, Agent, Scope};
 use super::detect::{detect_present, is_installed};
 use super::install::{WriteOutcome, install_agent};
+use super::path_check::zenith_on_path;
 use super::uninstall::{RemoveOutcome, uninstall_agent};
 
 /// Which agents a command should act on.
@@ -75,6 +76,13 @@ pub fn run_install(
         );
     }
 
+    if zenith_on_path().is_none() {
+        println!("warning: the installed skill calls `zenith`, but `zenith` is not on your PATH.");
+        println!(
+            "  Install it: `cargo install --path zenith-cli`, or `./scripts/install.sh`, then ensure its dir is on PATH."
+        );
+    }
+
     finish(any_error, any_overwrite, dry_run)
 }
 
@@ -131,6 +139,13 @@ pub fn run_list(project_root: &Path) -> u8 {
             "- {:<14} project:{proj}  user:{user}{present}",
             agent.display()
         );
+    }
+    match zenith_on_path() {
+        Some(path) => println!("zenith binary: {}", path.display()),
+        None => println!(
+            "zenith binary: NOT on PATH — the skill calls `zenith` by name; \
+             install it (`cargo install --path zenith-cli` or `./scripts/install.sh`) and put its dir on PATH"
+        ),
     }
     0
 }
