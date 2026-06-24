@@ -182,9 +182,9 @@ Zenith doesn't generate a picture. It generates the _design itself_ — a struct
 
 Most design tools are built for a human dragging boxes, and an automation API gets added later as an afterthought — a thin, limited layer over a model that was never meant to be driven by software.
 
-Zenith is built the other way around. The foundation is a programmatic, text-based, deterministic engine. Agents, scripts, and the command line drive it directly. A visual editor for humans is a client on top of that same engine — not the other way around. So automation isn't a side door; it's the front door.
+Zenith is built the other way around. The foundation is a programmatic, text-based, deterministic engine. Agents, scripts, and the command line drive it directly. So automation isn't a side door; it's the front door.
 
-People are still first-class users. "Agent-first" means the safe, scriptable core comes first, and everything else is built on it.
+**Where this is going.** Today Zenith is the engine and the CLI — the surface an AI agent drives. The roadmap is a **visual editor where humans and AI agents co-edit the same `.zen` documents**: a designer nudges a box, an agent restyles a hundred variants, and both operate on the identical deterministic core with the same validation, transactions, and version history. The GUI is a client on top of the engine — not a separate product with automation bolted on. Agent-first now; **agent + human, together, next.**
 
 </details>
 
