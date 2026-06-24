@@ -287,7 +287,7 @@ const DELIVERABLE: &str = r##"zenith version=1 doc-id="01HWSCRATCHTEST0000000000
   styles {
   }
   document id="doc.del" title="Deliverable" {
-    page id="page.export" w=(px)400 h=(px)300 promotion-target="page.source" {
+    page id="page.export" w=(px)400 h=(px)300 {
       rect id="placeholder" x=(px)0 y=(px)0 w=(px)400 h=(px)300
     }
   }
@@ -303,7 +303,7 @@ const CANDIDATE_SNAP: &str = r##"zenith version=1 doc-id="01HWSCRATCHTEST0000000
   styles {
   }
   document id="doc.cand" title="Candidate" {
-    page id="page.source" w=(px)400 h=(px)300 candidate-status="selected" {
+    page id="page.source" w=(px)400 h=(px)300 {
       rect id="hero" x=(px)0 y=(px)0 w=(px)400 h=(px)300
       rect id="sub" x=(px)10 y=(px)10 w=(px)100 h=(px)50
     }
@@ -366,11 +366,6 @@ fn promote_selected_candidate_merges_content() {
     assert!(
         !written.contains("\"placeholder\""),
         "placeholder must be replaced; got:\n{written}"
-    );
-    // workspace-role must be set to export.
-    assert!(
-        written.contains("workspace-role=\"export\""),
-        "page must be marked export; got:\n{written}"
     );
 }
 

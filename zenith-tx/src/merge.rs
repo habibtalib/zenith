@@ -1,9 +1,9 @@
 //! Pure candidate-page merge helper.
 //!
 //! [`merge_candidate_page`] deep-copies a source page's content into a target
-//! page in place, suffixing every descendant id, and marks the target as an
-//! export page. The transform is pure — no filesystem access, no session I/O,
-//! no validation. The caller is responsible for validating the mutated document.
+//! page in place, suffixing every descendant id. The transform is pure — no
+//! filesystem access, no session I/O, no validation. The caller is responsible
+//! for validating the mutated document.
 
 use zenith_core::ast::document::Page;
 
@@ -11,8 +11,7 @@ use crate::engine::structure::{suffix_ids_in_children, suffix_zone_and_fold_ids}
 
 /// Merge a candidate source page's content into `target` in place: deep-copy
 /// the source's children, safe-zones, and folds with every descendant id
-/// suffixed by `id_suffix`, replacing the target's content, and mark the
-/// target as an export page.
+/// suffixed by `id_suffix`, replacing the target's content.
 ///
 /// Pure transform — no filesystem, no validation (the caller validates the
 /// resulting document).
@@ -27,8 +26,6 @@ pub fn merge_candidate_page(source: &Page, target: &mut Page, id_suffix: &str) {
     target.children = children;
     target.safe_zones = safe_zones;
     target.folds = folds;
-    target.workspace_role = Some("export".to_owned());
-    target.promotion_target = None;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -56,7 +53,7 @@ mod tests {
   tokens format="zenith-token-v1" {}
   styles {}
   document id="doc.src" title="Src" {
-    page id="page.source" w=(px)400 h=(px)300 candidate-status="selected" {
+    page id="page.source" w=(px)400 h=(px)300 {
       rect id="rect.a" x=(px)0 y=(px)0 w=(px)100 h=(px)100
       rect id="rect.b" x=(px)100 y=(px)0 w=(px)100 h=(px)100
     }
@@ -69,7 +66,7 @@ mod tests {
   tokens format="zenith-token-v1" {}
   styles {}
   document id="doc.tgt" title="Tgt" {
-    page id="page.target" w=(px)400 h=(px)300 promotion-target="page.source" {
+    page id="page.target" w=(px)400 h=(px)300 {
       rect id="old.rect" x=(px)0 y=(px)0 w=(px)50 h=(px)50
     }
   }
@@ -128,36 +125,13 @@ mod tests {
     }
 
     #[test]
-    fn target_workspace_role_set_to_export() {
-        let source = parse_first_page(SOURCE_DOC);
-        let mut target = parse_first_page(TARGET_DOC);
-        merge_candidate_page(&source, &mut target, ".p");
-        assert_eq!(target.workspace_role.as_deref(), Some("export"));
-    }
-
-    #[test]
-    fn target_promotion_target_cleared() {
-        let source = parse_first_page(SOURCE_DOC);
-        let mut target = parse_first_page(TARGET_DOC);
-        assert!(
-            target.promotion_target.is_some(),
-            "target fixture must have promotion_target"
-        );
-        merge_candidate_page(&source, &mut target, ".p");
-        assert!(
-            target.promotion_target.is_none(),
-            "promotion_target must be cleared after merge"
-        );
-    }
-
-    #[test]
     fn empty_source_replaces_target_children() {
         const EMPTY_SOURCE: &str = r##"zenith version=1 {
   project id="proj.empty" name="E"
   tokens format="zenith-token-v1" {}
   styles {}
   document id="doc.empty" title="E" {
-    page id="page.source" w=(px)100 h=(px)100 candidate-status="selected" {}
+    page id="page.source" w=(px)100 h=(px)100 {}
   }
 }
 "##;

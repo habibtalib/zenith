@@ -7,11 +7,9 @@
 
 mod add_remove;
 mod duplicate;
-mod finalize;
 mod finders;
 mod group;
 mod page;
-mod promote;
 mod reorder;
 
 pub(in crate::engine) use add_remove::{apply_add_node, apply_remove_node};
@@ -19,11 +17,9 @@ pub(in crate::engine) use duplicate::{
     apply_duplicate_node, apply_duplicate_page, node_set_id_any,
 };
 pub(crate) use duplicate::{suffix_ids_in_children, suffix_zone_and_fold_ids};
-pub(in crate::engine) use finalize::apply_finalize_run;
 pub(in crate::engine) use group::{apply_group, apply_reparent, apply_ungroup};
 pub(in crate::engine) use page::{
     AddPageSpec, apply_add_page, apply_delete_page, apply_reorder_pages, apply_set_page_size,
     parse_dimension_str,
 };
-pub(in crate::engine) use promote::apply_promote_candidate;
 pub(in crate::engine) use reorder::{ReorderKind, apply_reorder};

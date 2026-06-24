@@ -48,7 +48,7 @@ pub enum SchemaSub {
     ///
     /// Lists every attribute the parser recognises on a `page` node:
     /// geometry (w, h), margins, bleed, baseline-grid, line-jumps, parity,
-    /// master, and workflow-metadata (workspace-role, candidate-status, …).
+    /// and master.
     Page,
 
     /// Show the recognized attributes for an `asset` declaration.

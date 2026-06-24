@@ -283,7 +283,7 @@ pub(crate) fn suffix_ids_in_children(children: &mut [Node], id_suffix: &str) {
 /// Append `id_suffix` to every safe-zone and fold id in a cloned page and clear
 /// their source spans. Page-metadata children (safe-zones, folds) carry ids in
 /// the same namespace as nodes, so a deep page copy must suffix them too to stay
-/// collision-free. Shared by `DuplicatePage` and `PromoteCandidate`.
+/// collision-free. Used by `DuplicatePage` and `merge_candidate_page`.
 pub(crate) fn suffix_zone_and_fold_ids(
     safe_zones: &mut [SafeZone],
     folds: &mut [Fold],
