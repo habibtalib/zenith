@@ -23,7 +23,7 @@ text contrast-safe by construction:
 - `radius.box` (cards/frames), `radius.field` (buttons/inputs), `radius.selector` (badges/toggles)
 - `border.width` (default stroke width), `space.unit` (base spacing step)
 - `shadow.depth` (a soft elevation shadow) — present only when the theme has depth; flat themes omit it
-- _noise_ — a flag in the file header; `1` ⇒ apply the grain-overlay recipe (`references/recipes.md`), since there is no native noise primitive
+- _noise_ — a flag in the file header; `1` ⇒ apply a grain-overlay (a `noise` filter kind inside a `filter` token — see `examples/noise.zen` and `zenith schema node filter`)
 
 **Type** (added — daisyUI omits type):
 

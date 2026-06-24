@@ -55,7 +55,7 @@ Default is the page. Precedence when more than one is present: **zone > sibling 
 
 All four resolve to explicit, deterministic geometry at compile time (absent anchor = byte-identical
 to hand-placed coords). Use them for logos, page numbers, captions, badges, and CTAs so they stay
-correctly placed across size variants (see `references/format-variants.md`).
+correctly placed across size variants (see `references/variants.md`).
 
 ### Adjacent-edge placement (`anchor-edge`, `anchor-gap`)
 
@@ -116,7 +116,7 @@ rect id="card" anchor-sibling="title" anchor-edge="below" anchor-gap=(px)8 ancho
 ## Multi-size variants
 
 For square/story/banner from one design, **declare a `variants` block and run `zenith variant`**
-— a first-class, deterministic regeneration model (see `references/format-variants.md`). It
+— a first-class, deterministic regeneration model (see `references/variants.md`). It
 expands one canonical page into N named target sizes, with per-variant `override`s and automatic
 token propagation. Anchored nodes reflow to each size; reposition free-coordinate decorative nodes
 via overrides. (This is size/format variation — for varying *content* across data rows, that's

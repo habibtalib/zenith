@@ -25,8 +25,8 @@ banners, book/magazine pages, diagrams/flowcharts, ads, or on-brand variants —
 user wants the result as source they can review, version, and re-render.
 
 **Don't use it for**: generating a photographic/illustrative _picture_ (use an image model
-for that, then compose the resulting asset into a `.zen` document — see
-`references/images.md`); pure backend/code tasks; or editing existing raster files.
+for that, then compose the resulting asset into a `.zen` document — see `examples/image.zen` and
+`zenith schema node image`); pure backend/code tasks; or editing existing raster files.
 
 ## The CLI is the source of truth
 
@@ -84,7 +84,7 @@ These make designs editable, on-brand, and reproducible — and keep the agentic
 - **Validate before render, render before finalize.** Hard diagnostics block finalization.
 - **Keep real-object pixels external.** Photos/illustrations from an image model are declared
   as `assets` (with `sha256` for lockable provenance) and placed as `image` nodes — never bake
-  text or layout into a flattened picture. See `references/images.md`.
+  text or layout into a flattened picture. See `examples/image.zen` and `zenith schema node image`.
 - **Determinism.** Same source + backend → same bytes. No reliance on time/randomness. If you
   generate many nodes procedurally, record the parameters/seed in a note so it is replayable.
 - **Verify syntax against reality, not memory.** Exact node/attribute syntax lives in
@@ -103,7 +103,7 @@ example). Every command supports `--json`. The groups, in brief: **author** (`va
 
 > Two different "variant" tools — don't confuse them: `zenith variant` varies **size/format**
 > (one design → square/story/banner), `zenith merge` varies **content** (one template → many
-> data rows). See `references/format-variants.md` vs `references/variants.md`.
+> data rows). `references/variants.md` covers both.
 
 ## Routing — load a reference pack on demand
 
@@ -117,18 +117,15 @@ Read only the pack you need for the current sub-task (progressive disclosure). E
 | Command flags and usage                                                                               | `zenith <cmd> --help`                                      |
 | Syntax errors, type mismatches, "did you mean?" — act on the diagnostic                              | `zenith validate <file> --json`                            |
 | The full agent run: scratch experiments, multiple candidates, select, promote, clean up, provenance   | `references/agentic-workflow.md`                           |
-| Backgrounds, gradients, glows, patterns, motifs, texture/grain, "make it look premium"                | `references/recipes.md`                                    |
 | Procedural grid/scatter tiling — the `pattern` node or the `detach_pattern` op                        | `references/pattern.md`                                    |
 | Recording a generated motif as a `recipes` block (provenance, seed/params, recipe `tx` ops)           | `references/recipes-model.md`                              |
 | Picking or applying a ready-made visual theme (palette + shape language)                              | `references/themes.md` + `themes/*.zen`                    |
 | Generating a theme from a brand (logo, website, brand colors)                                         | `references/themes.md` → `zenith theme new --help`         |
-| Color systems, palettes, sRGB vs CMYK, gradient tokens                                                | `references/color.md`                                      |
-| Text, fonts, spans, wrapping, hyphenation, contrast                                                   | `references/typography.md`                                 |
+| Color, gradients, glows, texture, typography, "make it premium" — visual effects                      | `zenith schema` for attributes + `examples/*.zen` for runnable patterns + design judgment |
 | Page setup, anchors, safe zones, frames, grids, spreads                                               | `references/layout.md`                                     |
-| Bringing in a photo/illustration asset and composing around it                                        | `references/images.md`                                     |
+| Bringing in a photo/illustration asset and composing around it                                        | `examples/image.zen` + `zenith schema node image`         |
 | Defining or applying a brand/identity, or per-project style                                           | `references/brand.md`                                      |
-| Same design at many **sizes/formats** (square/story/banner) — the `variants` block + `zenith variant` | `references/format-variants.md`                            |
-| Many outputs from one template + **data** rows (mail-merge, localization, personalization)            | `references/variants.md` (`zenith merge`)                  |
+| Many outputs from one design — **sizes/formats** (`zenith variant`) or **data** rows (`zenith merge`) | `references/variants.md`                                   |
 | Reporting a Zenith bug or feature request (the `gh` feedback loop)                                    | `references/reporting-issues.md`                           |
 
 ## Project configuration (brand / identity / style)

@@ -1,15 +1,53 @@
-# Data mail-merge (`zenith merge`)
+# Variants
+
+Zenith has two distinct "variant" tools — don't confuse them:
+
+- **`zenith variant`** — one design at many **sizes/formats** (square/story/banner). Varies dimensions.
+- **`zenith merge`** — one template + many **data rows** → many rendered outputs. Varies content.
+
+---
+
+## Size/format variants (`zenith variant`)
+
+Turn **one canonical page into many named target sizes** — square, story, banner, ad slots —
+deterministically. This varies **dimensions** (and small per-target tweaks). Reach for `variant`
+for "the same design at 4 sizes"; reach for `merge` for "this design for 200 people".
+
+For the `variants` block syntax, `override` props, and all command flags, run:
+
+```bash
+zenith variant --help
+```
+
+### Why it's reliable
+
+- **Token propagation is free.** Variants are overrides *on* the canonical page, so they inherit
+  the source tokens — change a brand token once and every size re-renders on-brand.
+- **Anchored nodes reflow.** Use `anchor` / `anchor-zone` (see `references/layout.md`) so logos,
+  CTAs, and page numbers stay correctly placed at every size; only free-coordinate decorative
+  nodes need per-variant repositioning.
+- **Deterministic.** Same source → byte-identical `.zen`, PNG, and manifest across runs.
+
+### Workflow
+
+1. Build and `zenith validate` the canonical page first — a broken source fails every variant.
+   Variant-specific diagnostics: `variant.duplicate_id`, `variant.unknown_source`,
+   `variant.invalid_dimension` (non-px or ≤ 0), `variant.override_unknown_node`.
+2. Generate, then open a couple of the PNGs to eyeball reflow at the widest/tallest sizes.
+3. For CI, pass `--manifest` and commit it so the batch is auditable and reproducible.
+
+Run `zenith variant --help` for exact flags.
+
+---
+
+## Data-driven variants / mail-merge (`zenith merge`)
 
 Turn **one template + a data table into many rendered designs** — deterministically. This is
 the high-volume path: localized posts (one row per language), personalized graphics (one row
 per recipient), campaign/product variants, certificates, badges, price cards. One template,
 N rows, N PNGs, each reproducible.
 
-> Not the same as `zenith variant`. This (`merge`) varies **content** across CSV rows. To render
-> one design at multiple **sizes/formats** (square/story/banner), use the `variants` block +
-> `zenith variant` — see `references/format-variants.md`.
-
-## How it works
+### How it works
 
 1. Author a normal `.zen` template (tokens, layout, stable ids — all the usual discipline).
 2. Mark the **variable** nodes with `role="data.<column>"`, where `<column>` matches a CSV
@@ -21,10 +59,10 @@ N rows, N PNGs, each reproducible.
 4. Run `merge` — one render per data row.
 
 ```kdl
-# in the template, the headline is bound to the CSV "name" column:
+// in the template, the headline is bound to the CSV "name" column:
 text id="t.name" role="data.name" x=(px)60 y=(px)160 w=(px)680 h=(px)90
      fill=(token)"color.ink" font-family=(token)"font.h" font-size=(token)"size.h" { span "PLACEHOLDER" }
-# a per-row image:
+// a per-row image:
 image id="img.logo" role="data.logo" asset="asset.placeholder" x=(px)60 y=(px)40 w=(px)160 h=(px)60 fit="contain"
 ```
 
@@ -40,7 +78,7 @@ For the full command flags (including `--name-by`, `--manifest`, `--json`), run:
 zenith merge --help
 ```
 
-## Workflow
+### Workflow
 
 1. Build the template and `zenith validate` it once — fix every hard diagnostic before batching
    (a broken template fails every row).
@@ -50,12 +88,12 @@ zenith merge --help
 4. For production/CI, pass `--manifest` (and render assets with `--locked` where applicable via
    the template's `sha256` asset hashes) so the batch is auditable and reproducible.
 
-## Tips
+### Tips
 
 - Everything stays tokenized — a brand/palette change re-renders all variants from one edit
-  (`references/brand.md`, `references/themes.md`).
+  (see `references/brand.md`, `references/themes.md`).
 - Pages vs rows: `merge` varies **content** across CSV rows; different **sizes** (square/story/
-  banner) are separate pages in the template — see `references/layout.md`.
+  banner) are separate pages in the template handled by `zenith variant` — see above.
 - Localization: one column per text slot, one row per locale; keep type large enough for the
   longest translation.
 

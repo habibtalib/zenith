@@ -111,7 +111,9 @@ fn folder_install_writes_whole_tree_and_commands() {
     );
     // Entry file and a reference pack exist on disk.
     let skill = tmp.path().join(".claude/skills/zenith/SKILL.md");
-    let refs = tmp.path().join(".claude/skills/zenith/references/color.md");
+    let refs = tmp
+        .path()
+        .join(".claude/skills/zenith/references/layout.md");
     let cmd = tmp.path().join(".claude/commands/zenith-new.md");
     assert!(skill.is_file() && refs.is_file() && cmd.is_file());
     assert!(is_installed(Agent::ClaudeCode, Scope::Project, tmp.path()));

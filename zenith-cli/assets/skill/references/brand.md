@@ -54,7 +54,7 @@ zenith library add @acme/brand#<item> --into doc.zen --page page.hero   # materi
 - A document whose colors/fonts/sizes are all tokens can be re-skinned by applying a brand
   action (a `tx` that does `update_token_value` on `color.brand`, etc.) — preview with
   `zenith tx doc.zen brand.tx.json`, then `--apply`. No geometry changes; the palette swaps
-  consistently everywhere (see `references/recipes.md` → "re-skin").
+  consistently everywhere.
 - This is why the engine insists on tokens: brand application is a token-value diff, not a
   redraw.
 
