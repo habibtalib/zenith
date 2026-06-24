@@ -193,22 +193,26 @@ fn run_render(args: &Value) -> Result<Value, String> {
     let locked = flag(args, "locked");
     let parent = path.parent();
     let src = read(&path)?;
+    // MCP carries no policy flags; in-document `diagnostics {}` and config files
+    // are still resolved on the render path via the project directory.
+    let flags = crate::config::CliPolicyFlags::default();
 
     let (bytes, ext, mime_diags): (Vec<u8>, &str, Vec<zenith_core::Diagnostic>) = match format {
         "png" => {
-            let art = commands::render::to_png_with_dir(&src, parent, page, locked)
+            let art = commands::render::to_png_with_dir(&src, parent, page, locked, &flags)
                 .map_err(|e| e.message)?;
             blocked(&art.diagnostics)?;
             (art.png, "png", art.diagnostics)
         }
         "pdf" => {
-            let art = commands::render::to_pdf_with_dir(&src, parent, page, locked)
+            let art = commands::render::to_pdf_with_dir(&src, parent, page, locked, &flags)
                 .map_err(|e| e.message)?;
             blocked(&art.diagnostics)?;
             (art.pdf, "pdf", art.diagnostics)
         }
         "scene" => {
-            let art = commands::render::to_scene_json(&src, parent, page).map_err(|e| e.message)?;
+            let art = commands::render::to_scene_json(&src, parent, page, &flags)
+                .map_err(|e| e.message)?;
             blocked(&art.diagnostics)?;
             (art.json.into_bytes(), "json", art.diagnostics)
         }
