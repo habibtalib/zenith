@@ -133,30 +133,65 @@ pub(super) fn translate(
     (content, res)
 }
 
-/// True for a command that opens a non-vector effect bracket (blur, shadow,
-/// filter, or mask). Returns `false` for all other variants. Note: `matches!`
-/// is NOT exhaustive — a new `Begin*` variant silently returns `false` (and
-/// is treated as a plain draw). Update this predicate alongside any new effect.
+/// A scene command's role in non-vector effect bracketing.
+enum EffectBracket {
+    /// Opens an offscreen capture (blur, shadow, filter, or mask).
+    Open,
+    /// Closes the innermost offscreen capture.
+    Close,
+    /// Not an effect bracket — a plain draw, clip, layer, or transform command.
+    None,
+}
+
+/// Exhaustively classify a command's effect-bracket role. Every `SceneCommand`
+/// variant is listed explicitly (no wildcard arm), so adding a new variant
+/// forces a compile error here and can never be silently treated as a plain draw.
+fn effect_bracket(cmd: &SceneCommand) -> EffectBracket {
+    match cmd {
+        // ── Effect openers ────────────────────────────────────────────────
+        SceneCommand::BeginShadow { .. }
+        | SceneCommand::BeginBlur { .. }
+        | SceneCommand::BeginFilter { .. }
+        | SceneCommand::BeginMask { .. } => EffectBracket::Open,
+
+        // ── Effect closers ────────────────────────────────────────────────
+        SceneCommand::EndShadow
+        | SceneCommand::EndBlur
+        | SceneCommand::EndFilter
+        | SceneCommand::EndMask => EffectBracket::Close,
+
+        // ── Plain draw / clip / layer / transform commands ─────────────────
+        SceneCommand::FillRect { .. }
+        | SceneCommand::StrokeRect { .. }
+        | SceneCommand::FillRoundedRect { .. }
+        | SceneCommand::StrokeRoundedRect { .. }
+        | SceneCommand::FillEllipse { .. }
+        | SceneCommand::StrokeEllipse { .. }
+        | SceneCommand::StrokeLine { .. }
+        | SceneCommand::FillPolygon { .. }
+        | SceneCommand::StrokePolyline { .. }
+        | SceneCommand::DrawImage { .. }
+        | SceneCommand::DrawSvgAsset { .. }
+        | SceneCommand::DrawGlyphRun { .. }
+        | SceneCommand::PushClip { .. }
+        | SceneCommand::PopClip
+        | SceneCommand::PushLayer { .. }
+        | SceneCommand::PopLayer
+        | SceneCommand::PushTransform { .. }
+        | SceneCommand::PopTransform => EffectBracket::None,
+    }
+}
+
+/// True for a command that opens a non-vector effect bracket (shadow, blur,
+/// filter, or mask).
 fn is_effect_open(cmd: &SceneCommand) -> bool {
-    matches!(
-        cmd,
-        SceneCommand::BeginBlur { .. }
-            | SceneCommand::BeginShadow { .. }
-            | SceneCommand::BeginFilter { .. }
-            | SceneCommand::BeginMask { .. }
-    )
+    matches!(effect_bracket(cmd), EffectBracket::Open)
 }
 
 /// True for a command that closes a non-vector effect bracket — the matching
 /// `End*` for each [`is_effect_open`] case.
 fn is_effect_close(cmd: &SceneCommand) -> bool {
-    matches!(
-        cmd,
-        SceneCommand::EndBlur
-            | SceneCommand::EndShadow
-            | SceneCommand::EndFilter
-            | SceneCommand::EndMask
-    )
+    matches!(effect_bracket(cmd), EffectBracket::Close)
 }
 
 /// True for a `BeginFilter` carrying no filters — a no-op bracket that must not

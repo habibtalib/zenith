@@ -3,16 +3,15 @@
 use std::collections::BTreeSet;
 
 use crate::ast::node::PatternNode;
-use crate::ast::value::{PropertyValue, dim_to_px};
+use crate::ast::value::dim_to_px;
 use crate::diagnostics::Diagnostic;
 
 use super::shared::{
-    AnchorParentCtx, AnchorProps, check_anchor, check_optional_dim, check_style_ref,
-    is_valid_blend_mode,
+    AnchorParentCtx, AnchorProps, VisualProps, check_anchor, check_optional_dim, check_style_ref,
+    check_visual_props,
 };
 use crate::validate::check::nodes::WalkCtx;
 use crate::validate::check::register_id;
-use crate::validate::check::visual::{VisualExpect, check_visual_prop};
 
 pub(in crate::validate::check) fn check_pattern(
     p: &PatternNode,
@@ -92,168 +91,42 @@ pub(in crate::validate::check) fn check_pattern(
 
     // Visual properties — token refs collected for token-usage checks.
     // This mirrors the complete set that check_rect collects so that a token
-    // used only on a pattern's border/stroke-outer/blur props is counted as used.
-    check_visual_prop(
+    // used only on a pattern's border/stroke-outer/blur props is counted as
+    // used. Pattern has no corner-radius props, so all radius fields are `None`.
+    let props = VisualProps {
+        fill: p.fill.as_ref(),
+        stroke: p.stroke.as_ref(),
+        stroke_width: p.stroke_width.as_ref(),
+        stroke_dash: p.stroke_dash.as_ref(),
+        stroke_gap: p.stroke_gap.as_ref(),
+        stroke_linecap: p.stroke_linecap.as_deref(),
+        border_top: p.border_top.as_ref(),
+        border_bottom: p.border_bottom.as_ref(),
+        border_left: p.border_left.as_ref(),
+        border_right: p.border_right.as_ref(),
+        stroke_outer: p.stroke_outer.as_ref(),
+        border_width: p.border_width.as_ref(),
+        stroke_outer_width: p.stroke_outer_width.as_ref(),
+        blend_mode: p.blend_mode.as_deref(),
+        radius: None,
+        radius_tl: None,
+        radius_tr: None,
+        radius_br: None,
+        radius_bl: None,
+        shadow: p.shadow.as_ref(),
+        filter: p.filter.as_ref(),
+        mask: p.mask.as_ref(),
+        blur: p.blur.as_ref(),
+    };
+    check_visual_props(
+        "pattern",
         &p.id,
-        "fill",
-        p.fill.as_ref(),
-        VisualExpect::ColorOrGradient,
+        p.source_span,
+        props,
         referenced_token_ids,
         resolved_tokens,
         diagnostics,
     );
-    check_visual_prop(
-        &p.id,
-        "stroke",
-        p.stroke.as_ref(),
-        VisualExpect::Color,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    check_visual_prop(
-        &p.id,
-        "stroke-width",
-        p.stroke_width.as_ref(),
-        VisualExpect::Dimension,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    check_visual_prop(
-        &p.id,
-        "stroke-dash",
-        p.stroke_dash.as_ref(),
-        VisualExpect::Dimension,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    if let Some(PropertyValue::Dimension(d)) = p.stroke_dash.as_ref()
-        && d.value < 0.0
-    {
-        diagnostics.push(Diagnostic::error(
-            "node.invalid_geometry",
-            format!("pattern '{}': stroke-dash must be >= 0", p.id),
-            p.source_span,
-            Some(p.id.clone()),
-        ));
-    }
-    check_visual_prop(
-        &p.id,
-        "stroke-gap",
-        p.stroke_gap.as_ref(),
-        VisualExpect::Dimension,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    if let Some(PropertyValue::Dimension(d)) = p.stroke_gap.as_ref()
-        && d.value < 0.0
-    {
-        diagnostics.push(Diagnostic::error(
-            "node.invalid_geometry",
-            format!("pattern '{}': stroke-gap must be >= 0", p.id),
-            p.source_span,
-            Some(p.id.clone()),
-        ));
-    }
-    if let Some(lc) = p.stroke_linecap.as_deref()
-        && !matches!(lc, "butt" | "round" | "square")
-    {
-        diagnostics.push(Diagnostic::warning(
-            "node.unknown_property",
-            format!(
-                "pattern '{}': stroke-linecap '{}' is not one of butt/round/square",
-                p.id, lc
-            ),
-            p.source_span,
-            Some(p.id.clone()),
-        ));
-    }
-    // Per-side border colors and outer stroke (token-required color props).
-    for (prop_name, prop_val) in [
-        ("border-top", p.border_top.as_ref()),
-        ("border-bottom", p.border_bottom.as_ref()),
-        ("border-left", p.border_left.as_ref()),
-        ("border-right", p.border_right.as_ref()),
-        ("stroke-outer", p.stroke_outer.as_ref()),
-    ] {
-        check_visual_prop(
-            &p.id,
-            prop_name,
-            prop_val,
-            VisualExpect::Color,
-            referenced_token_ids,
-            resolved_tokens,
-            diagnostics,
-        );
-    }
-    // Per-side border width and outer stroke width (token-required dimension props).
-    for (prop_name, prop_val) in [
-        ("border-width", p.border_width.as_ref()),
-        ("stroke-outer-width", p.stroke_outer_width.as_ref()),
-    ] {
-        check_visual_prop(
-            &p.id,
-            prop_name,
-            prop_val,
-            VisualExpect::Dimension,
-            referenced_token_ids,
-            resolved_tokens,
-            diagnostics,
-        );
-    }
-    if let Some(bm) = p.blend_mode.as_deref()
-        && !is_valid_blend_mode(bm)
-    {
-        diagnostics.push(Diagnostic::warning(
-            "node.unknown_property",
-            format!(
-                "pattern '{}': blend-mode '{bm}' is not a recognized value",
-                p.id
-            ),
-            p.source_span,
-            Some(p.id.clone()),
-        ));
-    }
-    check_visual_prop(
-        &p.id,
-        "shadow",
-        p.shadow.as_ref(),
-        VisualExpect::Shadow,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    check_visual_prop(
-        &p.id,
-        "filter",
-        p.filter.as_ref(),
-        VisualExpect::Filter,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    check_visual_prop(
-        &p.id,
-        "mask",
-        p.mask.as_ref(),
-        VisualExpect::Mask,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    if let Some(d) = p.blur.as_ref()
-        && d.value < 0.0
-    {
-        diagnostics.push(Diagnostic::error(
-            "node.invalid_geometry",
-            format!("pattern '{}': blur must be >= 0", p.id),
-            p.source_span,
-            Some(p.id.clone()),
-        ));
-    }
 
     // Pattern-specific semantic checks.
     //
