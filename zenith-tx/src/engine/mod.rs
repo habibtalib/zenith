@@ -29,8 +29,9 @@ use pattern::apply_detach_pattern;
 use recipe::{RecipeScalars, apply_create_recipe, apply_delete_recipe, apply_update_recipe};
 use structure::{
     ReorderKind, apply_add_node, apply_add_page, apply_delete_page, apply_duplicate_node,
-    apply_duplicate_page, apply_group, apply_promote_candidate, apply_remove_node, apply_reorder,
-    apply_reorder_pages, apply_reparent, apply_set_page_size, apply_ungroup,
+    apply_duplicate_page, apply_finalize_run, apply_group, apply_promote_candidate,
+    apply_remove_node, apply_reorder, apply_reorder_pages, apply_reparent, apply_set_page_size,
+    apply_ungroup,
 };
 use style::{
     apply_find_replace_text, apply_replace_text, apply_set_fill, apply_set_opacity,
@@ -405,6 +406,9 @@ fn apply_op(
         Op::DeleteRecipe { id } => {
             apply_delete_recipe(id, doc, diagnostics, affected);
         }
+        Op::FinalizeRun { run_pages } => {
+            apply_finalize_run(run_pages, doc, diagnostics, affected);
+        }
         Op::DetachPattern { node: node_id } => {
             apply_detach_pattern(node_id, doc, diagnostics, affected);
         }
@@ -462,6 +466,7 @@ fn op_lock_targets(op: &Op) -> Vec<&str> {
         // Page-structure ops act on `Page` structs, which have no `locked`
         // dimension (locking is a per-`Node` property). There is no node-level
         // lock target to enforce here, so these are exempt (empty).
+        | Op::FinalizeRun { .. }
         | Op::PromoteCandidate { .. }
         | Op::AddPage { .. }
         | Op::DeletePage { .. }

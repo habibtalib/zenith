@@ -512,6 +512,7 @@ fn op_name(op: &zenith_tx::Op) -> String {
         zenith_tx::Op::CreateRecipe { .. } => "create_recipe",
         zenith_tx::Op::UpdateRecipe { .. } => "update_recipe",
         zenith_tx::Op::DeleteRecipe { .. } => "delete_recipe",
+        zenith_tx::Op::FinalizeRun { .. } => "finalize_run",
         zenith_tx::Op::DetachPattern { .. } => "detach_pattern",
     }
     .to_owned()

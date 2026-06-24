@@ -27,6 +27,7 @@ pub fn op_names() -> &'static [&'static str] {
         "distribute_nodes",
         "duplicate_node",
         "duplicate_page",
+        "finalize_run",
         "find_replace_text",
         "group",
         "move_backward",
@@ -124,6 +125,9 @@ pub fn op_summary(name: &str) -> Option<&'static str> {
         "promote_candidate" => Some(
             "Deep-copy a selected candidate page's content into a target export page with fresh node ids.",
         ),
+        "finalize_run" => Some(
+            "Clean up rejected candidate pages at the end of a run by deleting or archiving them per their cleanup-policy.",
+        ),
         _ => None,
     }
 }
@@ -184,6 +188,7 @@ mod tests {
             Op::DeleteRecipe { .. } => "delete_recipe",
             Op::DetachPattern { .. } => "detach_pattern",
             Op::PromoteCandidate { .. } => "promote_candidate",
+            Op::FinalizeRun { .. } => "finalize_run",
         }
     }
 
@@ -233,6 +238,7 @@ mod tests {
             "delete_recipe",
             "detach_pattern",
             "promote_candidate",
+            "finalize_run",
         ])
     }
 
@@ -451,6 +457,7 @@ mod tests {
                 target_page: String::new(),
                 id_suffix: String::new(),
             },
+            Op::FinalizeRun { run_pages: vec![] },
         ];
 
         for op in samples {

@@ -900,6 +900,15 @@ pub enum Op {
         /// Suffix appended to every descendant node id in the copy (keeps ids unique).
         id_suffix: String,
     },
+    /// Finalize a candidate run: for each listed page whose candidate-status is
+    /// "rejected", apply its cleanup-policy — "delete" removes the page entirely,
+    /// "archive" (or absent policy) sets its workspace-role to "archived", and any
+    /// other policy is left untouched with an advisory. Pages that are not rejected
+    /// (or not listed) are never modified.
+    FinalizeRun {
+        /// The ids of the candidate pages that were part of this run.
+        run_pages: Vec<String>,
+    },
     /// Materialize a `pattern` node into an editable `group` of native shapes —
     /// the "detach to native" path.
     ///
