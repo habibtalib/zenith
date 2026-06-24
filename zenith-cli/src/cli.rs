@@ -202,16 +202,6 @@ pub enum Command {
     /// inspect candidates; use `zenith workspace candidate` to transition their
     /// lifecycle status (draft → selected | rejected).
     Workspace(WorkspaceArgs),
-
-    /// Relocate provenance state from a `.zen` deliverable into the app-managed store.
-    ///
-    /// Reads the `agent-runs`, `previews`, and page-level candidate metadata
-    /// blocks from the document, writes them into the per-document store (under
-    /// the same doc-id), and re-emits the `.zen` with those blocks stripped.
-    /// The document must already have a `doc-id`; run `zenith sync` first if it
-    /// does not. Use `--dry-run` to preview what would be migrated without writing
-    /// to the store or modifying the file.
-    Migrate(MigrateArgs),
 }
 
 /// Arguments for `zenith mcp`.
@@ -515,22 +505,4 @@ pub struct RestoreArgs {
 pub struct SyncArgs {
     /// Path to the `.zen` document.
     pub path: PathBuf,
-}
-
-/// Arguments for `zenith migrate`.
-#[derive(Debug, Args)]
-#[command(
-    after_help = "EXAMPLE:\n  zenith migrate poster.zen\n  zenith migrate poster.zen --dry-run\n  zenith migrate poster.zen --json"
-)]
-pub struct MigrateArgs {
-    /// Path to the `.zen` document to migrate.
-    pub doc: PathBuf,
-
-    /// Emit machine-readable JSON reporting counts and warnings.
-    #[arg(long)]
-    pub json: bool,
-
-    /// Preview what would be migrated without writing to the store or the file.
-    #[arg(long)]
-    pub dry_run: bool,
 }

@@ -9,7 +9,6 @@ pub mod fmt;
 pub mod inspect;
 pub mod library;
 pub mod merge;
-pub mod migrate;
 pub mod plugin;
 pub mod render;
 pub mod schema;

@@ -549,36 +549,5 @@ pub fn run() -> ExitCode {
         }
 
         Command::Workspace(args) => workspace::dispatch_workspace(args),
-
-        Command::Migrate(args) => {
-            let src = match read_file(&args.doc) {
-                Ok(s) => s,
-                Err(msg) => {
-                    eprintln!("{}", msg);
-                    return ExitCode::from(2);
-                }
-            };
-            match commands::migrate::run(&src, args.dry_run, args.json) {
-                Ok(out) => {
-                    if !args.dry_run {
-                        let recorded =
-                            history::record_edit(&out.stripped_bytes, &args.doc, "migrate");
-                        if let Some(w) = &recorded.warning {
-                            eprintln!("warning: {w}");
-                        }
-                        if let Err(e) = std::fs::write(&args.doc, &recorded.bytes) {
-                            eprintln!("error writing '{}': {}", args.doc.display(), e);
-                            return ExitCode::from(2);
-                        }
-                    }
-                    println!("{}", out.report);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("{}", e.message);
-                    ExitCode::from(e.exit_code)
-                }
-            }
-        }
     }
 }
