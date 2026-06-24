@@ -182,3 +182,49 @@ zenith tx doc.zen palette.tx.json --apply    # write it
 
 See `references/brand.md` for brand-kit packs that bundle these swaps as reusable `actions`,
 and `references/color.md` for the token model. Run `zenith tx --help` for the op schema.
+
+## Recipe: repeating tiled motif via pattern grid
+
+The `pattern` node tiles a single motif template across a bounds box deterministically — no
+manual node authoring, no seed-computing loop. Change `spacing` for density; add `jitter` for
+organic variety. See `references/pattern.md` for the full attribute reference.
+
+```kdl
+tokens format="zenith-token-v1" {
+  token id="color.dot" type="color" value="#22d3ee55"
+}
+pattern id="bg.dots" kind="grid" x=(px)0 y=(px)0 w=(px)1080 h=(px)1080 spacing=(px)48 jitter=0.15 seed=7 {
+  ellipse id="dot" x=(px)0 y=(px)0 w=(px)8 h=(px)8 fill=(token)"color.dot"
+}
+```
+
+- `spacing`, like `x`/`y`/`w`/`h`, is a literal dimension (`(px)N`) — it is **not** a token
+  reference. Writing `spacing=(token)"…"` leaves the grid with no spacing and fires
+  `pattern.grid_missing_spacing`.
+- A token used **only** inside the motif (here `color.dot`) currently reads as `token.unused`
+  (advisory) — the validator does not descend into the template. The pattern still renders; the
+  advisory is harmless.
+- The bounds box clips instances at the edges.
+- `jitter=0.15` displaces each cell by up to ±15 % of `spacing` per axis (seed-derived, x/y
+  uncorrelated).
+- To freeze the tiled instances into individually-editable nodes: `zenith tx doc.zen detach.json`
+  where `detach.json` is `{"ops":[{"op":"detach_pattern","node":"bg.dots"}]}` (tx files always wrap
+  their ops in an `ops` array).
+
+## Recipe: random scatter via pattern scatter
+
+Scatter a fixed count of motif instances at seed-derived pseudo-random positions inside the
+bounds. Change `seed` to rotate the arrangement; change `count` to control density.
+
+```kdl
+tokens format="zenith-token-v1" {
+  token id="color.accent" type="color" value="#f59e0b99"
+}
+pattern id="bg.scatter" kind="scatter" x=(px)0 y=(px)0 w=(px)1080 h=(px)1080 count=25 seed=42 {
+  rect id="star" x=(px)0 y=(px)0 w=(px)12 h=(px)12 fill=(token)"color.accent" rotate=(deg)45
+}
+```
+
+The motif `id` (`star`) is a template — it is not addressable. Rendered instances carry ids
+`bg.scatter.0` … `bg.scatter.24`. For the full attribute table and `detach_pattern` op, see
+`references/pattern.md`.

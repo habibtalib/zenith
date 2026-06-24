@@ -36,7 +36,7 @@ zenith --help           # the command list + the loop, in the tool itself
 zenith <command> --help # exact flags, plus an EXAMPLE, for any command
 ```
 
-The CLI is the source of truth for *what commands exist and what flags they take* — it is
+The CLI is the source of truth for _what commands exist and what flags they take_ — it is
 self-documenting, so **read `zenith --help` and `zenith <command> --help` instead of guessing
 flags or relying on this file for syntax.** This skill covers what help can't: the workflow
 loop, design recipes, and the token/brand discipline below.
@@ -102,20 +102,21 @@ example). Every command supports `--json`. The groups, in brief: **author** (`va
 Read only the pack you need for the current sub-task (progressive disclosure). Each lives in
 `references/` next to this file.
 
-| The task involves…                                                                                  | Read                                                       |
-| --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| The full agent run: scratch experiments, multiple candidates, select, promote, clean up, provenance | `references/agentic-workflow.md`                           |
-| Backgrounds, gradients, glows, patterns, motifs, texture/grain, "make it look premium"              | `references/recipes.md`                                    |
-| Recording a generated motif as a `recipes` block (provenance, seed/params, recipe `tx` ops)         | `references/recipes-model.md`                              |
-| Picking or applying a ready-made visual theme (palette + shape language)                            | `references/themes.md` + `themes/*.zen`                    |
-| Generating a theme from a brand (logo, website, brand colours)                                      | `references/theme-from-brand.md` (uses `zenith theme new`) |
-| Color systems, palettes, sRGB vs CMYK, gradient tokens                                              | `references/color.md`                                      |
-| Text, fonts, spans, wrapping, hyphenation, contrast                                                 | `references/typography.md`                                 |
-| Page setup, anchors, safe zones, frames, grids, spreads                                             | `references/layout.md`                                     |
-| Bringing in a photo/illustration asset and composing around it                                      | `references/images.md`                                     |
-| Defining or applying a brand/identity, or per-project style                                         | `references/brand.md`                                      |
-| Same design at many **sizes/formats** (square/story/banner) — the `variants` block + `zenith variant` | `references/format-variants.md`                          |
-| Many outputs from one template + **data** rows (mail-merge, localization, personalization)           | `references/variants.md` (`zenith merge`)                  |
+| The task involves…                                                                                    | Read                                                       |
+| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| The full agent run: scratch experiments, multiple candidates, select, promote, clean up, provenance   | `references/agentic-workflow.md`                           |
+| Backgrounds, gradients, glows, patterns, motifs, texture/grain, "make it look premium"                | `references/recipes.md`                                    |
+| Procedural grid/scatter tiling — the `pattern` node or the `detach_pattern` op                        | `references/pattern.md`                                    |
+| Recording a generated motif as a `recipes` block (provenance, seed/params, recipe `tx` ops)           | `references/recipes-model.md`                              |
+| Picking or applying a ready-made visual theme (palette + shape language)                              | `references/themes.md` + `themes/*.zen`                    |
+| Generating a theme from a brand (logo, website, brand colours)                                        | `references/theme-from-brand.md` (uses `zenith theme new`) |
+| Color systems, palettes, sRGB vs CMYK, gradient tokens                                                | `references/color.md`                                      |
+| Text, fonts, spans, wrapping, hyphenation, contrast                                                   | `references/typography.md`                                 |
+| Page setup, anchors, safe zones, frames, grids, spreads                                               | `references/layout.md`                                     |
+| Bringing in a photo/illustration asset and composing around it                                        | `references/images.md`                                     |
+| Defining or applying a brand/identity, or per-project style                                           | `references/brand.md`                                      |
+| Same design at many **sizes/formats** (square/story/banner) — the `variants` block + `zenith variant` | `references/format-variants.md`                            |
+| Many outputs from one template + **data** rows (mail-merge, localization, personalization)            | `references/variants.md` (`zenith merge`)                  |
 
 ## Project configuration (brand / identity / style)
 
