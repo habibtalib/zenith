@@ -949,6 +949,18 @@ pub fn run() -> ExitCode {
                     }
                 }
             }
+            cli::WorkspaceSub::Promote(a) => {
+                match commands::workspace::promote(&a.doc, &a.candidate, &a.into, &a.id_suffix) {
+                    Ok(out) => {
+                        println!("{}", out);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("{}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            }
         },
     }
 }

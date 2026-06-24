@@ -18,6 +18,7 @@ pub(in crate::engine) use add_remove::{apply_add_node, apply_remove_node};
 pub(in crate::engine) use duplicate::{
     apply_duplicate_node, apply_duplicate_page, node_set_id_any,
 };
+pub(crate) use duplicate::{suffix_ids_in_children, suffix_zone_and_fold_ids};
 pub(in crate::engine) use finalize::apply_finalize_run;
 pub(in crate::engine) use group::{apply_group, apply_reparent, apply_ungroup};
 pub(in crate::engine) use page::{

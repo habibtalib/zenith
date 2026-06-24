@@ -868,6 +868,15 @@ pub enum WorkspaceSub {
 
     /// Transition a scratch candidate's lifecycle status (draft → selected | rejected).
     Candidate(CandidateArgs),
+
+    /// Promote a selected candidate into a target page of the deliverable document.
+    ///
+    /// Fetches the candidate's stored `.zen` snapshot, deep-copies the source page's
+    /// content into the named target page (suffixing all ids), validates the result,
+    /// and writes the mutated document back in place. The promote is recorded in
+    /// version history. The candidate must have status `selected`; use
+    /// `zenith workspace candidate` to transition it first.
+    Promote(PromoteArgs),
 }
 
 /// Arguments for `zenith workspace scratch`.
@@ -944,6 +953,27 @@ pub struct ScratchShowArgs {
     /// Emit machine-readable JSON instead of a human-readable summary.
     #[arg(long)]
     pub json: bool,
+}
+
+/// Arguments for `zenith workspace promote`.
+#[derive(Debug, Args)]
+#[command(after_help = "EXAMPLE:\n  \
+zenith workspace promote poster.zen cand0 --into page.export\n  \
+zenith workspace promote poster.zen cand0 --into page.export --id-suffix .v2")]
+pub struct PromoteArgs {
+    /// Path to the deliverable `.zen` document (written in-place).
+    pub doc: PathBuf,
+
+    /// The candidate id to promote (must have status `selected`).
+    pub candidate: String,
+
+    /// Id of the target page in the deliverable document to merge content into.
+    #[arg(long, value_name = "PAGE_ID")]
+    pub into: String,
+
+    /// Suffix appended to every cloned node id to keep them unique (default: `.promoted`).
+    #[arg(long, default_value = ".promoted", value_name = "SUFFIX")]
+    pub id_suffix: String,
 }
 
 /// Arguments for `zenith workspace candidate`.

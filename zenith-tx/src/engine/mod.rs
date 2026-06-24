@@ -15,7 +15,7 @@ mod flags;
 mod geometry;
 mod pattern;
 mod recipe;
-mod structure;
+pub(crate) mod structure;
 mod style;
 mod token;
 

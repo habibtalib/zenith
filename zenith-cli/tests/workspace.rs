@@ -1,4 +1,5 @@
-//! Integration tests for `zenith workspace scratch` and `zenith workspace candidate`.
+//! Integration tests for `zenith workspace scratch`, `zenith workspace candidate`,
+//! and `zenith workspace promote`.
 //!
 //! Uses the `_in` variants of the command functions so that a tempdir-rooted
 //! `StorePaths` is passed explicitly — no real data directory is touched and
@@ -8,7 +9,7 @@
 use tempfile::TempDir;
 use zenith_cli::cli::ScratchNewArgs;
 use zenith_cli::commands::workspace::{
-    candidate_set_status_in, scratch_list_in, scratch_new_in, scratch_show_in,
+    candidate_set_status_in, promote_in, scratch_list_in, scratch_new_in, scratch_show_in,
 };
 use zenith_session::StorePaths;
 
@@ -270,4 +271,170 @@ fn scratch_show_json_roundtrip() {
     assert_eq!(parsed["status"], "selected");
     assert_eq!(parsed["page_id"], "page.main");
     assert_eq!(parsed["notes"], "json-test");
+}
+
+// ── Promote tests ─────────────────────────────────────────────────────────────
+
+/// Deliverable document: has `doc-id`, two pages — `page.export` is the
+/// target page with a placeholder rect.
+const DELIVERABLE: &str = r##"zenith version=1 doc-id="01HWSCRATCHTEST000000000001" {
+  project id="proj.del" name="Deliverable"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#ffffff"
+  }
+  styles {
+  }
+  document id="doc.del" title="Deliverable" {
+    page id="page.export" w=(px)400 h=(px)300 promotion-target="page.source" {
+      rect id="placeholder" x=(px)0 y=(px)0 w=(px)400 h=(px)300
+    }
+  }
+}
+"##;
+
+/// Candidate snapshot: a selected-status page with content nodes.
+const CANDIDATE_SNAP: &str = r##"zenith version=1 doc-id="01HWSCRATCHTEST000000000001" {
+  project id="proj.cand" name="Candidate"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#ffffff"
+  }
+  styles {
+  }
+  document id="doc.cand" title="Candidate" {
+    page id="page.source" w=(px)400 h=(px)300 candidate-status="selected" {
+      rect id="hero" x=(px)0 y=(px)0 w=(px)400 h=(px)300
+      rect id="sub" x=(px)10 y=(px)10 w=(px)100 h=(px)50
+    }
+  }
+}
+"##;
+
+fn setup_promote() -> (TempDir, StorePaths, std::path::PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    let paths = StorePaths::new(tmp.path());
+    let doc_path = tmp.path().join("deliver.zen");
+    std::fs::write(&doc_path, DELIVERABLE).unwrap();
+    (tmp, paths, doc_path)
+}
+
+fn record_selected_candidate(
+    paths: &StorePaths,
+    doc_path: &std::path::Path,
+    page_id: &str,
+    snap: &[u8],
+) -> String {
+    let cand_id = scratch_new_in(
+        paths,
+        snap,
+        doc_path,
+        &new_args(doc_path, Some(page_id), "draft", None, None, None, None),
+    )
+    .unwrap();
+    candidate_set_status_in(paths, doc_path, &cand_id, "selected").unwrap();
+    cand_id
+}
+
+#[test]
+fn promote_selected_candidate_merges_content() {
+    let (_tmp, paths, doc_path) = setup_promote();
+    let cand_id =
+        record_selected_candidate(&paths, &doc_path, "page.source", CANDIDATE_SNAP.as_bytes());
+
+    let out = promote_in(&paths, &doc_path, &cand_id, "page.export", ".promoted").unwrap();
+    assert!(
+        out.contains(&cand_id),
+        "confirmation must mention candidate id"
+    );
+    assert!(
+        out.contains("page.export"),
+        "confirmation must mention target page"
+    );
+
+    // Read the written file and verify the promoted content.
+    let written = std::fs::read_to_string(&doc_path).unwrap();
+    assert!(
+        written.contains("hero.promoted"),
+        "written doc must contain suffixed hero id; got:\n{written}"
+    );
+    assert!(
+        written.contains("sub.promoted"),
+        "written doc must contain suffixed sub id; got:\n{written}"
+    );
+    // The old placeholder must be gone (replaced).
+    assert!(
+        !written.contains("\"placeholder\""),
+        "placeholder must be replaced; got:\n{written}"
+    );
+    // workspace-role must be set to export.
+    assert!(
+        written.contains("workspace-role=\"export\""),
+        "page must be marked export; got:\n{written}"
+    );
+}
+
+#[test]
+fn promote_draft_candidate_errors() {
+    let (_tmp, paths, doc_path) = setup_promote();
+    // Record a draft candidate (do NOT transition to selected).
+    let cand_id = scratch_new_in(
+        &paths,
+        CANDIDATE_SNAP.as_bytes(),
+        &doc_path,
+        &new_args(
+            &doc_path,
+            Some("page.source"),
+            "draft",
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+    .unwrap();
+
+    let result = promote_in(&paths, &doc_path, &cand_id, "page.export", ".promoted");
+    assert!(result.is_err(), "promoting a draft candidate must error");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("selected"),
+        "error must mention 'selected'; got: {msg}"
+    );
+    assert!(
+        msg.contains(&cand_id),
+        "error must mention the candidate id; got: {msg}"
+    );
+}
+
+#[test]
+fn promote_missing_candidate_errors() {
+    let (_tmp, paths, doc_path) = setup_promote();
+
+    let result = promote_in(&paths, &doc_path, "cand99", "page.export", ".promoted");
+    assert!(result.is_err(), "unknown candidate must error");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("cand99"),
+        "error must mention the missing id; got: {msg}"
+    );
+}
+
+#[test]
+fn promote_missing_target_page_errors() {
+    let (_tmp, paths, doc_path) = setup_promote();
+    let cand_id =
+        record_selected_candidate(&paths, &doc_path, "page.source", CANDIDATE_SNAP.as_bytes());
+
+    let result = promote_in(
+        &paths,
+        &doc_path,
+        &cand_id,
+        "page.does-not-exist",
+        ".promoted",
+    );
+    assert!(result.is_err(), "missing target page must error");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("page.does-not-exist"),
+        "error must mention the missing page id; got: {msg}"
+    );
 }
