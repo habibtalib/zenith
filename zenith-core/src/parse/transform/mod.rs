@@ -24,6 +24,6 @@ mod special;
 mod tokens;
 
 pub use document::transform;
-pub(crate) use document::{ASSET_KNOWN_PROPS, DOCUMENT_KNOWN_PROPS};
+pub(crate) use document::{ASSET_KNOWN_PROPS, DOCUMENT_KNOWN_PROPS, transform_diagnostic_policy};
 pub(crate) use helpers::known_props_for_kind;
 pub(crate) use page::PAGE_KNOWN_PROPS;

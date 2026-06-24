@@ -46,7 +46,12 @@ pub fn run() -> ExitCode {
                     return ExitCode::from(2);
                 }
             };
-            let out = commands::validate::run(&src, args.path.parent(), args.json);
+            let flags = crate::config::CliPolicyFlags {
+                allow: args.allow,
+                warn: args.warn,
+                deny: args.deny,
+            };
+            let out = commands::validate::run(&src, args.path.parent(), args.json, &flags);
             println!("{}", out.stdout);
             ExitCode::from(out.exit_code)
         }

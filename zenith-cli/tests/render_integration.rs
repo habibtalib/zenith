@@ -336,7 +336,12 @@ fn render_missing_asset_yields_asset_missing_error_diagnostic() {
 #[test]
 fn validate_missing_asset_reports_error_exit_1() {
     let src = missing_asset_doc();
-    let out = zenith_cli::commands::validate::run(&src, Some(&examples_dir()), false);
+    let out = zenith_cli::commands::validate::run(
+        &src,
+        Some(&examples_dir()),
+        false,
+        &zenith_cli::config::CliPolicyFlags::default(),
+    );
     assert_eq!(
         out.exit_code, 1,
         "a missing asset must make validate report a hard error; stdout: {}",
@@ -352,7 +357,12 @@ fn validate_missing_asset_reports_error_exit_1() {
 #[test]
 fn validate_missing_asset_json_reports_error() {
     let src = missing_asset_doc();
-    let out = zenith_cli::commands::validate::run(&src, Some(&examples_dir()), true);
+    let out = zenith_cli::commands::validate::run(
+        &src,
+        Some(&examples_dir()),
+        true,
+        &zenith_cli::config::CliPolicyFlags::default(),
+    );
     assert!(
         out.stdout.contains("asset.missing"),
         "validate --json output must include asset.missing; got: {}",

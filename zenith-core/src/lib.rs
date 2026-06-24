@@ -41,7 +41,7 @@ pub use color::{
 pub use diagnostics::{Diagnostic, Severity};
 pub use error::{FormatError, ParseError, ParseErrorCode};
 pub use font::{BytesFontProvider, FontData, FontProvider, FontStyle, default_provider};
-pub use parse::{KdlAdapter, KdlSource};
+pub use parse::{KdlAdapter, KdlSource, parse_diagnostic_policy};
 pub use tokens::{
     HighlightToken, ResolvedFilter, ResolvedFilterOp, ResolvedGradient, ResolvedMask,
     ResolvedShadow, ResolvedShadowLayer, ResolvedToken, ResolvedValue, SyntaxTheme, TokenKind,
@@ -49,4 +49,4 @@ pub use tokens::{
 };
 pub use util::hash_unit;
 pub use util::pattern::{PatternLayout, pattern_positions};
-pub use validate::{ValidationReport, validate};
+pub use validate::{ValidationReport, validate, validate_with_policy};

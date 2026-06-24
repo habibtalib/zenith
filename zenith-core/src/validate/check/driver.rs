@@ -10,6 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::document::Document;
+use crate::ast::policy::DiagnosticPolicy;
 use crate::ast::style::Style;
 use crate::ast::value::{PropertyValue, Unit, dim_to_px};
 use crate::color::parse_rgb;
@@ -29,12 +30,29 @@ use super::variants::check_variants;
 use super::visual::{VisualExpect, check_visual_prop};
 use super::{fold, margin, safezone};
 
-/// Run the full document validation pass.
+/// Run the full document validation pass against the document's own in-file
+/// diagnostic policy.
+///
+/// This is a thin wrapper over [`validate_with_policy`] that passes
+/// `doc.diagnostic_policy`. It preserves the historical contract exactly: a
+/// document with no `diagnostics { … }` block carries an empty policy, which is
+/// an identity pass, so the output is byte-identical to running validation with
+/// no policy at all.
+pub fn validate(doc: &Document) -> ValidationReport {
+    validate_with_policy(doc, &doc.diagnostic_policy)
+}
+
+/// Run the full document validation pass, applying an externally supplied
+/// `policy` at the policy choke point instead of `doc.diagnostic_policy`.
+///
+/// The caller is responsible for assembling `policy` (e.g. merging config-file
+/// and CLI-flag policy with the document's in-file policy). Passing
+/// `&doc.diagnostic_policy` reproduces [`validate`] exactly.
 ///
 /// Internally runs `resolve_tokens` on `doc.tokens`, merges those diagnostics,
 /// then walks the full document collecting all semantic diagnostics.
 /// Never hard-fails; all findings are returned in the [`ValidationReport`].
-pub fn validate(doc: &Document) -> ValidationReport {
+pub fn validate_with_policy(doc: &Document, policy: &DiagnosticPolicy) -> ValidationReport {
     // ── Step 1: token resolution ──────────────────────────────────────────
     let token_resolution = crate::tokens::resolve_tokens(&doc.tokens);
     let resolved_tokens: &BTreeMap<String, ResolvedToken> = &token_resolution.resolved;
@@ -767,8 +785,8 @@ pub fn validate(doc: &Document) -> ValidationReport {
     // suppress the warnings that describe its own entries. With no policy block,
     // `apply_policy` is an exact identity pass and `check_policy_entries` adds
     // nothing — the default-off path is byte-identical.
-    let mut diagnostics = apply_policy(diagnostics, &doc.diagnostic_policy);
-    check_policy_entries(&doc.diagnostic_policy, &mut diagnostics);
+    let mut diagnostics = apply_policy(diagnostics, policy);
+    check_policy_entries(policy, &mut diagnostics);
 
     ValidationReport { diagnostics }
 }

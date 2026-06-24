@@ -57,6 +57,6 @@ mod visual;
 // `passes` but is called by the node submodules via
 // `crate::validate::check::register_id`, so it is re-exported here to keep that
 // path resolving.
-pub use driver::validate;
+pub use driver::{validate, validate_with_policy};
 pub(in crate::validate::check) use passes::register_id;
 pub use report::ValidationReport;

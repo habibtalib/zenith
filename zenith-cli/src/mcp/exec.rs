@@ -56,7 +56,9 @@ pub fn call(name: &str, args: &Value) -> CallResult {
 fn run_validate(args: &Value) -> Result<String, String> {
     let path = req_str(args, "path")?;
     let src = read(path)?;
-    let out = commands::validate::run(&src, Path::new(path).parent(), flag(args, "json"));
+    // MCP has no policy flags; config files are still resolved by `run`.
+    let flags = crate::config::CliPolicyFlags::default();
+    let out = commands::validate::run(&src, Path::new(path).parent(), flag(args, "json"), &flags);
     Ok(out.stdout)
 }
 

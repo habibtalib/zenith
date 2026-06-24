@@ -42,7 +42,12 @@ fn creates_valid_document_with_doc_id() {
     assert_eq!(doc.doc_id.as_deref(), Some(result.doc_id.as_str()));
 
     let src = String::from_utf8(bytes).expect("utf8");
-    let out = validate::run(&src, path.parent(), false);
+    let out = validate::run(
+        &src,
+        path.parent(),
+        false,
+        &zenith_cli::config::CliPolicyFlags::default(),
+    );
     assert_eq!(
         out.exit_code, 0,
         "scaffolded document must validate clean; got:\n{}",

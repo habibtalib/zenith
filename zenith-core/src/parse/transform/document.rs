@@ -275,21 +275,16 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
 /// verb whose code argument is missing or non-string is a hard [`ParseError`]
 /// (the entry is meaningless without a code). Declaration order is preserved;
 /// last-wins resolution happens at consult time (see [`DiagnosticPolicy::verb_for`]).
-fn transform_diagnostic_policy(node: &KdlNode) -> Result<DiagnosticPolicy, ParseError> {
+pub(crate) fn transform_diagnostic_policy(node: &KdlNode) -> Result<DiagnosticPolicy, ParseError> {
     let mut entries: Vec<PolicyEntry> = Vec::new();
     if let Some(children) = node.children() {
         for child in children.nodes() {
-            let verb = match child.name().value() {
-                "allow" => PolicyVerb::Allow,
-                "deny" => PolicyVerb::Deny,
-                "warn" => PolicyVerb::Warn,
+            let (verb, verb_name) = match child.name().value() {
+                "allow" => (PolicyVerb::Allow, "allow"),
+                "deny" => (PolicyVerb::Deny, "deny"),
+                "warn" => (PolicyVerb::Warn, "warn"),
                 // Unknown verb → ignore (forward-compat).
                 _ => continue,
-            };
-            let verb_name = match verb {
-                PolicyVerb::Allow => "allow",
-                PolicyVerb::Deny => "deny",
-                PolicyVerb::Warn => "warn",
             };
             let code = match child.get(0) {
                 Some(KdlValue::String(s)) => s.clone(),
