@@ -9,8 +9,8 @@ use crate::ast::value::PropertyValue;
 use crate::diagnostics::Diagnostic;
 
 use super::shared::{
-    AnchorParentCtx, AnchorProps, check_anchor, check_optional_dim, check_style_ref,
-    is_valid_blend_mode,
+    AnchorParentCtx, AnchorProps, VisualProps, check_anchor, check_optional_dim, check_style_ref,
+    check_visual_props, is_valid_blend_mode,
 };
 use crate::validate::check::nodes::WalkCtx;
 use crate::validate::check::register_id;
@@ -91,204 +91,41 @@ pub(in crate::validate::check) fn check_rect(
         diagnostics,
     );
 
-    // Visual properties.
-    check_visual_prop(
+    // Visual properties — shared with `pattern`; rect supplies the radius set.
+    let props = VisualProps {
+        fill: r.fill.as_ref(),
+        stroke: r.stroke.as_ref(),
+        stroke_width: r.stroke_width.as_ref(),
+        stroke_dash: r.stroke_dash.as_ref(),
+        stroke_gap: r.stroke_gap.as_ref(),
+        stroke_linecap: r.stroke_linecap.as_deref(),
+        border_top: r.border_top.as_ref(),
+        border_bottom: r.border_bottom.as_ref(),
+        border_left: r.border_left.as_ref(),
+        border_right: r.border_right.as_ref(),
+        stroke_outer: r.stroke_outer.as_ref(),
+        border_width: r.border_width.as_ref(),
+        stroke_outer_width: r.stroke_outer_width.as_ref(),
+        blend_mode: r.blend_mode.as_deref(),
+        radius: r.radius.as_ref(),
+        radius_tl: r.radius_tl.as_ref(),
+        radius_tr: r.radius_tr.as_ref(),
+        radius_br: r.radius_br.as_ref(),
+        radius_bl: r.radius_bl.as_ref(),
+        shadow: r.shadow.as_ref(),
+        filter: r.filter.as_ref(),
+        mask: r.mask.as_ref(),
+        blur: r.blur.as_ref(),
+    };
+    check_visual_props(
+        "rect",
         &r.id,
-        "fill",
-        r.fill.as_ref(),
-        VisualExpect::ColorOrGradient,
+        r.source_span,
+        props,
         referenced_token_ids,
         resolved_tokens,
         diagnostics,
     );
-    check_visual_prop(
-        &r.id,
-        "stroke",
-        r.stroke.as_ref(),
-        VisualExpect::Color,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    check_visual_prop(
-        &r.id,
-        "stroke-width",
-        r.stroke_width.as_ref(),
-        VisualExpect::Dimension,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    check_visual_prop(
-        &r.id,
-        "stroke-dash",
-        r.stroke_dash.as_ref(),
-        VisualExpect::Dimension,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    if let Some(PropertyValue::Dimension(d)) = r.stroke_dash.as_ref()
-        && d.value < 0.0
-    {
-        diagnostics.push(Diagnostic::error(
-            "node.invalid_geometry",
-            format!("rect '{}': stroke-dash must be >= 0", r.id),
-            r.source_span,
-            Some(r.id.clone()),
-        ));
-    }
-    check_visual_prop(
-        &r.id,
-        "stroke-gap",
-        r.stroke_gap.as_ref(),
-        VisualExpect::Dimension,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    if let Some(PropertyValue::Dimension(d)) = r.stroke_gap.as_ref()
-        && d.value < 0.0
-    {
-        diagnostics.push(Diagnostic::error(
-            "node.invalid_geometry",
-            format!("rect '{}': stroke-gap must be >= 0", r.id),
-            r.source_span,
-            Some(r.id.clone()),
-        ));
-    }
-    if let Some(lc) = r.stroke_linecap.as_deref()
-        && !matches!(lc, "butt" | "round" | "square")
-    {
-        diagnostics.push(Diagnostic::warning(
-            "node.unknown_property",
-            format!(
-                "rect '{}': stroke-linecap '{}' is not one of butt/round/square",
-                r.id, lc
-            ),
-            r.source_span,
-            Some(r.id.clone()),
-        ));
-    }
-    // Per-side border colors (token-required color props).
-    for (prop_name, prop_val) in [
-        ("border-top", r.border_top.as_ref()),
-        ("border-bottom", r.border_bottom.as_ref()),
-        ("border-left", r.border_left.as_ref()),
-        ("border-right", r.border_right.as_ref()),
-        ("stroke-outer", r.stroke_outer.as_ref()),
-    ] {
-        check_visual_prop(
-            &r.id,
-            prop_name,
-            prop_val,
-            VisualExpect::Color,
-            referenced_token_ids,
-            resolved_tokens,
-            diagnostics,
-        );
-    }
-    // Per-side border width + outer stroke width (token-required dimension props).
-    for (prop_name, prop_val) in [
-        ("border-width", r.border_width.as_ref()),
-        ("stroke-outer-width", r.stroke_outer_width.as_ref()),
-    ] {
-        check_visual_prop(
-            &r.id,
-            prop_name,
-            prop_val,
-            VisualExpect::Dimension,
-            referenced_token_ids,
-            resolved_tokens,
-            diagnostics,
-        );
-    }
-    if let Some(bm) = r.blend_mode.as_deref()
-        && !is_valid_blend_mode(bm)
-    {
-        diagnostics.push(Diagnostic::warning(
-            "node.unknown_property",
-            format!(
-                "rect '{}': blend-mode '{bm}' is not a recognized value",
-                r.id
-            ),
-            r.source_span,
-            Some(r.id.clone()),
-        ));
-    }
-    check_visual_prop(
-        &r.id,
-        "radius",
-        r.radius.as_ref(),
-        VisualExpect::Dimension,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    // Per-corner radius overrides: same validation pattern as uniform radius.
-    for (prop_name, prop_val) in [
-        ("radius-tl", r.radius_tl.as_ref()),
-        ("radius-tr", r.radius_tr.as_ref()),
-        ("radius-br", r.radius_br.as_ref()),
-        ("radius-bl", r.radius_bl.as_ref()),
-    ] {
-        check_visual_prop(
-            &r.id,
-            prop_name,
-            prop_val,
-            VisualExpect::Dimension,
-            referenced_token_ids,
-            resolved_tokens,
-            diagnostics,
-        );
-        if let Some(PropertyValue::Dimension(d)) = prop_val
-            && d.value < 0.0
-        {
-            diagnostics.push(Diagnostic::error(
-                "node.invalid_geometry",
-                format!("rect '{}': {} must be >= 0", r.id, prop_name),
-                r.source_span,
-                Some(r.id.clone()),
-            ));
-        }
-    }
-    check_visual_prop(
-        &r.id,
-        "shadow",
-        r.shadow.as_ref(),
-        VisualExpect::Shadow,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    check_visual_prop(
-        &r.id,
-        "filter",
-        r.filter.as_ref(),
-        VisualExpect::Filter,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    check_visual_prop(
-        &r.id,
-        "mask",
-        r.mask.as_ref(),
-        VisualExpect::Mask,
-        referenced_token_ids,
-        resolved_tokens,
-        diagnostics,
-    );
-    if let Some(d) = r.blur.as_ref()
-        && d.value < 0.0
-    {
-        diagnostics.push(Diagnostic::error(
-            "node.invalid_geometry",
-            format!("rect '{}': blur must be >= 0", r.id),
-            r.source_span,
-            Some(r.id.clone()),
-        ));
-    }
 
     // Unknown properties.
     for prop_name in r.unknown_props.keys() {
