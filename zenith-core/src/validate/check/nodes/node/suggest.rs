@@ -71,10 +71,8 @@ pub(super) fn edit_distance_within(a: &str, b: &str, max: usize) -> Option<usize
 ///
 /// For each unknown property name, the known-props list for `kind` is queried
 /// via [`known_props_for_kind`] and the closest match within edit distance ≤ 2
-/// is found. Ties are broken by lexicographic order (BTreeMap iteration gives
-/// a deterministic candidate order because the known-props slice is sorted by
-/// insertion in the transform consts — we additionally pick the lex-smallest
-/// among equal-distance candidates).
+/// is found. Ties are broken by lexicographic order: among equal-distance
+/// candidates the lex-smallest name wins (see [`find_suggestion`]).
 ///
 /// - Near-miss (distance ≤ 2): message contains `— did you mean '<suggestion>'?`
 /// - No near-miss: the existing version-relative message is used verbatim.
