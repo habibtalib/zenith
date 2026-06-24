@@ -99,6 +99,27 @@ pub struct Page {
     /// index/parity. An unknown reference is a hard `master.unknown_reference`
     /// validation error. `None` → the page has no master (renders as before).
     pub master: Option<String>,
+    /// Optional scratchpad/candidate workspace role for this page. Open-ended
+    /// vocabulary — any string is accepted; no validation warning. Non-rendering
+    /// metadata only: never consulted by the render or compile path.
+    pub workspace_role: Option<String>,
+    /// Optional candidate lifecycle status. Recognized values: `"draft"`,
+    /// `"selected"`, `"rejected"`. Any other value is preserved verbatim and
+    /// surfaced as a validation warning (`page.invalid_candidate_status`).
+    /// Non-rendering metadata only.
+    pub candidate_status: Option<String>,
+    /// Optional free-form author notes for this page. May contain embedded
+    /// double-quotes and newlines; the writer escapes them. Non-rendering
+    /// metadata only.
+    pub notes: Option<String>,
+    /// Optional target page id or label this candidate should be promoted into.
+    /// Referential integrity is NOT validated (out of scope). Non-rendering
+    /// metadata only.
+    pub promotion_target: Option<String>,
+    /// Optional free-form cleanup policy memo for this page. May contain
+    /// embedded quotes and newlines; the writer escapes them. Non-rendering
+    /// metadata only.
+    pub cleanup_policy: Option<String>,
     /// Child content nodes in z-order (first = bottommost, last = topmost).
     pub children: Vec<Node>,
     /// Source declaration span, when available.
@@ -430,6 +451,11 @@ mod parity_tests {
             line_jumps: None,
             parity: parity.map(str::to_owned),
             master: None,
+            workspace_role: None,
+            candidate_status: None,
+            notes: None,
+            promotion_target: None,
+            cleanup_policy: None,
             safe_zones: Vec::new(),
             folds: Vec::new(),
             children: Vec::new(),

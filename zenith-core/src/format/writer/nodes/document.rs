@@ -5,6 +5,7 @@ use crate::ast::{DocumentBody, Fold, Page, SafeZone, SafeZoneType};
 
 use crate::format::writer::{
     fmt_dimension, indent, write_opt_dimension, write_opt_property_value, write_opt_str,
+    write_opt_str_escaped,
 };
 
 use super::write_children_block;
@@ -60,6 +61,11 @@ fn write_page(page: &Page, out: &mut String, depth: usize) {
     write_opt_dimension(out, "margin-bottom", &page.margin_bottom);
     write_opt_str(out, "parity", &page.parity);
     write_opt_str(out, "master", &page.master);
+    write_opt_str(out, "workspace-role", &page.workspace_role);
+    write_opt_str(out, "candidate-status", &page.candidate_status);
+    write_opt_str_escaped(out, "notes", &page.notes);
+    write_opt_str(out, "promotion-target", &page.promotion_target);
+    write_opt_str_escaped(out, "cleanup-policy", &page.cleanup_policy);
 
     out.push_str(" {\n");
     // Safe-zones and folds are page metadata, emitted before the renderable

@@ -505,6 +505,28 @@ pub fn validate(doc: &Document) -> ValidationReport {
             ));
         }
 
+        // ── Per-page candidate-status validity ────────────────────────────
+        // `candidate-status` must be one of "draft", "selected", or "rejected";
+        // any other value is a Warning (forward-compatible — never a hard error).
+        // workspace-role, notes, promotion-target, and cleanup-policy are free-form
+        // and require no validation.
+        if let Some(cs) = &page.candidate_status
+            && cs != "draft"
+            && cs != "selected"
+            && cs != "rejected"
+        {
+            diagnostics.push(Diagnostic::warning(
+                "page.invalid_candidate_status",
+                format!(
+                    "page '{}': candidate-status '{}' is unrecognized; expected \
+                     \"draft\", \"selected\", or \"rejected\"",
+                    page.id, cs
+                ),
+                page.source_span,
+                Some(page.id.clone()),
+            ));
+        }
+
         // Single source of truth for this page's parity (drives the margin
         // advisory's binding side + recto/verso label).
         let is_recto = doc.page_is_recto(page, page_index_1based);
