@@ -2,6 +2,33 @@
 //!
 //! This module defines the top-level [`Cli`] struct and the [`Command`]
 //! subcommand enum. No business logic lives here — just argument shapes.
+//!
+//! Per-command-group arg structs live in submodules and are re-exported here
+//! so that all existing `crate::cli::*` paths continue to resolve unchanged.
+//!
+//! Submodules:
+//! - [`library`] — `LibraryArgs`, `LibrarySub`, and library item arg types.
+//! - [`plugin`] — `PluginArgs`, `PluginSub`, `ScopeArg`, `AgentFlags`, and install/uninstall args.
+//! - [`render`] — `RenderArgs`.
+//! - [`schema`] — `SchemaArgs`, `SchemaSub`.
+//! - [`workspace`] — `WorkspaceArgs`, `WorkspaceSub`, scratch, candidate, and promote arg types.
+
+mod library;
+mod plugin;
+mod render;
+mod schema;
+mod workspace;
+
+pub use library::{LibraryAddArgs, LibraryArgs, LibraryListArgs, LibraryShowArgs, LibrarySub};
+pub use plugin::{
+    AgentFlags, PluginArgs, PluginInstallArgs, PluginSub, PluginUninstallArgs, ScopeArg,
+};
+pub use render::RenderArgs;
+pub use schema::{SchemaArgs, SchemaSub};
+pub use workspace::{
+    CandidateArgs, PromoteArgs, ScratchArgs, ScratchListArgs, ScratchNewArgs, ScratchShowArgs,
+    ScratchSub, WorkspaceArgs, WorkspaceSub,
+};
 
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
@@ -185,125 +212,16 @@ pub enum Command {
 )]
 pub struct McpArgs {}
 
-/// Arguments for `zenith plugin`.
+/// Arguments for `zenith update`.
 #[derive(Debug, Args)]
-pub struct PluginArgs {
-    #[command(subcommand)]
-    pub command: PluginSub,
-}
+pub struct UpdateArgs {
+    /// Install the latest prerelease instead of the latest stable release.
+    #[arg(long)]
+    pub pre: bool,
 
-/// Subcommands of `zenith plugin`.
-#[derive(Debug, Subcommand)]
-pub enum PluginSub {
-    /// Install the skill for the given agents (auto-detects when none are named).
-    ///
-    /// Install the Zenith agent skill so AI coding tools know how to drive the
-    /// `zenith` CLI. Claude Code, Codex, and OpenCode receive the full folder skill (SKILL.md plus
-    /// reference packs, templates, and themes); other agents receive a single self-contained rule
-    /// file that points back at this self-documenting CLI. Writes are idempotent. With no agent flag,
-    /// the present agents are auto-detected.
-    Install(PluginInstallArgs),
-
-    /// Remove a previously installed skill for the given agents.
-    Uninstall(PluginUninstallArgs),
-
-    /// Show where the Zenith skill is installed, per agent and scope.
-    List,
-}
-
-/// Installation scope for `zenith plugin`.
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum ScopeArg {
-    /// Install for the current user (e.g. `~/.claude/skills/…`).
-    User,
-    /// Install into the current project (e.g. `./.claude/skills/…`).
-    Project,
-}
-
-/// Per-agent selection flags, shared by install and uninstall.
-///
-/// With no flag set, the command auto-detects which agents are present. `--all`
-/// selects every supported agent.
-#[derive(Debug, Args)]
-pub struct AgentFlags {
-    /// Target Claude Code (folder skill).
-    #[arg(long)]
-    pub claude: bool,
-    /// Target Codex (folder skill).
-    #[arg(long)]
-    pub codex: bool,
-    /// Target OpenCode (folder skill).
-    #[arg(long)]
-    pub opencode: bool,
-    /// Target Cursor (project rule).
-    #[arg(long)]
-    pub cursor: bool,
-    /// Target Windsurf (project rule).
-    #[arg(long)]
-    pub windsurf: bool,
-    /// Target Aider (rule file).
-    #[arg(long)]
-    pub aider: bool,
-    /// Target Zed (rule file).
-    #[arg(long)]
-    pub zed: bool,
-    /// Target Gemini CLI (rule file).
-    #[arg(long)]
-    pub gemini: bool,
-    /// Target GitHub Copilot (rule file).
-    #[arg(long)]
-    pub copilot: bool,
-    /// Target Continue (rule file).
-    #[arg(long = "continue")]
-    pub continue_dev: bool,
-    /// Target Kiro (steering rule).
-    #[arg(long)]
-    pub kiro: bool,
-    /// Target Antigravity (rule file).
-    #[arg(long)]
-    pub antigravity: bool,
-    /// Target every supported agent.
-    #[arg(long)]
-    pub all: bool,
-}
-
-/// Arguments for `zenith plugin install`.
-#[derive(Debug, Args)]
-#[command(after_help = "EXAMPLES:\n  \
-zenith plugin install                       # auto-detect and install for the user\n  \
-zenith plugin install --claude --codex      # specific agents\n  \
-zenith plugin install --all --scope project # everything, into ./\n  \
-zenith plugin install --claude --dry-run    # preview without writing")]
-pub struct PluginInstallArgs {
-    #[command(flatten)]
-    pub agents: AgentFlags,
-
-    /// Install for the user (default) or the current project.
-    #[arg(long, value_enum, default_value_t = ScopeArg::User)]
-    pub scope: ScopeArg,
-
-    /// Overwrite existing files whose content differs.
-    #[arg(long)]
-    pub force: bool,
-
-    /// Show what would be written without touching the filesystem.
-    #[arg(long)]
-    pub dry_run: bool,
-}
-
-/// Arguments for `zenith plugin uninstall`.
-#[derive(Debug, Args)]
-pub struct PluginUninstallArgs {
-    #[command(flatten)]
-    pub agents: AgentFlags,
-
-    /// Uninstall from the user (default) or the current project.
-    #[arg(long, value_enum, default_value_t = ScopeArg::User)]
-    pub scope: ScopeArg,
-
-    /// Show what would be removed without touching the filesystem.
-    #[arg(long)]
-    pub dry_run: bool,
+    /// Install a specific version (e.g. `v0.1.0` or `0.1.0`) instead of the latest.
+    #[arg(long, value_name = "VERSION")]
+    pub version: Option<String>,
 }
 
 /// Arguments for `zenith theme`.
@@ -427,147 +345,6 @@ pub struct VariantArgs {
     pub manifest: Option<PathBuf>,
 }
 
-/// Arguments for `zenith update`.
-#[derive(Debug, Args)]
-pub struct UpdateArgs {
-    /// Install the latest prerelease instead of the latest stable release.
-    #[arg(long)]
-    pub pre: bool,
-
-    /// Install a specific version (e.g. `v0.1.0` or `0.1.0`) instead of the latest.
-    #[arg(long, value_name = "VERSION")]
-    pub version: Option<String>,
-}
-
-/// Arguments for `zenith library`.
-///
-/// The library subsystem is a set of reusable **packs** — collections of design
-/// assets that you materialize into a `.zen` document.  A pack is identified by
-/// a package id such as `@zenith/filters`, and each pack exports one or more
-/// named **items** addressed as `<package>#<item>` (e.g.
-/// `@zenith/flowchart#decision`).
-///
-/// Three item kinds exist:
-///
-/// * **token** — a filter or mask token (e.g. `@zenith/filters#sepia`).  Added
-///   to the document's `tokens` block; apply with `filter=(token)"sepia"` or
-///   `mask=(token)"vignette"` on any node.
-/// * **component** — a reusable node group (e.g. a flowchart shape) that is
-///   materialized as an `instance` on a named page.  Requires `--page <id>`.
-/// * **action** — a canned transaction op sequence (e.g.
-///   `@zenith/brand-kit#apply-2026`) that mutates the target document's tokens
-///   or layout.  No page required.
-///
-/// Embedded `@zenith/*` packs are bundled in the binary; project-local packs
-/// live in `<project-dir>/libraries/*.zen` and shadow the embedded ones.
-///
-/// WORKFLOW:
-///   zenith library list                          # discover packs + items
-///   zenith library show @zenith/filters#sepia    # inspect one item
-///   zenith library add @zenith/filters#sepia --into poster.zen
-#[derive(Debug, Args)]
-#[command(
-    long_about = "Manage reusable library packs (embedded @zenith/* presets + project-local packs).\n\n\
-A pack exports items addressed as <package>#<item>, e.g. `@zenith/flowchart#decision`.\n\
-Item kinds:\n  \
-token     — filter or mask token; copy into tokens block, apply with filter=(token)\"id\"\n  \
-component — reusable node group; materialized as an instance on a page (requires --page)\n  \
-action    — canned tx op sequence; runs a transaction against the target document\n\n\
-Embedded @zenith/* packs are built in; project packs live in libraries/*.zen and shadow them.\n\n\
-WORKFLOW:\n  \
-zenith library list                          # discover packs and items\n  \
-zenith library show @zenith/filters#sepia    # inspect item content before adding\n  \
-zenith library add @zenith/filters#sepia --into poster.zen"
-)]
-pub struct LibraryArgs {
-    #[command(subcommand)]
-    pub command: LibrarySub,
-}
-
-/// Subcommands of `zenith library`.
-#[derive(Debug, Subcommand)]
-pub enum LibrarySub {
-    /// List all resolved library packs (project + embedded presets) and items.
-    ///
-    /// Lists every available pack and its exported items.  Run `zenith library
-    /// show <package>#<item>` to inspect any item in detail before adding it.
-    List(LibraryListArgs),
-
-    /// Inspect a library item in detail before adding it.
-    ///
-    /// Shows the package, item id, and kind-specific content: filter/mask token
-    /// types and ops, component node structure, or action op sequence.  Prints
-    /// the exact `zenith library add` invocation to materialize the item.
-    Show(LibraryShowArgs),
-
-    /// Materialize a library item into a target `.zen` document.
-    Add(LibraryAddArgs),
-}
-
-/// Arguments for `zenith library add`.
-#[derive(Debug, Args)]
-pub struct LibraryAddArgs {
-    /// The item to add, as `<package>#<item>`, e.g. `@zenith/flowchart#decision`.
-    pub spec: String,
-
-    /// Target `.zen` document to materialize the item into (written in-place,
-    /// unless `--dry-run`). Its parent directory is the project dir whose
-    /// `libraries/*.zen` packs are resolved alongside the embedded presets.
-    #[arg(long, value_name = "FILE")]
-    pub into: PathBuf,
-
-    /// Id of the page in the target document to place the instance on.
-    ///
-    /// Required only for COMPONENT items; TOKEN items (filter tokens) ignore it.
-    #[arg(long, value_name = "ID")]
-    pub page: Option<String>,
-
-    /// Instance origin as `X,Y` in pixels (default `0,0`).
-    #[arg(long, value_name = "X,Y")]
-    pub at: Option<String>,
-
-    /// Override the generated instance id base (default: the item name).
-    #[arg(long, value_name = "ID")]
-    pub id: Option<String>,
-
-    /// Print the resulting source to stdout WITHOUT writing the file.
-    #[arg(long)]
-    pub dry_run: bool,
-}
-
-/// Arguments for `zenith library list`.
-#[derive(Debug, Args)]
-pub struct LibraryListArgs {
-    /// Project directory, or a `.zen` file whose parent is the project directory.
-    /// Project `libraries/*.zen` packs are scanned alongside embedded presets.
-    /// Defaults to the current working directory.
-    pub path: Option<PathBuf>,
-
-    /// Emit machine-readable JSON instead of a human-readable listing.
-    #[arg(long)]
-    pub json: bool,
-}
-
-/// Arguments for `zenith library show`.
-#[derive(Debug, Args)]
-#[command(after_help = "EXAMPLES:\n  \
-zenith library show @zenith/filters#sepia       # inspect a filter token\n  \
-zenith library show @zenith/flowchart#decision  # inspect a component\n  \
-zenith library show @zenith/brand-kit#apply-2026 --json")]
-pub struct LibraryShowArgs {
-    /// The item to inspect, as `<package>#<item>`, e.g. `@zenith/filters#sepia`.
-    pub spec: String,
-
-    /// Project directory, or a `.zen` file whose parent is the project directory.
-    /// Project `libraries/*.zen` packs are resolved alongside embedded presets.
-    /// Defaults to the current working directory.
-    pub path: Option<PathBuf>,
-
-    /// Emit machine-readable JSON instead of a human-readable summary.
-    #[arg(long)]
-    pub json: bool,
-}
-
 /// Arguments for `zenith validate`.
 #[derive(Debug, Args)]
 #[command(after_help = "EXAMPLE:\n  zenith validate poster.zen --json")]
@@ -680,58 +457,6 @@ pub struct MergeArgs {
     pub manifest: Option<PathBuf>,
 }
 
-/// Arguments for `zenith render`.
-#[derive(Debug, Args)]
-#[command(
-    after_help = "At least one of --scene, --png, --pdf, or --all-pages is required.\n\n\
-EXAMPLES:\n  \
-zenith render poster.zen --png out.png\n  \
-zenith render book.zen --all-pages sheet/      # one PNG per page\n  \
-zenith render book.zen --pdf book.pdf          # print-ready vector PDF"
-)]
-pub struct RenderArgs {
-    /// Path to the `.zen` document.
-    pub path: PathBuf,
-
-    /// Write the compiled scene display-list JSON to this path.
-    #[arg(long, value_name = "OUT")]
-    pub scene: Option<PathBuf>,
-
-    /// Write the rendered PNG to this path.
-    #[arg(long, value_name = "OUT")]
-    pub png: Option<PathBuf>,
-
-    /// Write a vector PDF (with print boxes + DeviceCMYK) to this path.
-    #[arg(long, value_name = "OUT")]
-    pub pdf: Option<PathBuf>,
-
-    /// 1-based page number to render (default: 1).
-    #[arg(long, value_name = "N", default_value_t = 1)]
-    pub page: usize,
-
-    /// Render every page to `<DIR>/page-<N>.png` (1-based) instead of a single page.
-    #[arg(long, value_name = "DIR")]
-    pub all_pages: Option<PathBuf>,
-
-    /// Render two facing pages side by side as a single PNG, e.g. `--spread 10-11`
-    /// (1-based page numbers; A on the left, B on the right). Requires `--png`.
-    #[arg(long, value_name = "A-B")]
-    pub spread: Option<String>,
-
-    /// Override the spread gutter in pixels (default: the document's spread-gutter, or 0).
-    /// Only used when `--spread` is set.
-    #[arg(long, value_name = "PX")]
-    pub gutter: Option<u32>,
-
-    /// Verify each image asset's bytes against its declared `sha256` and fail on mismatch.
-    #[arg(long)]
-    pub locked: bool,
-
-    /// Emit machine-readable JSON (diagnostics + output path) to stdout.
-    #[arg(long)]
-    pub json: bool,
-}
-
 /// Arguments for `zenith history`.
 #[derive(Debug, Args)]
 pub struct HistoryArgs {
@@ -780,212 +505,4 @@ pub struct RestoreArgs {
 pub struct SyncArgs {
     /// Path to the `.zen` document.
     pub path: PathBuf,
-}
-
-/// Arguments for `zenith schema`.
-#[derive(Debug, Args)]
-#[command(after_help = "EXAMPLES:\n  \
-zenith schema                       # overview: counts + drill-in hints\n  \
-zenith schema nodes                 # list all node kinds with summaries\n  \
-zenith schema node pattern          # attributes for one node kind\n  \
-zenith schema ops                   # list all transaction ops\n  \
-zenith schema op set_fill           # summary for one op\n  \
-zenith schema page                  # attributes for a page declaration\n  \
-zenith schema asset                 # attributes for an asset declaration\n  \
-zenith schema document              # attributes for the document root\n  \
-zenith schema nodes --json          # machine-readable JSON")]
-pub struct SchemaArgs {
-    #[command(subcommand)]
-    pub command: Option<SchemaSub>,
-
-    /// Emit machine-readable JSON instead of human-readable text.
-    #[arg(long, global = true)]
-    pub json: bool,
-}
-
-/// Subcommands of `zenith schema`.
-#[derive(Debug, Subcommand)]
-pub enum SchemaSub {
-    /// List all authorable node kinds with their one-line summaries.
-    Nodes,
-
-    /// Show the summary and recognized attributes for one node kind.
-    Node {
-        /// The node kind to look up (e.g. `rect`, `text`, `pattern`).
-        kind: String,
-    },
-
-    /// List all transaction ops with their one-line summaries.
-    Ops,
-
-    /// Show the summary, JSON fields, and a working example for one transaction op.
-    Op {
-        /// The op name to look up (e.g. `set_fill`, `add_node`).
-        name: String,
-    },
-
-    /// Show the recognized attributes for a `page` declaration.
-    ///
-    /// Lists every attribute the parser recognises on a `page` node:
-    /// geometry (w, h), margins, bleed, baseline-grid, line-jumps, parity,
-    /// master, and workflow-metadata (workspace-role, candidate-status, …).
-    Page,
-
-    /// Show the recognized attributes for an `asset` declaration.
-    ///
-    /// Lists every attribute the parser recognises on an `asset` node inside
-    /// the `assets { … }` block: id, kind, src, sha256, and the full suite of
-    /// AI-provenance fields (ai-prompt, ai-model, ai-provider, …).
-    Asset,
-
-    /// Show the recognized attributes for the document root (`zenith` node).
-    ///
-    /// Lists every attribute the parser recognises on the top-level `zenith`
-    /// node and the `document { … }` child block: version, colorspace, doc-id,
-    /// mirror-margins, page-progression, spread-gutter, margin-*, and more.
-    Document,
-}
-
-// ── Workspace command group ───────────────────────────────────────────────────
-
-/// Arguments for `zenith workspace`.
-#[derive(Debug, Args)]
-pub struct WorkspaceArgs {
-    #[command(subcommand)]
-    pub command: WorkspaceSub,
-}
-
-/// Subcommands of `zenith workspace`.
-#[derive(Debug, Subcommand)]
-pub enum WorkspaceSub {
-    /// Record, list, and inspect scratch design candidates for a document.
-    ///
-    /// Scratch candidates are content-addressed `.zen` snapshots stored in the
-    /// session data directory alongside the durable version history. Use `new`
-    /// to record a candidate, `list` to enumerate them, and `show` to inspect
-    /// a specific one.
-    Scratch(ScratchArgs),
-
-    /// Transition a scratch candidate's lifecycle status (draft → selected | rejected).
-    Candidate(CandidateArgs),
-
-    /// Promote a selected candidate into a target page of the deliverable document.
-    ///
-    /// Fetches the candidate's stored `.zen` snapshot, deep-copies the source page's
-    /// content into the named target page (suffixing all ids), validates the result,
-    /// and writes the mutated document back in place. The promote is recorded in
-    /// version history. The candidate must have status `selected`; use
-    /// `zenith workspace candidate` to transition it first.
-    Promote(PromoteArgs),
-}
-
-/// Arguments for `zenith workspace scratch`.
-#[derive(Debug, Args)]
-pub struct ScratchArgs {
-    #[command(subcommand)]
-    pub command: ScratchSub,
-}
-
-/// Subcommands of `zenith workspace scratch`.
-#[derive(Debug, Subcommand)]
-pub enum ScratchSub {
-    /// Record the current `.zen` file as a scratch candidate.
-    New(ScratchNewArgs),
-    /// List all scratch candidates for a document.
-    List(ScratchListArgs),
-    /// Show detail for one scratch candidate.
-    Show(ScratchShowArgs),
-}
-
-/// Arguments for `zenith workspace scratch new`.
-#[derive(Debug, Args)]
-#[command(after_help = "EXAMPLE:\n  \
-zenith workspace scratch new poster.zen --page main --status draft --notes \"first pass\"")]
-pub struct ScratchNewArgs {
-    /// Path to the `.zen` document to snapshot.
-    pub doc: PathBuf,
-
-    /// Page id this candidate captures (default: `*` for the whole document).
-    #[arg(long, value_name = "ID")]
-    pub page: Option<String>,
-
-    /// Initial lifecycle status: `draft`, `selected`, or `rejected` (default: `draft`).
-    #[arg(long, default_value = "draft", value_name = "STATUS")]
-    pub status: String,
-
-    /// Free-text notes about this candidate.
-    #[arg(long, value_name = "TEXT")]
-    pub notes: Option<String>,
-
-    /// Target slot or branch to promote this candidate into.
-    #[arg(long, value_name = "TARGET")]
-    pub promotion_target: Option<String>,
-
-    /// Policy tag controlling when this candidate may be cleaned up.
-    #[arg(long, value_name = "POLICY")]
-    pub cleanup_policy: Option<String>,
-
-    /// Workflow role label for this candidate (e.g. `hero`, `fallback`).
-    #[arg(long, value_name = "ROLE")]
-    pub workspace_role: Option<String>,
-}
-
-/// Arguments for `zenith workspace scratch list`.
-#[derive(Debug, Args)]
-pub struct ScratchListArgs {
-    /// Path to the `.zen` document.
-    pub doc: PathBuf,
-
-    /// Emit machine-readable JSON instead of a human-readable listing.
-    #[arg(long)]
-    pub json: bool,
-}
-
-/// Arguments for `zenith workspace scratch show`.
-#[derive(Debug, Args)]
-pub struct ScratchShowArgs {
-    /// Path to the `.zen` document.
-    pub doc: PathBuf,
-
-    /// The candidate id to show (e.g. `cand0`).
-    pub candidate: String,
-
-    /// Emit machine-readable JSON instead of a human-readable summary.
-    #[arg(long)]
-    pub json: bool,
-}
-
-/// Arguments for `zenith workspace promote`.
-#[derive(Debug, Args)]
-#[command(after_help = "EXAMPLE:\n  \
-zenith workspace promote poster.zen cand0 --into page.export\n  \
-zenith workspace promote poster.zen cand0 --into page.export --id-suffix .v2")]
-pub struct PromoteArgs {
-    /// Path to the deliverable `.zen` document (written in-place).
-    pub doc: PathBuf,
-
-    /// The candidate id to promote (must have status `selected`).
-    pub candidate: String,
-
-    /// Id of the target page in the deliverable document to merge content into.
-    #[arg(long, value_name = "PAGE_ID")]
-    pub into: String,
-
-    /// Suffix appended to every cloned node id to keep them unique (default: `.promoted`).
-    #[arg(long, default_value = ".promoted", value_name = "SUFFIX")]
-    pub id_suffix: String,
-}
-
-/// Arguments for `zenith workspace candidate`.
-#[derive(Debug, Args)]
-#[command(after_help = "EXAMPLE:\n  zenith workspace candidate poster.zen cand0 selected")]
-pub struct CandidateArgs {
-    /// Path to the `.zen` document.
-    pub doc: PathBuf,
-
-    /// The candidate id to transition (e.g. `cand0`).
-    pub candidate: String,
-
-    /// New lifecycle status: `draft`, `selected`, or `rejected`.
-    pub status: String,
 }
