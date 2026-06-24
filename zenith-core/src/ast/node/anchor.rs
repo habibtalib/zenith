@@ -1,4 +1,5 @@
-//! Page-relative 9-point anchor: the [`Anchor`] enum and its derivation helpers.
+//! Page-relative 9-point anchor and adjacent-edge placement: the [`Anchor`] and
+//! [`AnchorEdge`] enums and their derivation helpers.
 
 /// One of the nine named page-relative placement anchors.
 ///
@@ -38,6 +39,36 @@ pub fn parse_anchor(s: &str) -> Option<Anchor> {
         "bottom-left" => Some(Anchor::BottomLeft),
         "bottom-center" => Some(Anchor::BottomCenter),
         "bottom-right" => Some(Anchor::BottomRight),
+        _ => None,
+    }
+}
+
+/// One of the four adjacent-edge directions for `anchor-edge` placement.
+///
+/// When a node carries both `anchor-sibling` and `anchor-edge`, the node is
+/// placed flush against the named edge of the sibling rather than within the
+/// sibling's box. An optional 9-point `anchor` on the same node controls
+/// cross-axis alignment (e.g. centering horizontally when placed below).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnchorEdge {
+    Above,
+    Below,
+    Before,
+    After,
+}
+
+/// Parse a string into an [`AnchorEdge`] variant.
+///
+/// Returns `Some` for the four recognized names; `None` for any other string.
+/// This is the SINGLE source of truth for the anchor-edge name list — both the
+/// validator (`anchor.unknown_edge`) and the scene pre-pass use this function
+/// so the names cannot diverge.
+pub fn parse_anchor_edge(s: &str) -> Option<AnchorEdge> {
+    match s {
+        "above" => Some(AnchorEdge::Above),
+        "below" => Some(AnchorEdge::Below),
+        "before" => Some(AnchorEdge::Before),
+        "after" => Some(AnchorEdge::After),
         _ => None,
     }
 }

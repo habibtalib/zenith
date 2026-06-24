@@ -50,7 +50,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use zenith_core::{Dimension, Node, Page, SafeZone, anchor_xy, dim_to_px, parse_anchor};
+use zenith_core::{
+    Anchor, AnchorEdge, Dimension, Node, Page, SafeZone, anchor_xy, dim_to_px, parse_anchor,
+    parse_anchor_edge,
+};
 
 /// Pre-derived anchor coordinates keyed by node id.
 ///
@@ -217,6 +220,8 @@ struct AnchorFields<'a> {
     anchor_zone: Option<&'a str>,
     anchor_sibling: Option<&'a str>,
     anchor_parent: Option<bool>,
+    anchor_edge: Option<&'a str>,
+    anchor_gap: Option<&'a Dimension>,
     x: Option<&'a Dimension>,
     y: Option<&'a Dimension>,
     w: Option<&'a Dimension>,
@@ -233,6 +238,8 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             anchor_zone: n.anchor_zone.as_deref(),
             anchor_sibling: n.anchor_sibling.as_deref(),
             anchor_parent: n.anchor_parent,
+            anchor_edge: n.anchor_edge.as_deref(),
+            anchor_gap: n.anchor_gap.as_ref(),
             x: n.x.as_ref(),
             y: n.y.as_ref(),
             w: n.w.as_ref(),
@@ -244,6 +251,8 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             anchor_zone: n.anchor_zone.as_deref(),
             anchor_sibling: n.anchor_sibling.as_deref(),
             anchor_parent: n.anchor_parent,
+            anchor_edge: n.anchor_edge.as_deref(),
+            anchor_gap: n.anchor_gap.as_ref(),
             x: n.x.as_ref(),
             y: n.y.as_ref(),
             w: n.w.as_ref(),
@@ -255,6 +264,8 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             anchor_zone: n.anchor_zone.as_deref(),
             anchor_sibling: n.anchor_sibling.as_deref(),
             anchor_parent: n.anchor_parent,
+            anchor_edge: n.anchor_edge.as_deref(),
+            anchor_gap: n.anchor_gap.as_ref(),
             x: n.x.as_ref(),
             y: n.y.as_ref(),
             w: n.w.as_ref(),
@@ -266,6 +277,8 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             anchor_zone: n.anchor_zone.as_deref(),
             anchor_sibling: n.anchor_sibling.as_deref(),
             anchor_parent: n.anchor_parent,
+            anchor_edge: n.anchor_edge.as_deref(),
+            anchor_gap: n.anchor_gap.as_ref(),
             x: n.x.as_ref(),
             y: n.y.as_ref(),
             w: n.w.as_ref(),
@@ -277,6 +290,8 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             anchor_zone: n.anchor_zone.as_deref(),
             anchor_sibling: n.anchor_sibling.as_deref(),
             anchor_parent: n.anchor_parent,
+            anchor_edge: n.anchor_edge.as_deref(),
+            anchor_gap: n.anchor_gap.as_ref(),
             x: n.x.as_ref(),
             y: n.y.as_ref(),
             w: n.w.as_ref(),
@@ -288,6 +303,8 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             anchor_zone: n.anchor_zone.as_deref(),
             anchor_sibling: n.anchor_sibling.as_deref(),
             anchor_parent: n.anchor_parent,
+            anchor_edge: n.anchor_edge.as_deref(),
+            anchor_gap: n.anchor_gap.as_ref(),
             x: n.x.as_ref(),
             y: n.y.as_ref(),
             w: n.w.as_ref(),
@@ -299,6 +316,8 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             anchor_zone: n.anchor_zone.as_deref(),
             anchor_sibling: n.anchor_sibling.as_deref(),
             anchor_parent: n.anchor_parent,
+            anchor_edge: n.anchor_edge.as_deref(),
+            anchor_gap: n.anchor_gap.as_ref(),
             x: n.x.as_ref(),
             y: n.y.as_ref(),
             w: n.w.as_ref(),
@@ -310,6 +329,8 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             anchor_zone: n.anchor_zone.as_deref(),
             anchor_sibling: n.anchor_sibling.as_deref(),
             anchor_parent: n.anchor_parent,
+            anchor_edge: n.anchor_edge.as_deref(),
+            anchor_gap: n.anchor_gap.as_ref(),
             x: n.x.as_ref(),
             y: n.y.as_ref(),
             w: n.w.as_ref(),
@@ -321,6 +342,8 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             anchor_zone: n.anchor_zone.as_deref(),
             anchor_sibling: n.anchor_sibling.as_deref(),
             anchor_parent: n.anchor_parent,
+            anchor_edge: n.anchor_edge.as_deref(),
+            anchor_gap: n.anchor_gap.as_ref(),
             x: n.x.as_ref(),
             y: n.y.as_ref(),
             w: n.w.as_ref(),
@@ -332,6 +355,8 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             anchor_zone: n.anchor_zone.as_deref(),
             anchor_sibling: n.anchor_sibling.as_deref(),
             anchor_parent: n.anchor_parent,
+            anchor_edge: n.anchor_edge.as_deref(),
+            anchor_gap: n.anchor_gap.as_ref(),
             x: n.x.as_ref(),
             y: n.y.as_ref(),
             w: n.w.as_ref(),
@@ -343,6 +368,8 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             anchor_zone: n.anchor_zone.as_deref(),
             anchor_sibling: n.anchor_sibling.as_deref(),
             anchor_parent: n.anchor_parent,
+            anchor_edge: n.anchor_edge.as_deref(),
+            anchor_gap: n.anchor_gap.as_ref(),
             x: n.x.as_ref(),
             y: n.y.as_ref(),
             w: n.w.as_ref(),
@@ -354,6 +381,8 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
             anchor_zone: n.anchor_zone.as_deref(),
             anchor_sibling: n.anchor_sibling.as_deref(),
             anchor_parent: n.anchor_parent,
+            anchor_edge: n.anchor_edge.as_deref(),
+            anchor_gap: n.anchor_gap.as_ref(),
             x: n.x.as_ref(),
             y: n.y.as_ref(),
             w: n.w.as_ref(),
@@ -492,6 +521,38 @@ fn collect_anchor(
     }
 }
 
+/// Compute the cross-axis horizontal coordinate (x) for Above/Below edges.
+///
+/// `anchor` is the optional 9-pt anchor (supplies horizontal alignment);
+/// absent anchor → leading edge (left-align, i.e. `sib_x`).
+fn cross_h(anchor: Option<Anchor>, sib_x: f64, sib_w: f64, node_w: f64) -> f64 {
+    match anchor {
+        None | Some(Anchor::TopLeft) | Some(Anchor::CenterLeft) | Some(Anchor::BottomLeft) => sib_x,
+        Some(Anchor::TopCenter) | Some(Anchor::Center) | Some(Anchor::BottomCenter) => {
+            sib_x + (sib_w - node_w) / 2.0
+        }
+        Some(Anchor::TopRight) | Some(Anchor::CenterRight) | Some(Anchor::BottomRight) => {
+            sib_x + sib_w - node_w
+        }
+    }
+}
+
+/// Compute the cross-axis vertical coordinate (y) for Before/After edges.
+///
+/// `anchor` is the optional 9-pt anchor (supplies vertical alignment);
+/// absent anchor → leading edge (top-align, i.e. `sib_y`).
+fn cross_v(anchor: Option<Anchor>, sib_y: f64, sib_h: f64, node_h: f64) -> f64 {
+    match anchor {
+        None | Some(Anchor::TopLeft) | Some(Anchor::TopCenter) | Some(Anchor::TopRight) => sib_y,
+        Some(Anchor::CenterLeft) | Some(Anchor::Center) | Some(Anchor::CenterRight) => {
+            sib_y + (sib_h - node_h) / 2.0
+        }
+        Some(Anchor::BottomLeft) | Some(Anchor::BottomCenter) | Some(Anchor::BottomRight) => {
+            sib_y + sib_h - node_h
+        }
+    }
+}
+
 /// Derive and insert the anchor map entry for one node from its fields.
 fn derive_entry(
     fields: AnchorFields<'_>,
@@ -506,22 +567,41 @@ fn derive_entry(
         anchor_zone: anchor_zone_str,
         anchor_sibling,
         anchor_parent,
+        anchor_edge: anchor_edge_str,
+        anchor_gap,
         x: _,
         y: _,
         w: w_dim,
         h: h_dim,
     } = fields;
 
-    // No anchor string → no entry.
-    let anchor_name = match anchor_str {
-        Some(s) => s,
-        None => return,
-    };
+    // Resolve the edge placement request (may be None when anchor-edge is
+    // absent or unrecognized). This is needed BEFORE the early-return so we
+    // can decide whether to proceed even when anchor-string is absent.
+    let edge = anchor_edge_str.and_then(parse_anchor_edge);
 
-    // Unrecognized anchor → no entry (the validator already errors on this).
-    let anchor = match parse_anchor(anchor_name) {
-        Some(a) => a,
-        None => return,
+    // When BOTH anchor string and anchor-edge are absent, nothing to derive.
+    if anchor_str.is_none() && edge.is_none() {
+        return;
+    }
+
+    // Parse the 9-pt anchor string. For edge-placement paths, this is
+    // OPTIONAL (supplies cross-axis alignment only); None means default
+    // (leading edge). For the non-edge paths it is required — unrecognized
+    // values exit early (validator already errors on them).
+    let anchor_parsed: Option<Anchor> = match anchor_str {
+        Some(s) => match parse_anchor(s) {
+            Some(a) => Some(a),
+            // Unrecognized anchor. For edge paths, don't block; treat as None.
+            // For non-edge paths (classic derivation), exit early.
+            None => {
+                if edge.is_none() {
+                    return;
+                }
+                None
+            }
+        },
+        None => None,
     };
 
     // Both w and h must be present and px-convertible for derivation.
@@ -538,12 +618,21 @@ fn derive_entry(
     // Reference rectangle precedence:
     //   1. anchor-zone wins when set — resolve the zone rect; skip on
     //      unknown id / non-px dims (validator diagnoses).
+    //      (Edge placement does NOT combine with anchor-zone; zone wins.)
     //   2. anchor-sibling when no zone — derive against the named
     //      sibling's resolved box, purely in local space.
+    //      When anchor-edge is set here, use adjacent-edge placement instead
+    //      of within-box anchor_xy.
     //   3. anchor-parent when no zone/sibling — use the enclosing
     //      container box and pre-subtract the accumulated group translation.
+    //      (anchor-edge without sibling falls through to here or page.)
     //   4. page-relative otherwise.
     if let Some(zone_id) = anchor_zone_str {
+        // For zone-relative paths the 9-pt anchor is required (classic path).
+        let anchor = match anchor_parsed {
+            Some(a) => a,
+            None => return,
+        };
         let (ref_x, ref_y, ref_w, ref_h) = match env.safe_zones.iter().find(|z| z.id == zone_id) {
             Some(zone) => match (
                 dim_to_px(zone.x.value, &zone.x.unit),
@@ -596,10 +685,64 @@ fn derive_entry(
         let (Some(sib_x), Some(sib_y)) = (sib_x, sib_y) else {
             return;
         };
+
+        // When anchor-edge is set, use adjacent-edge placement instead of
+        // the within-box anchor_xy derivation.
+        if let Some(edge) = edge {
+            let gap = anchor_gap
+                .and_then(|d| dim_to_px(d.value, &d.unit))
+                .unwrap_or(0.0);
+            let (x, y) = match edge {
+                AnchorEdge::Below => (
+                    cross_h(anchor_parsed, sib_x, sib_w, node_w),
+                    sib_y + sib_h + gap,
+                ),
+                AnchorEdge::Above => (
+                    cross_h(anchor_parsed, sib_x, sib_w, node_w),
+                    sib_y - gap - node_h,
+                ),
+                AnchorEdge::After => (
+                    sib_x + sib_w + gap,
+                    cross_v(anchor_parsed, sib_y, sib_h, node_h),
+                ),
+                AnchorEdge::Before => (
+                    sib_x - gap - node_w,
+                    cross_v(anchor_parsed, sib_y, sib_h, node_h),
+                ),
+            };
+            map.insert(id.to_owned(), (x, y));
+            return;
+        }
+
+        // Classic within-box sibling derivation (anchor-edge absent).
+        // anchor_parsed is Some here because we returned early above when both
+        // anchor_str and edge are None, and zone path has returned. When
+        // anchor_str was None and edge is also None we returned above, so
+        // anchor_parsed must be Some for this branch.
+        let anchor = match anchor_parsed {
+            Some(a) => a,
+            None => return,
+        };
         let (ox, oy) = anchor_xy(anchor, sib_w, sib_h, node_w, node_h);
         map.insert(id.to_owned(), (sib_x + ox, sib_y + oy));
         return;
     }
+
+    // Edge placement without an anchor-sibling: no entry (sibling is required
+    // for edge placement; validation warns separately).
+    if edge.is_some() {
+        return;
+    }
+
+    // From here: classic non-edge paths (anchor-parent, page-relative).
+    // anchor_parsed must be Some at this point (we exited early when both
+    // anchor_str and edge are None; edge is None here; so anchor_str was Some
+    // and anchor_parsed is Some unless it was unrecognized, but unrecognized
+    // anchor with no edge already returned above).
+    let anchor = match anchor_parsed {
+        Some(a) => a,
+        None => return,
+    };
 
     if anchor_parent == Some(true) {
         // Parent-relative: requires a usable enclosing container box. When the

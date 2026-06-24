@@ -10,7 +10,7 @@ mod container;
 mod leaf;
 mod special;
 
-pub use anchor::{Anchor, anchor_xy, parse_anchor};
+pub use anchor::{Anchor, AnchorEdge, anchor_xy, parse_anchor, parse_anchor_edge};
 pub use common::{Node, ObjectPosition, Point, TextSpan, UnknownProperty, UnknownValue};
 pub use container::{FrameNode, GroupNode, TableCell, TableColumn, TableNode, TableRow};
 pub use leaf::{

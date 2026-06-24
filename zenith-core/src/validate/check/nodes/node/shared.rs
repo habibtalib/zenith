@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ast::node::{Node, TextSpan, parse_anchor};
+use crate::ast::node::{Node, TextSpan, parse_anchor, parse_anchor_edge};
 use crate::ast::value::{Dimension, PropertyValue, Unit, dim_to_px};
 use crate::diagnostics::Diagnostic;
 use crate::tokens::ResolvedToken;
@@ -304,25 +304,33 @@ pub(in crate::validate::check) struct AnchorProps<'a> {
     pub(in crate::validate::check) anchor_zone: Option<&'a str>,
     pub(in crate::validate::check) anchor_sibling: Option<&'a str>,
     pub(in crate::validate::check) anchor_parent: bool,
+    pub(in crate::validate::check) anchor_edge: Option<&'a str>,
+    pub(in crate::validate::check) anchor_gap: Option<&'a Dimension>,
 }
 
-/// Validate the `anchor`, `anchor_zone`, `anchor_sibling`, and `anchor_parent` properties on a node.
+/// Validate the `anchor`, `anchor_zone`, `anchor_sibling`, `anchor_parent`,
+/// `anchor_edge`, and `anchor_gap` properties on a node.
 ///
-/// Returns `true` when `anchor` is present and recognized (anchor active:
-/// x/y geometry is NOT required even outside a flow parent, in any of the
-/// page/zone/parent reference modes), `false` otherwise.
+/// Returns `true` when `anchor` is present and recognized, OR when
+/// `anchor_sibling` + `anchor_edge` are both present (edge-placement mode:
+/// x/y geometry is NOT required in that case either), `false` otherwise.
 ///
 /// Diagnostics pushed:
 /// - `anchor.unknown_value` (Error) — `anchor` present with an unrecognized value.
 /// - `anchor.zone_without_anchor` (Warning) — `anchor_zone` set but `anchor` absent.
 /// - `anchor.unresolved_zone` (Error) — `anchor_zone` names a zone not on this page.
-/// - `anchor.sibling_without_anchor` (Warning) — `anchor_sibling` set but `anchor` absent.
+/// - `anchor.sibling_without_anchor` (Warning) — `anchor_sibling` set but `anchor` absent
+///   and `anchor_edge` is also absent (edge-placement makes `anchor` optional).
 ///   (The sibling-reference graph — `anchor.unresolved_sibling` / `anchor.cycle` —
 ///   is validated per-scope by [`check_sibling_anchors`], not here.)
 /// - `anchor.parent_without_anchor` (Warning) — `anchor_parent` set but `anchor` absent.
 /// - `anchor.unresolvable_parent` (Error) — `anchor_parent` set but the node is
 ///   not inside a frame/group container, or the parent container's box is unknown
 ///   (a group without `w`/`h`).
+/// - `anchor.edge_without_sibling` (Warning) — `anchor_edge` set but `anchor_sibling` absent.
+/// - `anchor.unknown_edge` (Error) — `anchor_edge` value is not one of the four
+///   recognized directional values.
+/// - `anchor.gap_invalid_unit` (Warning) — `anchor_gap` unit cannot be resolved to px.
 pub(super) fn check_anchor(
     node_id: &str,
     props: AnchorProps,
@@ -336,6 +344,8 @@ pub(super) fn check_anchor(
         anchor_zone,
         anchor_sibling,
         anchor_parent,
+        anchor_edge,
+        anchor_gap,
     } = props;
     // When anchor-zone is present without anchor, emit a warning and treat zone as
     // irrelevant (anchor-zone has no effect without an anchor value).
@@ -352,14 +362,16 @@ pub(super) fn check_anchor(
         ));
     }
 
-    // When anchor-sibling is present without anchor, emit a warning
-    // (anchor-sibling has no effect without an anchor value to position).
-    if anchor_sibling.is_some() && anchor.is_none() {
+    // When anchor-sibling is present without anchor, emit a warning — BUT only
+    // when anchor-edge is also absent. When anchor-edge is set, anchor-sibling
+    // enables edge-placement mode and anchor is intentionally optional.
+    if anchor_sibling.is_some() && anchor.is_none() && anchor_edge.is_none() {
         diagnostics.push(Diagnostic::warning(
             "anchor.sibling_without_anchor",
             format!(
                 "node '{}': anchor-sibling is set but anchor is absent; \
-                 anchor-sibling has no effect without an anchor value",
+                 anchor-sibling has no effect without an anchor value \
+                 (unless anchor-edge is set)",
                 node_id
             ),
             span,
@@ -396,6 +408,55 @@ pub(super) fn check_anchor(
                 "node '{}': anchor-parent is set but the node is not inside a \
                  frame/group container with a usable box",
                 node_id
+            ),
+            span,
+            Some(node_id.to_owned()),
+        ));
+    }
+
+    // When anchor-edge is present without anchor-sibling, it has no effect.
+    if anchor_edge.is_some() && anchor_sibling.is_none() {
+        diagnostics.push(Diagnostic::warning(
+            "anchor.edge_without_sibling",
+            format!(
+                "node '{}': anchor-edge is set but anchor-sibling is absent; \
+                 it has no effect without an anchor-sibling target",
+                node_id
+            ),
+            span,
+            Some(node_id.to_owned()),
+        ));
+    }
+
+    // When anchor-edge is present, validate that the value is one of the four
+    // recognized directional values. `parse_anchor_edge` is the single source
+    // of truth for the valid names (shared with the scene pre-pass).
+    if let Some(edge) = anchor_edge
+        && parse_anchor_edge(edge).is_none()
+    {
+        diagnostics.push(Diagnostic::error(
+            "anchor.unknown_edge",
+            format!(
+                "node '{}': anchor-edge value '{}' is not recognized; \
+                 valid values are above, below, before, after",
+                node_id, edge
+            ),
+            span,
+            Some(node_id.to_owned()),
+        ));
+    }
+
+    // When anchor-gap is present, the unit must be px-convertible.
+    if let Some(gap) = anchor_gap
+        && dim_to_px(gap.value, &gap.unit).is_none()
+    {
+        diagnostics.push(Diagnostic::warning(
+            "anchor.gap_invalid_unit",
+            format!(
+                "node '{}': anchor-gap unit '{}' cannot be resolved to px; \
+                 gap must resolve to px",
+                node_id,
+                gap.unit.as_annotation()
             ),
             span,
             Some(node_id.to_owned()),
@@ -440,7 +501,10 @@ pub(super) fn check_anchor(
         ));
     }
 
-    anchor_active
+    // Edge-placement mode: anchor_sibling + anchor_edge together supply both x
+    // and y (the engine positions the node relative to the sibling edge), so
+    // x/y geometry is not required even without a nine-point anchor.
+    anchor_active || (anchor_sibling.is_some() && anchor_edge.is_some())
 }
 
 /// Per-node sibling-anchor read: the node's id, its `anchor_sibling` target (if

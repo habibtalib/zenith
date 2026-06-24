@@ -55,6 +55,8 @@ pub(in crate::validate::check) fn check_shape(
             anchor_zone: s.anchor_zone.as_deref(),
             anchor_sibling: s.anchor_sibling.as_deref(),
             anchor_parent: s.anchor_parent == Some(true),
+            anchor_edge: s.anchor_edge.as_deref(),
+            anchor_gap: s.anchor_gap.as_ref(),
         },
         parent_ctx,
         zone_ids,

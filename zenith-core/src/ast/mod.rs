@@ -22,11 +22,11 @@ pub use document::{
 };
 pub use library::LibraryDef;
 pub use node::{
-    Anchor, CodeNode, ConnectorNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode,
-    ImageNode, InstanceNode, LineNode, Node, ObjectPosition, Override, PatternNode, Point,
-    PolygonNode, PolylineNode, RectNode, ShapeNode, TableCell, TableColumn, TableNode, TableRow,
-    TextNode, TextSpan, TocNode, UnknownNode, UnknownProperty, UnknownValue, anchor_xy,
-    parse_anchor,
+    Anchor, AnchorEdge, CodeNode, ConnectorNode, EllipseNode, FieldNode, FootnoteNode, FrameNode,
+    GroupNode, ImageNode, InstanceNode, LineNode, Node, ObjectPosition, Override, PatternNode,
+    Point, PolygonNode, PolylineNode, RectNode, ShapeNode, TableCell, TableColumn, TableNode,
+    TableRow, TextNode, TextSpan, TocNode, UnknownNode, UnknownProperty, UnknownValue, anchor_xy,
+    parse_anchor, parse_anchor_edge,
 };
 pub use provenance::ProvenanceDef;
 pub use recipe::{RecipeDef, RecipeParam};

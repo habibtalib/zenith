@@ -48,6 +48,8 @@ pub(in crate::validate::check) fn check_pattern(
             anchor_zone: p.anchor_zone.as_deref(),
             anchor_sibling: p.anchor_sibling.as_deref(),
             anchor_parent: p.anchor_parent == Some(true),
+            anchor_edge: p.anchor_edge.as_deref(),
+            anchor_gap: p.anchor_gap.as_ref(),
         },
         parent_ctx,
         zone_ids,
