@@ -339,7 +339,8 @@ fn validate_gradient(
         diagnostics.push(Diagnostic::error(
             "gradient.too_few_stops",
             format!(
-                "gradient token '{}' has {} stop(s); at least 2 are required",
+                "gradient token '{}' has {} stop(s); at least 2 are required \
+                 — add `stop` child nodes, e.g. `stop offset=0.0 color=(token)\"id\"`",
                 token_id,
                 stops.len()
             ),
@@ -420,7 +421,8 @@ fn validate_shadow(
         diagnostics.push(Diagnostic::error(
             "shadow.no_layers",
             format!(
-                "shadow token '{}' has no layers; at least 1 is required",
+                "shadow token '{}' has no layers; at least 1 is required \
+                 — add a `layer` child, e.g. `layer color=(token)\"id\" dx=(px)0 dy=(px)2 blur=(px)4`",
                 token_id
             ),
             span,
@@ -537,7 +539,8 @@ fn validate_filter(
                     "filter.duotone_missing_color",
                     format!(
                         "filter token '{}' has a duotone op missing {}; \
-                         a duotone op requires both shadow and highlight color tokens",
+                         a duotone op requires both shadow and highlight color tokens \
+                         — a duotone op needs both `shadow=(token)\"id\"` and `highlight=(token)\"id\"`",
                         token_id, which
                     ),
                     span,

@@ -166,7 +166,8 @@ pub fn resolve_tokens(block: &TokenBlock) -> TokenResolution {
                 None => diagnostics.push(Diagnostic::error(
                     "gradient.stop_unresolved",
                     format!(
-                        "gradient '{}' stop references unknown token '{}'",
+                        "gradient '{}' stop references unknown token '{}' \
+                         — declare the color token in the `tokens` block or fix the id",
                         id, color_token_id
                     ),
                     span,
@@ -323,7 +324,8 @@ fn resolve_token_to_literal<'a>(
                         diagnostics.push(Diagnostic::error(
                             "token.unknown_reference",
                             format!(
-                                "token '{}' references '{}' which does not exist",
+                                "token '{}' references '{}' which does not exist \
+                                 — check the spelling and that the token is declared in the `tokens` block",
                                 start.id, token_id
                             ),
                             start.source_span,

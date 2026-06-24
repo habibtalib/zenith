@@ -63,7 +63,8 @@ pub(super) fn check_visual_prop(
                     "token.unknown_reference",
                     format!(
                         "node '{}': property '{}' references token '{}' which \
-                         does not exist or failed resolution",
+                         does not exist or failed resolution \
+                         — check the spelling and that the token is declared in the `tokens` block",
                         node_id, prop_name, token_id
                     ),
                     None,
@@ -155,7 +156,8 @@ pub(super) fn check_visual_prop(
                 "token.raw_visual_literal",
                 format!(
                     "node '{}': visual property '{}' has a raw literal value; \
-                     visual properties must reference design tokens",
+                     visual properties must reference design tokens \
+                     — define a token and reference it as `(token)\"token-id\"`",
                     node_id, prop_name
                 ),
                 None,
