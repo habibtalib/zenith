@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::config::CliPolicyFlags;
 
-use super::{to_png, to_png_all_pages, to_png_with_dir, to_scene_json};
+use super::{to_pdf_all_pages_with_dir, to_png, to_png_all_pages, to_png_with_dir, to_scene_json};
 
 const VALID_DOC: &str = r##"zenith version=1 {
   project id="proj.r" name="Render Test"
@@ -354,5 +354,34 @@ fn to_png_overflow_fit_fits_no_error_diagnostic() {
         fit_errors.is_empty(),
         "fitting text must produce no text.fit_failed; got: {:?}",
         fit_errors
+    );
+}
+
+#[test]
+fn to_pdf_all_pages_produces_one_pdf_page_per_document_page() {
+    let artifact =
+        to_pdf_all_pages_with_dir(TWO_PAGE_DOC, None, false, &CliPolicyFlags::default(), None)
+            .expect("all-pages PDF render must succeed");
+    let text = String::from_utf8_lossy(&artifact.pdf);
+    assert!(
+        text.contains("/Count 2"),
+        "a two-page document must render a /Count 2 PDF"
+    );
+    assert_eq!(
+        text.matches("/MediaBox").count(),
+        2,
+        "each document page must carry its own MediaBox"
+    );
+}
+
+#[test]
+fn to_pdf_all_pages_is_deterministic() {
+    let a = to_pdf_all_pages_with_dir(TWO_PAGE_DOC, None, false, &CliPolicyFlags::default(), None)
+        .expect("render must succeed");
+    let b = to_pdf_all_pages_with_dir(TWO_PAGE_DOC, None, false, &CliPolicyFlags::default(), None)
+        .expect("render must succeed");
+    assert_eq!(
+        a.pdf, b.pdf,
+        "two all-pages PDF renders must be byte-identical"
     );
 }

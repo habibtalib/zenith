@@ -28,9 +28,13 @@ pub struct RenderArgs {
     #[arg(long, value_name = "OUT")]
     pub pdf: Option<PathBuf>,
 
-    /// 1-based page number to render (default: 1).
-    #[arg(long, value_name = "N", default_value_t = 1)]
-    pub page: usize,
+    /// 1-based page number to render; for `--pdf`, the default renders all pages.
+    ///
+    /// Without `--page`, single-output flags (`--scene`/`--png`) render page 1,
+    /// while `--pdf` renders every page into one multi-page PDF. Passing
+    /// `--page N` selects exactly that page for all outputs.
+    #[arg(long, value_name = "N")]
+    pub page: Option<usize>,
 
     /// Render every page to `<DIR>/page-<N>.png` (1-based) instead of a single page.
     #[arg(long, value_name = "DIR")]

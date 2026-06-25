@@ -4,7 +4,8 @@
 //! - [`to_scene_json`]   — parse → validate → compile → scene JSON string.
 //! - [`to_png`]          — parse → validate → compile → PNG bytes (no assets).
 //! - [`to_png_with_dir`] — like `to_png`, with asset directory, lock, and policy flags.
-//! - [`to_pdf_with_dir`] — parse → validate → compile → PDF bytes.
+//! - [`to_pdf_with_dir`] — parse → validate → compile → PDF bytes (one page).
+//! - [`to_pdf_all_pages_with_dir`] — render every page into one multi-page PDF.
 //! - [`to_png_all_pages`] — render every page to PNG.
 //! - [`to_png_spread`]   — render a two-page spread to PNG.
 //!
@@ -31,6 +32,7 @@ pub(crate) use assets::{
 };
 pub use data_input::{DataInputError, load_data_context};
 pub use entry::{
-    PdfArtifact, PngArtifact, RenderCmdErr, SceneArtifact, SpreadRenderOpts, to_pdf_with_dir,
-    to_png, to_png_all_pages, to_png_spread, to_png_with_dir, to_scene_json,
+    PdfArtifact, PngArtifact, RenderCmdErr, SceneArtifact, SpreadRenderOpts,
+    to_pdf_all_pages_with_dir, to_pdf_with_dir, to_png, to_png_all_pages, to_png_spread,
+    to_png_with_dir, to_scene_json,
 };

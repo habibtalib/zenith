@@ -119,7 +119,13 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
 
     // --scene ─────────────────────────────────────────────────────────
     if let Some(scene_out) = &args.scene {
-        match commands::render::to_scene_json(&src, args.path.parent(), args.page, &flags, data) {
+        match commands::render::to_scene_json(
+            &src,
+            args.path.parent(),
+            args.page.unwrap_or(1),
+            &flags,
+            data,
+        ) {
             Ok(artifact) => {
                 // Block on hard (Error-severity) compile diagnostics.
                 let n_hard = count_hard_diagnostics(&artifact.diagnostics);
@@ -159,7 +165,7 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
         match commands::render::to_png_with_dir(
             &src,
             args.path.parent(),
-            args.page,
+            args.page.unwrap_or(1),
             args.locked,
             &flags,
             data,
@@ -196,14 +202,26 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
 
     // --pdf ───────────────────────────────────────────────────────────
     if let Some(pdf_out) = &args.pdf {
-        match commands::render::to_pdf_with_dir(
-            &src,
-            args.path.parent(),
-            args.page,
-            args.locked,
-            &flags,
-            data,
-        ) {
+        // An explicit `--page N` selects one page (single-page PDF); without it
+        // every page is rendered into one multi-page PDF.
+        let result = match args.page {
+            Some(n) => commands::render::to_pdf_with_dir(
+                &src,
+                args.path.parent(),
+                n,
+                args.locked,
+                &flags,
+                data,
+            ),
+            None => commands::render::to_pdf_all_pages_with_dir(
+                &src,
+                args.path.parent(),
+                args.locked,
+                &flags,
+                data,
+            ),
+        };
+        match result {
             Ok(artifact) => {
                 // Block on hard (Error-severity) compile diagnostics.
                 let n_hard = count_hard_diagnostics(&artifact.diagnostics);

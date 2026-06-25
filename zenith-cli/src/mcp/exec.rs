@@ -203,7 +203,10 @@ fn run_tx(args: &Value) -> Result<Value, String> {
 fn run_render(args: &Value) -> Result<Value, String> {
     let (path, doc_id) = doc_ref::ensure(req_str(args, "doc")?)?;
     let format = req_str(args, "format")?;
-    let page = opt_u64(args, "page").unwrap_or(1).max(1) as usize;
+    // An explicit `page` selects one page; its absence means "default" — which
+    // for PDF renders all pages, and for PNG/scene renders page 1.
+    let explicit_page: Option<usize> = opt_u64(args, "page").map(|p| p.max(1) as usize);
+    let page = explicit_page.unwrap_or(1);
     let locked = flag(args, "locked");
     let parent = path.parent();
     let src = read(&path)?;
@@ -219,8 +222,13 @@ fn run_render(args: &Value) -> Result<Value, String> {
             (art.png, "png", art.diagnostics)
         }
         "pdf" => {
-            let art = commands::render::to_pdf_with_dir(&src, parent, page, locked, &flags, None)
-                .map_err(|e| e.message)?;
+            let art = match explicit_page {
+                Some(n) => commands::render::to_pdf_with_dir(&src, parent, n, locked, &flags, None),
+                None => {
+                    commands::render::to_pdf_all_pages_with_dir(&src, parent, locked, &flags, None)
+                }
+            }
+            .map_err(|e| e.message)?;
             blocked(&art.diagnostics)?;
             (art.pdf, "pdf", art.diagnostics)
         }

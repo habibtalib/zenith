@@ -330,3 +330,66 @@ fn filtered_region_render_is_byte_identical() {
         "two renders of a filtered scene must be byte-identical"
     );
 }
+
+#[test]
+fn multi_page_pdf_has_one_page_object_per_scene() {
+    use super::render_pdf_multi;
+    let (fonts, assets) = providers();
+
+    let mut p1 = Scene::new(100.0, 80.0);
+    p1.commands.push(SceneCommand::FillRect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 80.0,
+        paint: Paint::solid(Color::srgb(10, 20, 30, 255)),
+    });
+    let mut p2 = Scene::new(120.0, 60.0);
+    p2.commands.push(SceneCommand::FillRect {
+        x: 0.0,
+        y: 0.0,
+        w: 120.0,
+        h: 60.0,
+        paint: Paint::solid(Color::srgb(200, 100, 50, 255)),
+    });
+
+    let bytes = render_pdf_multi(&[p1, p2], &fonts, &assets);
+    let text = String::from_utf8_lossy(&bytes);
+
+    // The page tree must report two kids, and each page its own MediaBox.
+    assert!(
+        text.contains("/Count 2"),
+        "two-scene PDF must declare /Count 2"
+    );
+    let mediaboxes = text.matches("/MediaBox").count();
+    assert_eq!(mediaboxes, 2, "each page must carry its own MediaBox");
+    // Distinct page sizes confirm both scenes were written, not one twice.
+    assert!(
+        text.contains("/MediaBox [0 0 100 80]"),
+        "page 1 box missing"
+    );
+    assert!(
+        text.contains("/MediaBox [0 0 120 60]"),
+        "page 2 box missing"
+    );
+}
+
+#[test]
+fn single_scene_multi_is_byte_identical_to_render_pdf() {
+    use super::render_pdf_multi;
+    let (fonts, assets) = providers();
+    let mut scene = Scene::new(64.0, 48.0);
+    scene.commands.push(SceneCommand::FillRect {
+        x: 0.0,
+        y: 0.0,
+        w: 64.0,
+        h: 48.0,
+        paint: Paint::solid(Color::srgb(1, 2, 3, 255)),
+    });
+    let via_wrapper = render_pdf(&scene, &fonts, &assets);
+    let via_multi = render_pdf_multi(std::slice::from_ref(&scene), &fonts, &assets);
+    assert_eq!(
+        via_wrapper, via_multi,
+        "single-scene multi-page path must be byte-identical to render_pdf"
+    );
+}

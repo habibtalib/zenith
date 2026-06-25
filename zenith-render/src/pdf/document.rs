@@ -18,21 +18,94 @@ use super::gradient::AxialGradient;
 /// timestamps, no document id, ordered iteration throughout.
 ///
 /// Mirrors the shape of [`crate::render_png`] (`scene`, `fonts`, `assets`).
+///
+/// This is a thin single-page wrapper over [`render_pdf_multi`]; the
+/// one-scene path through that function yields byte-identical output to a
+/// historical single-page implementation (catalog=1, pages=2, page=3,
+/// content=4, resources from 5).
 #[must_use]
 pub fn render_pdf(scene: &Scene, fonts: &dyn FontProvider, assets: &dyn AssetProvider) -> Vec<u8> {
+    render_pdf_multi(std::slice::from_ref(scene), fonts, assets)
+}
+
+/// Render `scenes` (one per document page, in order) to a single deterministic
+/// multi-page vector PDF, sharing one sequential object-id space.
+///
+/// Object ids are allocated by an ordered walk: catalog=1, page-tree=2, then
+/// for each scene in order its page dict, content stream, and resource objects
+/// (ExtGStates, gradient shadings + functions, images + SMasks) from one shared
+/// monotonic counter starting at 3. With a single scene this reproduces the
+/// historical single-page numbering exactly, so additive multi-page support is
+/// byte-identical when only one page is present.
+///
+/// Print box metadata, DeviceCMYK colors, and full determinism (no timestamps,
+/// no document id, ordered iteration throughout) match [`render_pdf`].
+#[must_use]
+pub fn render_pdf_multi(
+    scenes: &[Scene],
+    fonts: &dyn FontProvider,
+    assets: &dyn AssetProvider,
+) -> Vec<u8> {
     let mut pdf = Pdf::new();
 
     let catalog_id = Ref::new(1);
     let page_tree_id = Ref::new(2);
-    let page_id = Ref::new(3);
-    let content_id = Ref::new(4);
-    // Subsequent objects (resources) start here and are allocated in order.
-    let mut next: i32 = 5;
+    // One shared monotonic id space for every page's dict, content stream, and
+    // resource objects, allocated in document order.
+    let mut next: i32 = 3;
     let mut alloc = || {
         let r = Ref::new(next);
         next += 1;
         r
     };
+
+    // Translate each scene and reserve all of its object ids in order, so the
+    // page-tree's /Kids can list every page id before any page body is written.
+    let mut pages: Vec<PreparedPage<'_>> = Vec::with_capacity(scenes.len());
+    for scene in scenes {
+        pages.push(prepare_page(scene, fonts, assets, &mut alloc));
+    }
+
+    // ── Catalog + page tree ──────────────────────────────────────────────
+    pdf.catalog(catalog_id).pages(page_tree_id);
+    pdf.pages(page_tree_id)
+        .kids(pages.iter().map(|p| p.page_id))
+        .count(pages.len() as i32);
+
+    // ── Per-page bodies ──────────────────────────────────────────────────
+    for prepared in pages {
+        write_prepared_page(&mut pdf, page_tree_id, prepared);
+    }
+
+    pdf.finish()
+}
+
+/// One scene translated to its content stream and resources, with every object
+/// id already reserved from the shared allocator (so id ordering is fixed
+/// before any object body is emitted).
+struct PreparedPage<'a> {
+    page_id: Ref,
+    content_id: Ref,
+    content: Vec<u8>,
+    scene: &'a Scene,
+    res: PageResources,
+    alpha_ids: Vec<Ref>,
+    gradient_refs: Vec<GradientRefs>,
+    image_refs: Vec<ImageRefs>,
+}
+
+/// Translate one scene and reserve all of its object ids from `alloc` in the
+/// fixed order: page dict, content stream, then resources (ExtGStates, gradient
+/// shadings each with their function/subfunctions, images each with optional
+/// SMask). Matches the historical single-page allocation order.
+fn prepare_page<'a>(
+    scene: &'a Scene,
+    fonts: &dyn FontProvider,
+    assets: &dyn AssetProvider,
+    alloc: &mut impl FnMut() -> Ref,
+) -> PreparedPage<'a> {
+    let page_id = alloc();
+    let content_id = alloc();
 
     // Translate the scene to a content stream + the resources it references.
     let (content, res) = translate(scene, fonts, assets);
@@ -76,13 +149,36 @@ pub fn render_pdf(scene: &Scene, fonts: &dyn FontProvider, assets: &dyn AssetPro
         })
         .collect();
 
-    // ── Catalog + page tree ──────────────────────────────────────────────
-    pdf.catalog(catalog_id).pages(page_tree_id);
-    pdf.pages(page_tree_id).kids([page_id]).count(1);
+    PreparedPage {
+        page_id,
+        content_id,
+        content: content.finish().into_vec(),
+        scene,
+        res,
+        alpha_ids,
+        gradient_refs,
+        image_refs,
+    }
+}
+
+/// Emit one prepared page's object bodies (page dict, content stream, resource
+/// objects) using its pre-reserved ids. `/Parent` of the page dict is the
+/// shared page-tree id.
+fn write_prepared_page(pdf: &mut Pdf, page_tree_id: Ref, prepared: PreparedPage<'_>) {
+    let PreparedPage {
+        page_id,
+        content_id,
+        content,
+        scene,
+        res,
+        alpha_ids,
+        gradient_refs,
+        image_refs,
+    } = prepared;
 
     // ── Page dict + boxes + resource dict ────────────────────────────────
     write_page(
-        &mut pdf,
+        pdf,
         PageWrite {
             page_id,
             page_tree_id,
@@ -96,14 +192,12 @@ pub fn render_pdf(scene: &Scene, fonts: &dyn FontProvider, assets: &dyn AssetPro
     );
 
     // ── Content stream ───────────────────────────────────────────────────
-    pdf.stream(content_id, &content.finish());
+    pdf.stream(content_id, &content);
 
     // ── Resource objects ─────────────────────────────────────────────────
-    write_alpha_states(&mut pdf, &res, &alpha_ids);
-    write_gradients(&mut pdf, &res, &gradient_refs);
-    write_images(&mut pdf, &res, &image_refs);
-
-    pdf.finish()
+    write_alpha_states(pdf, &res, &alpha_ids);
+    write_gradients(pdf, &res, &gradient_refs);
+    write_images(pdf, &res, &image_refs);
 }
 
 /// Indirect references backing one axial gradient: its shading dict and its

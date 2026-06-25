@@ -48,4 +48,4 @@ mod raster_embed;
 #[cfg(test)]
 mod tests;
 
-pub use document::render_pdf;
+pub use document::{render_pdf, render_pdf_multi};

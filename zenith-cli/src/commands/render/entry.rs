@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use zenith_core::{BytesAssetProvider, DataContext, Diagnostic, dim_to_px};
-use zenith_render::{render_pdf, render_png, render_spread_png};
-use zenith_scene::compile_page;
+use zenith_render::{render_pdf, render_pdf_multi, render_png, render_spread_png};
+use zenith_scene::{Scene, compile_page};
 
 use crate::config::CliPolicyFlags;
 
@@ -215,6 +215,57 @@ pub fn to_pdf_with_dir(
         compile_result.diagnostics,
         &policy,
     ));
+    Ok(PdfArtifact { pdf, diagnostics })
+}
+
+/// Parse `src`, validate it with the merged diagnostic policy, compile EVERY
+/// page (in document order, page 1 first), and render them into a single
+/// multi-page vector PDF, sourcing image/SVG and font asset bytes from
+/// `project_dir` when provided (exactly like [`to_pdf_with_dir`]).
+///
+/// This is the default `--pdf` behavior: a multi-page document produces a
+/// multi-page PDF. Use [`to_pdf_with_dir`] to select one explicit page.
+///
+/// Diagnostics from disk plus every page's governed compile diagnostics are
+/// merged in document order (page 1's first); duplicates are not removed. The
+/// PDF carries print box metadata and native DeviceCMYK exactly as the
+/// single-page path; a one-page document yields byte-identical output to
+/// [`to_pdf_with_dir`] for page 1.
+///
+/// `data` is applied to every page. `flags` carries the
+/// `--allow`/`--warn`/`--deny` CLI overrides; pass `&CliPolicyFlags::default()`
+/// when no flags are available (e.g. MCP).
+///
+/// Returns `Err` on parse failure (exit 2), validation errors (exit 1), an
+/// empty document (exit 2), or an asset/font failure (exit 2).
+pub fn to_pdf_all_pages_with_dir(
+    src: &str,
+    project_dir: Option<&Path>,
+    locked: bool,
+    flags: &CliPolicyFlags,
+    data: Option<&DataContext>,
+) -> Result<PdfArtifact, RenderCmdErr> {
+    let (doc, policy) = parse_validate(src, project_dir, flags)?;
+    let fonts = build_font_provider(&doc, project_dir, locked)?;
+    let page_count = doc.body.pages.len();
+    if page_count == 0 {
+        return Err(RenderCmdErr::new("document has no pages to render", 2));
+    }
+    let assets = match project_dir {
+        Some(dir) => build_asset_provider(&doc, dir, locked)?,
+        None => BytesAssetProvider::new(),
+    };
+    let mut scenes: Vec<Scene> = Vec::with_capacity(page_count);
+    let mut diagnostics = disk_diagnostics(&doc, project_dir);
+    for page_index in 0..page_count {
+        let compile_result = compile_page(&doc, &fonts, page_index, data);
+        scenes.push(compile_result.scene);
+        diagnostics.extend(govern_compile_diagnostics(
+            compile_result.diagnostics,
+            &policy,
+        ));
+    }
+    let pdf = render_pdf_multi(&scenes, &fonts, &assets);
     Ok(PdfArtifact { pdf, diagnostics })
 }
 
