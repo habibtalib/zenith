@@ -534,7 +534,8 @@ fn transform_provenance_def(node: &KdlNode) -> Result<ProvenanceDef, ParseError>
 // ---------------------------------------------------------------------------
 
 const VARIANT_KNOWN_PROPS: &[&str] = &["id", "source", "w", "h"];
-const VARIANT_OVERRIDE_KNOWN_PROPS: &[&str] = &["node", "visible", "text", "fill"];
+const VARIANT_OVERRIDE_KNOWN_PROPS: &[&str] =
+    &["node", "visible", "x", "y", "w", "h", "fill", "text"];
 
 /// Transform the document-level `variants { … }` block into a list of
 /// [`VariantDef`]. Each `variant id="…" source="…" w=(px)N h=(px)N { … }` is
@@ -602,18 +603,26 @@ fn transform_variant_def(node: &KdlNode) -> Result<VariantDef, ParseError> {
 fn transform_variant_override(node: &KdlNode) -> Result<VariantOverride, ParseError> {
     let target_node = required_string_prop(node, "node")?.to_owned();
     let visible = optional_bool_prop(node, "visible");
-    let text = optional_string_prop(node, "text").map(str::to_owned);
+    let x = optional_dimension_prop(node, "x");
+    let y = optional_dimension_prop(node, "y");
+    let w = optional_dimension_prop(node, "w");
+    let h = optional_dimension_prop(node, "h");
     let fill = node
         .entry("fill")
         .and_then(|e| entry_to_property_value(e).ok());
+    let text = optional_string_prop(node, "text").map(str::to_owned);
     let unknown_props = collect_unknown_props(node, VARIANT_OVERRIDE_KNOWN_PROPS);
     let source_span = node_span(node);
 
     Ok(VariantOverride {
         node: target_node,
         visible,
-        text,
+        x,
+        y,
+        w,
+        h,
         fill,
+        text,
         source_span,
         unknown_props,
     })

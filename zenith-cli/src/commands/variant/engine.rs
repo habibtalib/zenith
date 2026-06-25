@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::{Document, KdlAdapter, KdlSource, PropertyValue};
+use zenith_core::{Document, KdlAdapter, KdlSource, PropertyValue, dim_to_px};
 use zenith_tx::{Op, OpSpan, Permissions, Transaction, TxStatus, run_transaction};
 
 // ── Result / outcome types ────────────────────────────────────────────────────
@@ -105,12 +105,23 @@ pub fn expand_variants(doc: &Document) -> VariantExpansion {
             h: variant.h.to_kdl_string(),
         });
 
-        // 2. Per-override ops, in stored order, sub-ordered: visible → fill → text.
+        // 2. Per-override ops, in stored order, sub-ordered:
+        //    visible → geometry → fill → text.
         for ov in &variant.overrides {
             if let Some(visible) = ov.visible {
                 ops.push(Op::SetVisible {
                     node: ov.node.clone(),
                     visible,
+                });
+            }
+            if ov.x.is_some() || ov.y.is_some() || ov.w.is_some() || ov.h.is_some() {
+                ops.push(Op::SetGeometry {
+                    node: ov.node.clone(),
+                    x: ov.x.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)),
+                    y: ov.y.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)),
+                    w: ov.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)),
+                    h: ov.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)),
+                    rotate: None,
                 });
             }
             if let Some(fill) = &ov.fill {
@@ -423,6 +434,128 @@ mod tests {
         assert_eq!(
             rect.fill,
             Some(PropertyValue::TokenRef("color.alt".to_owned()))
+        );
+    }
+
+    /// A document whose single variant repositions a rect node via x/y/w/h
+    /// geometry overrides — all four axes specified.
+    const DOC_GEOMETRY_VARIANT: &str = r##"zenith version=1 {
+  project id="proj.gv" name="Geometry Variant Test"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#ffffff"
+  }
+  styles {}
+  document id="doc.gv" title="Geometry Variant Test" {
+    page id="page.g" w=(px)1920 h=(px)1080 {
+      rect id="rect.hero" x=(px)0 y=(px)0 w=(px)400 h=(px)200 fill=(token)"color.bg"
+    }
+  }
+  variants {
+    variant id="var.geo" source="page.g" w=(px)1920 h=(px)1080 {
+      override node="rect.hero" x=(px)100 y=(px)266 w=(px)880 h=(px)340
+    }
+  }
+}
+"##;
+
+    /// A document whose single variant overrides only `y` on a rect (partial
+    /// geometry — x/w/h left to the tx engine's partial-apply semantics).
+    const DOC_PARTIAL_GEOMETRY_VARIANT: &str = r##"zenith version=1 {
+  project id="proj.pgv" name="Partial Geometry Test"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#ffffff"
+  }
+  styles {}
+  document id="doc.pgv" title="Partial Geometry Test" {
+    page id="page.pg" w=(px)800 h=(px)600 {
+      rect id="rect.box" x=(px)10 y=(px)20 w=(px)300 h=(px)150 fill=(token)"color.bg"
+    }
+  }
+  variants {
+    variant id="var.pgeo" source="page.pg" w=(px)800 h=(px)600 {
+      override node="rect.box" y=(px)50
+    }
+  }
+}
+"##;
+
+    #[test]
+    fn geometry_override_repositions_node() {
+        let doc = parse(DOC_GEOMETRY_VARIANT);
+        let expansion = expand_variants(&doc);
+
+        assert_eq!(expansion.generated(), 1, "var.geo must be generated");
+        assert_eq!(expansion.failed(), 0);
+
+        let result = &expansion.results[0];
+        assert_eq!(result.id, "var.geo");
+
+        let VariantOutcome::Generated(ref materialized) = result.outcome else {
+            panic!("var.geo must be Generated");
+        };
+
+        let rect = find_rect_node_by_id(materialized, "rect.hero").expect("rect.hero must exist");
+
+        // All four geometry overrides must be applied.
+        assert_eq!(
+            rect.x.as_ref().map(|d| d.value),
+            Some(100.0),
+            "x must be overridden to 100"
+        );
+        assert_eq!(
+            rect.y.as_ref().map(|d| d.value),
+            Some(266.0),
+            "y must be overridden to 266"
+        );
+        assert_eq!(
+            rect.w.as_ref().map(|d| d.value),
+            Some(880.0),
+            "w must be overridden to 880"
+        );
+        assert_eq!(
+            rect.h.as_ref().map(|d| d.value),
+            Some(340.0),
+            "h must be overridden to 340"
+        );
+    }
+
+    #[test]
+    fn partial_geometry_override_only_changes_specified_axes() {
+        let doc = parse(DOC_PARTIAL_GEOMETRY_VARIANT);
+        let expansion = expand_variants(&doc);
+
+        assert_eq!(expansion.generated(), 1, "var.pgeo must be generated");
+        assert_eq!(expansion.failed(), 0);
+
+        let result = &expansion.results[0];
+        assert_eq!(result.id, "var.pgeo");
+
+        let VariantOutcome::Generated(ref materialized) = result.outcome else {
+            panic!("var.pgeo must be Generated");
+        };
+
+        let rect = find_rect_node_by_id(materialized, "rect.box").expect("rect.box must exist");
+
+        // Only y was overridden; x/w/h must keep their original values.
+        assert_eq!(
+            rect.x.as_ref().map(|d| d.value),
+            Some(10.0),
+            "x must remain 10 (unset in override)"
+        );
+        assert_eq!(
+            rect.y.as_ref().map(|d| d.value),
+            Some(50.0),
+            "y must be overridden to 50"
+        );
+        assert_eq!(
+            rect.w.as_ref().map(|d| d.value),
+            Some(300.0),
+            "w must remain 300 (unset in override)"
+        );
+        assert_eq!(
+            rect.h.as_ref().map(|d| d.value),
+            Some(150.0),
+            "h must remain 150 (unset in override)"
         );
     }
 

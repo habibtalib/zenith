@@ -42,10 +42,18 @@ pub struct VariantOverride {
     pub node: String,
     /// Override for the node's `visible` property.
     pub visible: Option<bool>,
-    /// Override for the node's `text` content.
-    pub text: Option<String>,
+    /// Override for the node's left edge (`x`), in document pixels or points.
+    pub x: Option<Dimension>,
+    /// Override for the node's top edge (`y`), in document pixels or points.
+    pub y: Option<Dimension>,
+    /// Override for the node's width (`w`), in document pixels or points.
+    pub w: Option<Dimension>,
+    /// Override for the node's height (`h`), in document pixels or points.
+    pub h: Option<Dimension>,
     /// Override for the node's `fill` property (token ref or literal).
     pub fill: Option<PropertyValue>,
+    /// Override for the node's `text` content.
+    pub text: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Forward-compat: unrecognized attributes preserved with typed values +

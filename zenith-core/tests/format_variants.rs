@@ -229,6 +229,185 @@ fn test_variant_override_text_escaping_round_trip() {
     );
 }
 
+/// **Geometry override round-trip**: `x`, `y`, `w`, `h` on an override node
+/// must parse into the new AST fields, emit in canonical order (after
+/// `visible`, before `fill`/`text`), and survive a full parse → format →
+/// parse round-trip with byte-identical output.
+#[test]
+fn test_variant_override_geometry_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.geo" name="GEO"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  variants {
+    variant id="v.geo" source="page.main" w=(px)1920 h=(px)1080 {
+      override node="hero.title" x=(px)100 y=(px)266 w=(px)880 h=(px)340
+    }
+  }
+  document id="doc.geo" title="GEO" {
+    page id="page.main" w=(px)1920 h=(px)1080 {
+      rect id="hero.title" x=(px)0 y=(px)0 w=(px)400 h=(px)200
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    assert_eq!(doc.variants.len(), 1);
+    let v = &doc.variants[0];
+    assert_eq!(v.overrides.len(), 1);
+    let ov = &v.overrides[0];
+    assert_eq!(ov.node, "hero.title");
+
+    // Geometry fields must be parsed into the new AST fields.
+    let x = ov.x.as_ref().expect("x must be parsed");
+    let y = ov.y.as_ref().expect("y must be parsed");
+    let w = ov.w.as_ref().expect("w must be parsed");
+    let h = ov.h.as_ref().expect("h must be parsed");
+    assert_eq!(x.value, 100.0);
+    assert_eq!(y.value, 266.0);
+    assert_eq!(w.value, 880.0);
+    assert_eq!(h.value, 340.0);
+
+    // Geometry must NOT spill into unknown_props.
+    assert!(
+        ov.unknown_props.is_empty(),
+        "geometry keys must not appear in unknown_props; got: {:?}",
+        ov.unknown_props.keys().collect::<Vec<_>>()
+    );
+
+    let formatted = format_document(&doc).expect("format");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("utf8");
+
+    // Canonical emit order: node, then x y w h.
+    assert!(
+        formatted_str
+            .contains(r#"override node="hero.title" x=(px)100 y=(px)266 w=(px)880 h=(px)340"#),
+        "geometry override must emit in canonical order; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse");
+
+    // Second format pass must produce identical bytes (idempotency).
+    let formatted2 = format_document(&reparsed).expect("format 2");
+    assert_eq!(
+        formatted, formatted2,
+        "geometry override format must be idempotent"
+    );
+
+    assert_eq!(
+        strip_spans(doc).variants,
+        strip_spans(reparsed).variants,
+        "geometry override must survive parse → format → parse round-trip"
+    );
+}
+
+/// **Partial geometry override**: only some of x/y/w/h present — the absent
+/// ones must be `None` in the AST and omitted from the formatted output.
+#[test]
+fn test_variant_override_partial_geometry_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.pgeo" name="PGEO"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  variants {
+    variant id="v.pgeo" source="page.main" w=(px)800 h=(px)600 {
+      override node="box" y=(px)50
+    }
+  }
+  document id="doc.pgeo" title="PGEO" {
+    page id="page.main" w=(px)800 h=(px)600 {
+      rect id="box" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    let ov = &doc.variants[0].overrides[0];
+    assert!(ov.x.is_none(), "x must be absent");
+    assert_eq!(ov.y.as_ref().expect("y must be parsed").value, 50.0);
+    assert!(ov.w.is_none(), "w must be absent");
+    assert!(ov.h.is_none(), "h must be absent");
+    assert!(ov.unknown_props.is_empty(), "no spill into unknown_props");
+
+    let formatted = format_document(&doc).expect("format");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("utf8");
+
+    // Only y is present on the override line; x/w/h must be omitted there.
+    let override_line = formatted_str
+        .lines()
+        .find(|l| l.trim_start().starts_with("override "))
+        .expect("override line present");
+    assert_eq!(
+        override_line.trim(),
+        r#"override node="box" y=(px)50"#,
+        "partial geometry override must emit only y; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse");
+    assert_eq!(
+        strip_spans(doc).variants,
+        strip_spans(reparsed).variants,
+        "partial geometry override must survive full round-trip"
+    );
+}
+
+/// **Byte-identical-when-absent**: an override WITHOUT geometry keys must
+/// parse and format exactly as before — no new fields, no new output.
+#[test]
+fn test_variant_override_without_geometry_is_unchanged() {
+    let src = r##"zenith version=1 {
+  project id="proj.nog" name="NOG"
+  tokens format="zenith-token-v1" {
+    token id="color.brand" type="color" value="#ff0000"
+  }
+  styles {
+  }
+  variants {
+    variant id="v.nog" source="page.main" w=(px)800 h=(px)600 {
+      override node="qr" visible=#false
+    }
+  }
+  document id="doc.nog" title="NOG" {
+    page id="page.main" w=(px)800 h=(px)600 {
+      rect id="qr" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    let ov = &doc.variants[0].overrides[0];
+    assert!(ov.x.is_none());
+    assert!(ov.y.is_none());
+    assert!(ov.w.is_none());
+    assert!(ov.h.is_none());
+
+    let formatted = format_document(&doc).expect("format");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("utf8");
+
+    // The override line must be exactly as in the original — no geometry noise.
+    assert!(
+        formatted_str.contains("override node=\"qr\" visible=#false"),
+        "override without geometry must be unchanged; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse");
+    assert_eq!(
+        strip_spans(doc).variants,
+        strip_spans(reparsed).variants,
+        "no-geometry override must survive round-trip unchanged"
+    );
+}
+
 /// **Unknown-prop capture on variant and override**: annotated unknown props
 /// must survive parse → format → parse byte-identically on both the `variant`
 /// node and its `override` children.

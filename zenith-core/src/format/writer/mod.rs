@@ -641,11 +641,11 @@ fn write_provenance_block(provenance: &[ProvenanceDef], out: &mut String, depth:
 ///
 /// ```text
 /// variant id="…" source="…" w=(px)N h=(px)N {
-///   override node="…" visible=#false text="…" fill=…
+///   override node="…" visible=#false x=(px)N y=(px)N w=(px)N h=(px)N fill=… text="…"
 /// }
 /// ```
 ///
-/// Optional override props (`visible`, `text`, `fill`) are omitted when `None`.
+/// Optional override props (`visible`, `x`, `y`, `w`, `h`, `fill`, `text`) are omitted when `None`.
 /// Unknown props follow known ones in BTreeMap key order. Variants with no
 /// overrides still emit a brace block (consistent with other block nodes).
 /// Mirrors [`write_provenance_block`].
@@ -679,12 +679,12 @@ fn write_variants_block(variants: &[VariantDef], out: &mut String, depth: usize)
             out.push_str(&ov.node);
             out.push('"');
             write_opt_bool(out, "visible", &ov.visible);
-            if let Some(t) = &ov.text {
-                out.push_str(" text=\"");
-                out.push_str(&escape_kdl_string(t));
-                out.push('"');
-            }
+            write_opt_dimension(out, "x", &ov.x);
+            write_opt_dimension(out, "y", &ov.y);
+            write_opt_dimension(out, "w", &ov.w);
+            write_opt_dimension(out, "h", &ov.h);
             write_opt_property_value(out, "fill", &ov.fill);
+            write_opt_str_escaped(out, "text", &ov.text);
             // Unknown props on the override node, in sorted key order.
             for (key, prop) in &ov.unknown_props {
                 out.push(' ');
