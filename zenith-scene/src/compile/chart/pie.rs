@@ -326,10 +326,16 @@ pub(super) fn emit_pie(
                 families: &families,
                 chart_id: &chart.id,
             };
+            // Per-slice label color overrides the chart-level color when set.
+            let slice_label_color = chart
+                .label_colors
+                .get(i)
+                .and_then(|p| resolve_property_color(p, cx.resolved, diagnostics, &chart.id))
+                .unwrap_or(chart_label_color);
             emit_slice_label(
                 &label,
                 mid,
-                chart_label_color,
+                slice_label_color,
                 lc,
                 cx,
                 commands,

@@ -302,6 +302,15 @@ pub(super) fn emit_bars(
 
         let paint = Paint::solid(color);
 
+        // Per-series label color overrides the chart value-color; either, when
+        // absent, leaves `explicit` None so the placement default applies.
+        let label_explicit = chart
+            .series
+            .get(s)
+            .and_then(|sr| sr.label_color.as_ref())
+            .and_then(|p| resolve_property_color(p, cx.resolved, diagnostics, &chart.id))
+            .or(explicit_label_color);
+
         if let Some(series_rects) = rects.get(s) {
             for (c, rect) in series_rects.iter().enumerate() {
                 if rect.w <= 0.0 || rect.h < 0.5 {
@@ -334,7 +343,7 @@ pub(super) fn emit_bars(
                         families: &value_label_families,
                         chart_id: &chart.id,
                         placement: label_mode,
-                        explicit: explicit_label_color,
+                        explicit: label_explicit,
                     },
                     cx,
                     commands,
