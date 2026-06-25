@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::ast::brand::BrandContract;
 use crate::ast::document::Document;
 use crate::ast::policy::DiagnosticPolicy;
 use crate::ast::style::Style;
@@ -32,28 +33,34 @@ use super::visual::{VisualExpect, check_visual_prop};
 use super::{fold, margin, safezone};
 
 /// Run the full document validation pass against the document's own in-file
-/// diagnostic policy.
+/// diagnostic policy and in-file brand contract.
 ///
 /// This is a thin wrapper over [`validate_with_policy`] that passes
-/// `doc.diagnostic_policy`. It preserves the historical contract exactly: a
-/// document with no `diagnostics { … }` block carries an empty policy, which is
-/// an identity pass, so the output is byte-identical to running validation with
-/// no policy at all.
+/// `doc.diagnostic_policy` and `&doc.brand_contract`. It preserves the
+/// historical contract exactly: a document with no `diagnostics { … }` or
+/// `brand { … }` block carries empty defaults, which are identity passes, so
+/// the output is byte-identical to running validation with no config at all.
 pub fn validate(doc: &Document) -> ValidationReport {
-    validate_with_policy(doc, &doc.diagnostic_policy)
+    validate_with_policy(doc, &doc.diagnostic_policy, &doc.brand_contract)
 }
 
 /// Run the full document validation pass, applying an externally supplied
-/// `policy` at the policy choke point instead of `doc.diagnostic_policy`.
+/// `policy` and `brand` contract at their respective choke points.
 ///
 /// The caller is responsible for assembling `policy` (e.g. merging config-file
-/// and CLI-flag policy with the document's in-file policy). Passing
-/// `&doc.diagnostic_policy` reproduces [`validate`] exactly.
+/// and CLI-flag policy with the document's in-file policy) and `brand` (e.g.
+/// merging global/local config brand contracts with the document's in-file
+/// `brand { … }` block). Passing `&doc.diagnostic_policy` and
+/// `&doc.brand_contract` reproduces [`validate`] exactly.
 ///
 /// Internally runs `resolve_tokens` on `doc.tokens`, merges those diagnostics,
 /// then walks the full document collecting all semantic diagnostics.
 /// Never hard-fails; all findings are returned in the [`ValidationReport`].
-pub fn validate_with_policy(doc: &Document, policy: &DiagnosticPolicy) -> ValidationReport {
+pub fn validate_with_policy(
+    doc: &Document,
+    policy: &DiagnosticPolicy,
+    brand: &BrandContract,
+) -> ValidationReport {
     // ── Step 1: token resolution ──────────────────────────────────────────
     let token_resolution = crate::tokens::resolve_tokens(&doc.tokens);
     let resolved_tokens: &BTreeMap<String, ResolvedToken> = &token_resolution.resolved;
@@ -62,8 +69,10 @@ pub fn validate_with_policy(doc: &Document, policy: &DiagnosticPolicy) -> Valida
 
     // ── Brand-contract check ──────────────────────────────────────────────
     // Runs right after token resolution so we have the resolved token map.
+    // Uses the EFFECTIVE brand contract supplied by the caller (which may be a
+    // merge of global/local config + in-file), not doc.brand_contract directly.
     // An empty contract is an identity pass (no diagnostics, byte-identical).
-    check_brand_contract(&doc.brand_contract, resolved_tokens, &mut diagnostics);
+    check_brand_contract(brand, resolved_tokens, &mut diagnostics);
 
     // ── Document color space ──────────────────────────────────────────────
     // `colorspace` is informational export metadata; it does not affect PNG

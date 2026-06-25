@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 
 use zenith_core::{
     Diagnostic, DiagnosticPolicy, Document, KdlAdapter, KdlSource, Severity, apply_policy,
-    validate_with_policy,
+    merge_brand_contract, validate_with_policy,
 };
 
 use crate::config::{CliPolicyFlags, load_global_and_local, merge_policy};
@@ -41,8 +41,9 @@ pub(super) fn verify_locked_sha256(
     Ok(())
 }
 
-/// Parse → validate with the merged diagnostic policy, returning the parsed
-/// [`Document`] together with the merged [`DiagnosticPolicy`].
+/// Parse → validate with the merged diagnostic policy and brand contract,
+/// returning the parsed [`Document`] together with the merged
+/// [`DiagnosticPolicy`] and effective [`BrandContract`].
 ///
 /// The effective policy is `merge_policy(global, local, in_file, flags)`,
 /// mirroring the `validate` command exactly:
@@ -51,6 +52,9 @@ pub(super) fn verify_locked_sha256(
 /// - In-file policy comes from the parsed document.
 /// - CLI flags layer on top.
 ///
+/// The effective brand contract is `merge_brand_contract(global, local)` then
+/// overridden by `doc.brand_contract` (per-category: in-file > local > global).
+///
 /// The merged policy is returned so the render entry points can apply the SAME
 /// policy to the compile-stage diagnostics emitted by `zenith-scene` (which run
 /// after validation) — see [`govern_compile_diagnostics`].
@@ -58,14 +62,15 @@ pub(super) fn verify_locked_sha256(
 /// A config-load error returns exit code 2. Parse errors return exit code 2.
 /// Validation errors (at least one Error-severity diagnostic after policy
 /// application) return exit code 1. With no config files and no flags the
-/// merged policy is empty, so the result is byte-identical to the old behaviour.
+/// merged policy and brand are both empty, so the result is byte-identical to
+/// the old behaviour.
 pub(super) fn parse_validate(
     src: &str,
     start_dir: Option<&Path>,
     flags: &CliPolicyFlags,
 ) -> Result<(Document, DiagnosticPolicy), RenderCmdErr> {
-    // Resolve config policy ───────────────────────────────────────────────────
-    let (global, local) = load_global_and_local(start_dir)
+    // Resolve config policy and brand contract ───────────────────────────────
+    let (global, local, global_brand, local_brand) = load_global_and_local(start_dir)
         .map_err(|msg| RenderCmdErr::new(format!("error[config.error]: {msg}"), 2))?;
 
     // Parse ─────────────────────────────────────────────────────────────────
@@ -75,7 +80,11 @@ pub(super) fn parse_validate(
 
     // Validate ───────────────────────────────────────────────────────────────
     let merged = merge_policy(&global, &local, &doc.diagnostic_policy, flags);
-    let report = validate_with_policy(&doc, &merged);
+    let effective_brand = merge_brand_contract(
+        &merge_brand_contract(&global_brand, &local_brand),
+        &doc.brand_contract,
+    );
+    let report = validate_with_policy(&doc, &merged, &effective_brand);
     if report.has_errors() {
         let msgs: Vec<String> = report
             .diagnostics

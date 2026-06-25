@@ -1,4 +1,7 @@
-//! Diagnostic-policy resolution from config files and command-line flags.
+//! Diagnostic-policy and brand-contract resolution from config files and
+//! command-line flags.
+//!
+//! ## Diagnostic policy
 //!
 //! The effective diagnostic policy for a `validate` run is assembled from four
 //! sources, in increasing precedence:
@@ -15,6 +18,20 @@
 //! precedence entry for any given code wins, yielding
 //! `CLI > in-file > local > global`.
 //!
+//! ## Brand contract
+//!
+//! The effective brand contract is merged with per-category override semantics
+//! from three sources, in increasing precedence:
+//!
+//! 1. **global config** — `brand { … }` block in `<config_dir>/zenith/config.kdl`
+//! 2. **local config** — `brand { … }` block in the nearest `.zenith.kdl`
+//! 3. **in-file brand** — the document's own `brand { … }` block
+//!
+//! For each category (`colors`, `fonts`, `weights`), the highest-precedence
+//! source that declares the category wins. Absent categories in a higher-
+//! precedence source do not erase the same category from a lower-precedence
+//! source. See [`zenith_core::merge_brand_contract`].
+//!
 //! All loaders are path-injectable so tests can point them at temp directories
 //! without mutating process-global state (`$HOME`, cwd). The production
 //! [`load_global_policy`] resolves the config directory from `$HOME` exactly as
@@ -22,7 +39,10 @@
 
 use std::path::{Path, PathBuf};
 
-use zenith_core::{DiagnosticPolicy, PolicyEntry, PolicyVerb, parse_diagnostic_policy};
+use zenith_core::{
+    BrandContract, DiagnosticPolicy, PolicyEntry, PolicyVerb, parse_brand_contract,
+    parse_diagnostic_policy,
+};
 
 /// The file name of a local (per-project / per-directory) config block.
 const LOCAL_CONFIG_NAME: &str = ".zenith.kdl";
@@ -158,24 +178,94 @@ pub fn load_global_policy() -> Result<DiagnosticPolicy, String> {
     }
 }
 
-/// Load the global and local policies for a command run.
+/// Load a brand contract from a KDL config file.
+///
+/// A missing file is not an error — it yields [`BrandContract::default`]. A
+/// present-but-unreadable file, or a malformed `brand` block, returns a
+/// human-facing error message. A file that has no `brand` node also yields the
+/// default (the file may contain only a `diagnostics` block).
+pub fn load_brand_file(path: &Path) -> Result<BrandContract, String> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(BrandContract::default());
+        }
+        Err(e) => return Err(format!("cannot read config '{}': {e}", path.display())),
+    };
+    parse_brand_contract(&bytes)
+        .map_err(|e| format!("invalid config '{}': {}", path.display(), e.message))
+}
+
+/// Walk up from `start_dir` to the filesystem root, loading the `brand { … }`
+/// block from the first `.zenith.kdl` found. If none is found, or the found
+/// file has no `brand` node, returns [`BrandContract::default`].
+///
+/// The walk terminates cleanly at the root (where `parent()` is `None`) without
+/// panicking.
+pub fn find_local_brand(start_dir: &Path) -> Result<BrandContract, String> {
+    let mut dir: Option<&Path> = Some(start_dir);
+    while let Some(current) = dir {
+        let candidate = current.join(LOCAL_CONFIG_NAME);
+        if candidate.is_file() {
+            return load_brand_file(&candidate);
+        }
+        dir = current.parent();
+    }
+    Ok(BrandContract::default())
+}
+
+/// Load the global brand contract from `<config_dir>/zenith/config.kdl`.
+///
+/// Injectable variant: the caller supplies the base config directory so tests
+/// can point at a temp directory. A missing file, or a file with no `brand`
+/// node, yields the default contract.
+pub fn load_global_brand_in(config_dir: &Path) -> Result<BrandContract, String> {
+    let path = config_dir.join("zenith").join("config.kdl");
+    load_brand_file(&path)
+}
+
+/// Load the global brand contract from `$HOME/.config/zenith/config.kdl`.
+///
+/// Production variant: resolves the config directory from `$HOME`. When `$HOME`
+/// is absent there is no global config to read, so the default contract is
+/// returned.
+pub fn load_global_brand() -> Result<BrandContract, String> {
+    match std::env::var_os("HOME").map(PathBuf::from) {
+        Some(home) => load_global_brand_in(&home.join(".config")),
+        None => Ok(BrandContract::default()),
+    }
+}
+
+/// Load the global and local policies and brand contracts for a command run.
 ///
 /// This is the shared resolution preamble used by both `validate` and `render`:
-/// - Global policy is always loaded from `$HOME/.config/zenith/config.kdl`.
-/// - Local policy is walked up from `start_dir` when `Some`; when `None` the
-///   local policy is the default (empty).
+/// - Global policy and brand are always loaded from
+///   `$HOME/.config/zenith/config.kdl`.
+/// - Local policy and brand are walked up from `start_dir` when `Some`; when
+///   `None` both default to the respective empty defaults.
+///
+/// Returns `(global_policy, local_policy, global_brand, local_brand)`.
 ///
 /// Returns `Err` with a human-facing message on any config I/O or parse
-/// failure. Missing files are not errors — they yield the default policy.
+/// failure. Missing files are not errors — they yield the respective defaults.
 pub fn load_global_and_local(
     start_dir: Option<&Path>,
-) -> Result<(DiagnosticPolicy, DiagnosticPolicy), String> {
+) -> Result<
+    (
+        DiagnosticPolicy,
+        DiagnosticPolicy,
+        BrandContract,
+        BrandContract,
+    ),
+    String,
+> {
     let global = load_global_policy()?;
-    let local = match start_dir {
-        Some(dir) => find_local_policy(dir)?,
-        None => DiagnosticPolicy::default(),
+    let global_brand = load_global_brand()?;
+    let (local, local_brand) = match start_dir {
+        Some(dir) => (find_local_policy(dir)?, find_local_brand(dir)?),
+        None => (DiagnosticPolicy::default(), BrandContract::default()),
     };
-    Ok((global, local))
+    Ok((global, local, global_brand, local_brand))
 }
 
 #[cfg(test)]

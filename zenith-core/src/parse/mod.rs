@@ -5,7 +5,7 @@ pub mod policy;
 pub mod transform;
 
 pub use kdl_adapter::KdlAdapter;
-pub use policy::parse_diagnostic_policy;
+pub use policy::{parse_brand_contract, parse_diagnostic_policy};
 
 use crate::ast::Document;
 use crate::error::{FormatError, ParseError};

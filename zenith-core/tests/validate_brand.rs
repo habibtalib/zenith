@@ -260,9 +260,11 @@ fn format_absent_brand_no_output() {
     let formatted = format_document(&doc).expect("format must succeed");
     let formatted_str = String::from_utf8(formatted).expect("utf8");
     assert!(
-        !formatted_str.lines().any(|l| l.trim_start().starts_with("brand ")
-            || l.trim() == "brand"
-            || l.trim_start().starts_with("brand{")),
+        !formatted_str
+            .lines()
+            .any(|l| l.trim_start().starts_with("brand ")
+                || l.trim() == "brand"
+                || l.trim_start().starts_with("brand{")),
         "absent brand contract must not emit a brand block; got:\n{formatted_str}"
     );
 }

@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use zenith_core::{KdlAdapter, KdlSource, Severity, validate_with_policy};
+use zenith_core::{KdlAdapter, KdlSource, Severity, merge_brand_contract, validate_with_policy};
 
 use crate::commands::render::{
     collect_image_dimension_diagnostics, collect_missing_asset_diagnostics,
@@ -46,11 +46,11 @@ pub struct CmdOutput {
 ///   `exit_code = 1`.
 /// - Clean documents produce `exit_code = 0`.
 pub fn run(src: &str, project_dir: Option<&Path>, json: bool, flags: &CliPolicyFlags) -> CmdOutput {
-    // Resolve config policy ───────────────────────────────────────────────────
+    // Resolve config policy and brand contract ───────────────────────────────
     // Global config is always consulted; local config is walked up from the
     // document's directory when known. A load error is a hard exit-2 failure.
-    let (global, local) = match load_global_and_local(project_dir) {
-        Ok(pair) => pair,
+    let (global, local, global_brand, local_brand) = match load_global_and_local(project_dir) {
+        Ok(quad) => quad,
         Err(msg) => return config_error(&msg, json),
     };
 
@@ -81,8 +81,14 @@ pub fn run(src: &str, project_dir: Option<&Path>, json: bool, flags: &CliPolicyF
     };
 
     // Validate ───────────────────────────────────────────────────────────────
+    // Policy: global ++ local ++ in-file ++ CLI flags (last-wins).
+    // Brand:  global → local → in-file (per-category override, higher wins).
     let merged = merge_policy(&global, &local, &doc.diagnostic_policy, flags);
-    let mut diagnostics = validate_with_policy(&doc, &merged).diagnostics;
+    let effective_brand = merge_brand_contract(
+        &merge_brand_contract(&global_brand, &local_brand),
+        &doc.brand_contract,
+    );
+    let mut diagnostics = validate_with_policy(&doc, &merged, &effective_brand).diagnostics;
     if let Some(dir) = project_dir {
         diagnostics.extend(collect_missing_asset_diagnostics(&doc, dir));
         diagnostics.extend(collect_image_dimension_diagnostics(&doc, dir));

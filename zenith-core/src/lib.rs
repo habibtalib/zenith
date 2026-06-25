@@ -22,6 +22,7 @@ pub mod validate;
 
 // Curated flat re-exports for the most-used public surface.
 pub use asset::{AssetData, AssetProvider, BytesAssetProvider};
+pub use ast::brand::merge_brand_contract;
 pub use ast::{
     ActionDef, Anchor, AnchorEdge, AssetBlock, AssetDecl, AssetKind, BrandContract, CodeNode,
     ComponentDef, ConnectorNode, DiagnosticPolicy, Dimension, Document, DocumentBody, EllipseNode,
@@ -45,7 +46,7 @@ pub use font::{
     BytesFontProvider, FontData, FontProvider, FontSource, FontStyle, LocalFontEntry,
     default_provider, scan_font_dirs,
 };
-pub use parse::{KdlAdapter, KdlSource, parse_diagnostic_policy};
+pub use parse::{KdlAdapter, KdlSource, parse_brand_contract, parse_diagnostic_policy};
 pub use tokens::{
     HighlightToken, ResolvedFilter, ResolvedFilterOp, ResolvedGradient, ResolvedMask,
     ResolvedShadow, ResolvedShadowLayer, ResolvedToken, ResolvedValue, SyntaxTheme, TokenKind,
