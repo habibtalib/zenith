@@ -49,7 +49,7 @@ pub use font::{
     BytesFontProvider, FontData, FontProvider, FontSource, FontStyle, LocalFontEntry,
     default_provider, scan_font_dirs,
 };
-pub use markdown::parse_inline_markdown;
+pub use markdown::{ListKind, MdBlock, parse_block_markdown, parse_inline_markdown};
 pub use parse::{KdlAdapter, KdlSource, parse_brand_contract, parse_diagnostic_policy};
 pub use tokens::{
     HighlightToken, ResolvedFilter, ResolvedFilterOp, ResolvedGradient, ResolvedMask,
