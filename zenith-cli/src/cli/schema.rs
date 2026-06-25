@@ -17,6 +17,7 @@ zenith schema asset                 # attributes for an asset declaration\n  \
 zenith schema document              # attributes for the document root\n  \
 zenith schema variant               # variants block and override entry structure\n  \
 zenith schema diagnostics           # diagnostic-policy verbs + governable codes\n  \
+zenith schema brand                 # brand-contract block (allowed colors/fonts/weights)\n  \
 zenith schema nodes --json          # machine-readable JSON")]
 pub struct SchemaArgs {
     #[command(subcommand)]
@@ -107,4 +108,16 @@ pub enum SchemaSub {
     /// full list of governable diagnostic codes (code · severity · summary).
     /// Integrity Errors are listed as non-suppressible.
     Diagnostics,
+
+    /// Show the structure and semantics of the top-level `brand { … }` block.
+    ///
+    /// Documents the three optional child nodes (`colors`, `fonts`, `weights`),
+    /// placement (top-level sibling of `tokens`/`assets`/`document` inside
+    /// `zenith version=1 { … }`), the absent-child = unconstrained rule, and
+    /// the three diagnostic codes emitted when resolved token values fall outside
+    /// the declared contract (`brand.color_off_palette`, `brand.font_not_allowed`,
+    /// `brand.weight_not_allowed`). Shows how to elevate these Warnings to
+    /// blocking Errors for a CI gate via `--deny` or an in-file `diagnostics`
+    /// policy. Includes a complete worked example.
+    Brand,
 }

@@ -58,7 +58,15 @@ zenith library add @acme/brand#<item> --into doc.zen --page page.hero   # materi
 - This is why the engine insists on tokens: brand application is a token-value diff, not a
   redraw.
 
-## 4. Workflow for "set up / apply our brand"
+## 4. Brand-contract enforcement (CI gate)
+
+To declare which colors, fonts, and weights are on-contract and have Zenith warn (or fail
+the build) on any violation, use the `brand { … }` block — run `zenith schema brand` for the
+exact block syntax, child-node forms, absent=unconstrained rule, and the three diagnostic
+codes (`brand.color_off_palette`, `brand.font_not_allowed`, `brand.weight_not_allowed`) that
+can be elevated to blocking Errors via `--deny` or an in-file `diagnostics` policy.
+
+## 5. Workflow for "set up / apply our brand"
 
 1. If `.zenith/brand.md` is missing, scaffold it from `templates/brand.md` and fill it from the
    user's brand (palette, fonts, spacing, voice).

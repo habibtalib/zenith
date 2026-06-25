@@ -9,11 +9,12 @@ use zenith_tx::schema as tx_schema;
 
 use crate::commands::serialize_pretty;
 use crate::json_types::{
-    SchemaAttr, SchemaDiagnosticCode, SchemaDiagnosticsOutput, SchemaNodeContent, SchemaNodeDetail,
-    SchemaNodeEntry, SchemaNodeOutput, SchemaNodesOutput, SchemaOpDetail, SchemaOpEntry,
-    SchemaOpFieldEntry, SchemaOpOutput, SchemaOpsOutput, SchemaOverridePropEntry,
-    SchemaOverviewOutput, SchemaSurfaceOutput, SchemaTokenDetail, SchemaTokenEntry,
-    SchemaTokenOutput, SchemaTokensOutput, SchemaVariantOutput,
+    SchemaAttr, SchemaBrandChildNode, SchemaBrandDiagCode, SchemaBrandOutput, SchemaDiagnosticCode,
+    SchemaDiagnosticsOutput, SchemaNodeContent, SchemaNodeDetail, SchemaNodeEntry,
+    SchemaNodeOutput, SchemaNodesOutput, SchemaOpDetail, SchemaOpEntry, SchemaOpFieldEntry,
+    SchemaOpOutput, SchemaOpsOutput, SchemaOverridePropEntry, SchemaOverviewOutput,
+    SchemaSurfaceOutput, SchemaTokenDetail, SchemaTokenEntry, SchemaTokenOutput,
+    SchemaTokensOutput, SchemaVariantOutput,
 };
 
 /// Precedence note shown on the `schema diagnostics` surface.
@@ -42,7 +43,7 @@ pub fn overview(json: bool) -> (String, u8) {
         let diag_count = core_schema::diagnostic_codes().len();
         let text = format!(
             "Zenith schema — {node_count} node kinds, {op_count} tx ops, \
-             {token_type_count} token types, 3 non-node surfaces, \
+             {token_type_count} token types, 4 non-node surfaces, \
              {diag_count} diagnostic codes\n\n\
              Drill in:\n  \
              zenith schema nodes              # list all node kinds\n  \
@@ -55,7 +56,8 @@ pub fn overview(json: bool) -> (String, u8) {
              zenith schema asset              # asset declaration attributes\n  \
              zenith schema document           # document root attributes\n  \
              zenith schema variant            # variants block + override entry structure\n  \
-             zenith schema diagnostics        # diagnostic-policy verbs + codes\n\n\
+             zenith schema diagnostics        # diagnostic-policy verbs + codes\n  \
+             zenith schema brand              # brand-contract block (allowed colors/fonts/weights)\n\n\
              Attribute types, required-ness, and valid values are enforced by \
              `zenith validate`."
         );
@@ -522,6 +524,153 @@ pub fn diagnostics(json: bool) -> (String, u8) {
              `zenith schema diagnostics --json`.",
         );
         (text.trim_end().to_owned(), 0)
+    }
+}
+
+/// `zenith schema brand`: structure and semantics of the top-level `brand { … }` block.
+///
+/// Returns `(stdout, exit_code)`.
+pub fn brand(json: bool) -> (String, u8) {
+    const SUMMARY: &str = "Declare the allowed palette, fonts, and weights for this document; \
+        resolved token values outside the contract emit Warnings that can be elevated to \
+        blocking Errors for a CI gate.";
+
+    const PLACEMENT: &str = "Top-level child of the root `zenith version=1 { … }` node, \
+        sibling of `tokens`, `assets`, and `document`. At most one `brand { … }` block \
+        per document.";
+
+    const ABSENT_MEANS: &str = "An absent child node means that category is UNCONSTRAINED — \
+        omitting `colors` allows any color; omitting `fonts` allows any font family; \
+        omitting `weights` allows any weight. A completely empty `brand {}` block constrains \
+        nothing.";
+
+    const CHILD_NODES: &[SchemaBrandChildNode] = &[
+        SchemaBrandChildNode {
+            node: "colors",
+            syntax: r##"colors "#rrggbb" "#rrggbb" …"##,
+            description: "Allowed sRGB hex colors (case-insensitive). Color tokens and the \
+                sRGB-equivalent of CMYK tokens are compared against this list. Any resolved \
+                color token whose value is absent from this set emits `brand.color_off_palette`.",
+        },
+        SchemaBrandChildNode {
+            node: "fonts",
+            syntax: r#"fonts "Family Name" "Another Family" …"#,
+            description: "Allowed font family names. Any resolved fontFamily token whose value \
+                is not in this set emits `brand.font_not_allowed`.",
+        },
+        SchemaBrandChildNode {
+            node: "weights",
+            syntax: "weights 400 700 …",
+            description: "Allowed font weights as bare integers (100–900 in multiples of 100). \
+                Any resolved fontWeight token whose value is not in this set emits \
+                `brand.weight_not_allowed`.",
+        },
+    ];
+
+    const DIAG_CODES: &[SchemaBrandDiagCode] = &[
+        SchemaBrandDiagCode {
+            code: "brand.color_off_palette",
+            severity: "warning",
+            summary: "Resolved color token value is not in the declared brand palette.",
+        },
+        SchemaBrandDiagCode {
+            code: "brand.font_not_allowed",
+            severity: "warning",
+            summary: "Resolved fontFamily token value is not in the declared brand font list.",
+        },
+        SchemaBrandDiagCode {
+            code: "brand.weight_not_allowed",
+            severity: "warning",
+            summary: "Resolved fontWeight token value is not in the declared brand weight list.",
+        },
+    ];
+
+    const EXAMPLE: &str = concat!(
+        "zenith version=1 {\n",
+        "  brand {\n",
+        "    colors \"#0b1f33\" \"#1b6cf0\" \"#ffffff\"\n",
+        "    fonts \"Noto Sans\"\n",
+        "    weights 400 700\n",
+        "  }\n",
+        "  tokens format=\"zenith-token-v1\" {\n",
+        "    token id=\"color.primary\" type=\"color\" value=\"#1b6cf0\"\n",
+        "    token id=\"color.bg\"      type=\"color\" value=\"#ffffff\"\n",
+        "    token id=\"font.body\"     type=\"fontFamily\" value=\"Noto Sans\"\n",
+        "    token id=\"weight.bold\"   type=\"fontWeight\" value=700\n",
+        "  }\n",
+        "  document id=\"doc\" title=\"Brand demo\" {}\n",
+        "}\n",
+        "\n",
+        "# CI gate — make off-contract values block the build:\n",
+        "#   zenith validate doc.zen --deny brand.color_off_palette\n",
+        "#\n",
+        "# Or declare the policy in-file:\n",
+        "#   diagnostics { deny \"brand.color_off_palette\" }"
+    );
+
+    if json {
+        let child_nodes: Vec<SchemaBrandChildNode> = CHILD_NODES
+            .iter()
+            .map(|n| SchemaBrandChildNode {
+                node: n.node,
+                syntax: n.syntax,
+                description: n.description,
+            })
+            .collect();
+        let diag_codes: Vec<SchemaBrandDiagCode> = DIAG_CODES
+            .iter()
+            .map(|d| SchemaBrandDiagCode {
+                code: d.code,
+                severity: d.severity,
+                summary: d.summary,
+            })
+            .collect();
+        let out = SchemaBrandOutput {
+            schema: "zenith-schema-v1",
+            summary: SUMMARY.to_owned(),
+            placement: PLACEMENT,
+            child_nodes,
+            absent_means: ABSENT_MEANS,
+            diagnostic_codes: diag_codes,
+            example: EXAMPLE,
+        };
+        (serialize_pretty(&out), 0)
+    } else {
+        let mut text = format!("brand: {SUMMARY}\n");
+
+        text.push_str(&format!("\nPlacement:\n  {PLACEMENT}\n"));
+
+        text.push_str("\nChild nodes (all optional):\n");
+        for node in CHILD_NODES {
+            text.push_str(&format!(
+                "  {:<8}  syntax:  {}\n           {}\n",
+                node.node, node.syntax, node.description
+            ));
+        }
+
+        text.push_str(&format!("\nAbsent-child rule:\n  {ABSENT_MEANS}\n"));
+
+        text.push_str("\nDiagnostic codes (Warning by default):\n");
+        let col = DIAG_CODES.iter().map(|d| d.code.len()).max().unwrap_or(0);
+        for d in DIAG_CODES {
+            text.push_str(&format!(
+                "  {:<col$}  —  {}\n",
+                d.code,
+                d.summary,
+                col = col,
+            ));
+        }
+
+        text.push_str(
+            "\nCI gate:\n  \
+            Elevate to blocking Errors with `--deny <code>` on the CLI:\n    \
+            zenith validate doc.zen --deny brand.color_off_palette\n  \
+            Or declare the policy in-file (cross-reference `zenith schema diagnostics`):\n    \
+            diagnostics { deny \"brand.color_off_palette\" }\n",
+        );
+
+        text.push_str(&format!("\nExample:\n  {}", EXAMPLE.replace('\n', "\n  ")));
+        (text, 0)
     }
 }
 
@@ -1223,6 +1372,82 @@ mod tests {
         assert!(
             !text.contains("\"content\""),
             "rect JSON must not carry a content field (skip_serializing_if = None); got:\n{text}"
+        );
+    }
+
+    // ── Brand surface tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn brand_human_contains_key_sections() {
+        let (text, code) = brand(false);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("brand {"),
+            "human output must include worked example with 'brand {{'; got:\n{text}"
+        );
+        assert!(
+            text.contains("colors"),
+            "human output must describe the colors child node; got:\n{text}"
+        );
+        assert!(
+            text.contains("fonts"),
+            "human output must describe the fonts child node; got:\n{text}"
+        );
+        assert!(
+            text.contains("weights"),
+            "human output must describe the weights child node; got:\n{text}"
+        );
+        assert!(
+            text.contains("brand.color_off_palette"),
+            "human output must list brand.color_off_palette diagnostic code; got:\n{text}"
+        );
+        assert!(
+            text.contains("brand.font_not_allowed"),
+            "human output must list brand.font_not_allowed diagnostic code; got:\n{text}"
+        );
+        assert!(
+            text.contains("brand.weight_not_allowed"),
+            "human output must list brand.weight_not_allowed diagnostic code; got:\n{text}"
+        );
+        assert!(
+            text.contains("--deny"),
+            "human output must mention --deny for CI gate; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn brand_json_schema_field() {
+        let (text, code) = brand(true);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("zenith-schema-v1"),
+            "JSON must carry schema field; got:\n{text}"
+        );
+        assert!(
+            text.contains("\"summary\""),
+            "JSON must carry summary field; got:\n{text}"
+        );
+        assert!(
+            text.contains("\"child_nodes\""),
+            "JSON must carry child_nodes array; got:\n{text}"
+        );
+        assert!(
+            text.contains("\"diagnostic_codes\""),
+            "JSON must carry diagnostic_codes array; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn overview_mentions_brand_surface() {
+        let (text, code) = overview(false);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("zenith schema brand"),
+            "overview must mention 'zenith schema brand'; got:\n{text}"
+        );
+        assert!(
+            text.contains("4 non-node surfaces"),
+            "overview must count 4 non-node surfaces after adding brand; got:\n{text}"
         );
     }
 }

@@ -355,6 +355,34 @@ pub struct SchemaVariantOutput {
     pub example: String,
 }
 
+/// Top-level JSON envelope for `schema brand`.
+#[derive(Debug, Serialize)]
+pub struct SchemaBrandOutput {
+    pub schema: &'static str,
+    pub summary: String,
+    pub placement: &'static str,
+    pub child_nodes: Vec<SchemaBrandChildNode>,
+    pub absent_means: &'static str,
+    pub diagnostic_codes: Vec<SchemaBrandDiagCode>,
+    pub example: &'static str,
+}
+
+/// One child-node descriptor in the `schema brand` JSON output.
+#[derive(Debug, Serialize)]
+pub struct SchemaBrandChildNode {
+    pub node: &'static str,
+    pub syntax: &'static str,
+    pub description: &'static str,
+}
+
+/// One diagnostic code entry in the `schema brand` JSON output.
+#[derive(Debug, Serialize)]
+pub struct SchemaBrandDiagCode {
+    pub code: &'static str,
+    pub severity: &'static str,
+    pub summary: &'static str,
+}
+
 // ── Fonts JSON types ──────────────────────────────────────────────────────────
 
 /// Top-level JSON envelope for `zenith fonts --json`.
