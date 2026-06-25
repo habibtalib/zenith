@@ -306,7 +306,13 @@ pub(super) fn emit_pie(
             continue;
         }
 
-        let fill = slice_color(i);
+        // Per-slice fill color: resolve from slice_colors if present, else fall
+        // back to the palette so a chart without slice-colors is byte-identical.
+        let fill = chart
+            .slice_colors
+            .get(i)
+            .and_then(|p| resolve_property_color(p, cx.resolved, diagnostics, &chart.id))
+            .unwrap_or_else(|| slice_color(i));
         let poly = wedge_polygon(geom, *a_start, *a_end);
         commands.push(SceneCommand::FillPolygon {
             points: poly,

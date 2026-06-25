@@ -1,11 +1,12 @@
 //! Transform for the `chart` node: the data-visualization primitive that
-//! carries one or more `series` data children and optional `categories` and
-//! `label-colors` children. The common visual/geometry props are read exactly
-//! like `pattern`; the chart-specific props (`kind`, `title`, `caption`,
-//! `legend`, `legend-position`, `legend-layout`, `legend-align`, `axis-min`,
-//! `axis-max`, `axis-style`, `bar-mode`, `orientation`, `point-placement`,
-//! `value-labels`, `value-color`) describe the chart presentation. Series,
-//! categories, and label-colors children are pure data (not renderable nodes).
+//! carries one or more `series` data children and optional `categories`,
+//! `label-colors`, and `slice-colors` children. The common visual/geometry
+//! props are read exactly like `pattern`; the chart-specific props (`kind`,
+//! `title`, `caption`, `legend`, `legend-position`, `legend-layout`,
+//! `legend-align`, `axis-min`, `axis-max`, `axis-style`, `bar-mode`,
+//! `orientation`, `point-placement`, `value-labels`, `value-color`) describe
+//! the chart presentation. Series, categories, label-colors, and slice-colors
+//! children are pure data (not renderable nodes).
 
 use kdl::{KdlNode, KdlValue};
 
@@ -162,14 +163,17 @@ pub(super) fn transform_chart(node: &KdlNode) -> Result<ChartNode, ParseError> {
     let legend_align =
         optional_string_prop_aliased(node, "legend-align", "legend_align").map(str::to_owned);
 
-    // Series, categories, and label-colors: each `series` child node becomes a
-    // ChartSeries; the single `categories` child carries string positional args as
-    // category labels; the single `label-colors` child carries positional
-    // PropertyValue entries (e.g. `(token)"color.x"`) as per-slice label colors.
+    // Series, categories, label-colors, and slice-colors: each `series` child node
+    // becomes a ChartSeries; the single `categories` child carries string positional
+    // args as category labels; the single `label-colors` child carries positional
+    // PropertyValue entries (e.g. `(token)"color.x"`) as per-slice label colors;
+    // the single `slice-colors` child carries positional PropertyValue entries as
+    // per-slice FILL colors.
     // All are pure data children — not renderable nodes.
     let mut series: Vec<ChartSeries> = Vec::new();
     let mut categories: Vec<String> = Vec::new();
     let mut label_colors: Vec<PropertyValue> = Vec::new();
+    let mut slice_colors: Vec<PropertyValue> = Vec::new();
     if let Some(children_block) = node.children() {
         for child in children_block.nodes() {
             match child.name().value() {
@@ -221,6 +225,18 @@ pub(super) fn transform_chart(node: &KdlNode) -> Result<ChartNode, ParseError> {
                             continue;
                         }
                         label_colors.push(entry_to_property_value(entry)?);
+                    }
+                }
+                "slice-colors" => {
+                    // Collect positional PropertyValue entries as per-slice FILL colors.
+                    // Values may be token refs `(token)"id"`, data refs `(data)"path"`,
+                    // or bare literals. Named props on the node are skipped.
+                    for entry in child.entries() {
+                        if entry.name().is_some() {
+                            // Named props are not expected on a slice-colors node; skip.
+                            continue;
+                        }
+                        slice_colors.push(entry_to_property_value(entry)?);
                     }
                 }
                 "categories" => {
@@ -320,6 +336,7 @@ pub(super) fn transform_chart(node: &KdlNode) -> Result<ChartNode, ParseError> {
         value_labels,
         value_color,
         label_colors,
+        slice_colors,
         categories,
         series,
         source_span: node_span(node),

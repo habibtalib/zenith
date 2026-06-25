@@ -190,13 +190,17 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
                 Optional `label-colors` child carries per-slice value-label colors as positional \
                 PropertyValue arguments (e.g. `(token)\"color.x\"`; one per category in order; \
                 absent = use the chart value-color or the white on-fill default). \
+                Optional `slice-colors` child carries per-slice FILL colors for pie/donut as \
+                positional PropertyValue arguments (e.g. `(token)\"color.x\"`; one per category \
+                in order; absent = use the palette). \
                 Zero or more `series` children carry the numeric data. \
                 Each series node takes its f64 data values as positional arguments \
                 and optional named props: label, color (token ref), label-color (token ref), data-ref. \
-                Emit `categories` then `label-colors` before any `series` children.",
+                Emit `categories` then `label-colors` then `slice-colors` before any `series` children.",
             example: concat!(
                 "categories \"Q1\" \"Q2\" \"Q3\" \"Q4\"\n",
                 "label-colors (token)\"color.c1\" (token)\"color.c2\" (token)\"color.c3\" (token)\"color.c4\"\n",
+                "slice-colors (token)\"color.s1\" (token)\"color.s2\" (token)\"color.s3\" (token)\"color.s4\"\n",
                 "series label=\"Revenue\" color=(token)\"color.primary\" label-color=(token)\"color.lbl\" 120.0 200.0 150.0 310.0\n",
                 "series label=\"Costs\" color=(token)\"color.secondary\" 80.0 90.0 100.0 120.0",
             ),

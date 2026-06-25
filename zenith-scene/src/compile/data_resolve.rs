@@ -124,6 +124,9 @@ fn node_has_data_ref(node: &Node) -> bool {
                 || n.label_colors
                     .iter()
                     .any(|p| matches!(p, PropertyValue::DataRef(_)))
+                || n.slice_colors
+                    .iter()
+                    .any(|p| matches!(p, PropertyValue::DataRef(_)))
                 || n.series.iter().any(|s| {
                     matches!(s.color, Some(PropertyValue::DataRef(_)))
                         || matches!(&s.label_color, Some(PropertyValue::DataRef(_)))
@@ -389,6 +392,10 @@ fn substitute_chart(n: &mut ChartNode, ctx: &DataContext, diagnostics: &mut Vec<
     // label-colors: per-slice label color refs; substitute each entry in place.
     for pv in &mut n.label_colors {
         substitute_color_prop(pv, ctx, &id, "label-colors", diagnostics);
+    }
+    // slice-colors: per-slice FILL color refs; substitute each entry in place.
+    for pv in &mut n.slice_colors {
+        substitute_color_prop(pv, ctx, &id, "slice-colors", diagnostics);
     }
     // Series color props and per-series label-color are token refs; substitute in place.
     // Also resolve data-ref bindings: populate values from the named array column.

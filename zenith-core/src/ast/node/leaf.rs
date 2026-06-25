@@ -719,8 +719,8 @@ pub struct ChartSeries {
 /// The common visual/geometry fields mirror [`PatternNode`]; the chart-specific
 /// fields (`kind`, `title`, `caption`, `legend`, `axis_*`, `bar_mode`,
 /// `orientation`, `point_placement`, `value_labels`, `value_color`, `label_colors`,
-/// `categories`, `series`, `legend_position`, `legend_layout`, `legend_align`)
-/// describe the chart content.
+/// `slice_colors`, `categories`, `series`, `legend_position`, `legend_layout`,
+/// `legend_align`) describe the chart content.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChartNode {
     pub id: String,
@@ -836,6 +836,11 @@ pub struct ChartNode {
     /// Populated from a `label-colors` child node whose positional arguments
     /// are each a `PropertyValue` (e.g. `(token)"color.x"`).
     pub label_colors: Vec<PropertyValue>,
+    /// Per-slice FILL colors for pie/donut (one per category, in order);
+    /// empty = fall back to the palette (`slice_color(idx)`).
+    /// Populated from a `slice-colors` child node whose positional arguments
+    /// are each a `PropertyValue` (e.g. `(token)"color.x"`).
+    pub slice_colors: Vec<PropertyValue>,
     /// X-axis category labels (one per category slot); empty = derive index
     /// labels at render. Populated from a `categories` child node whose
     /// positional arguments are the label strings.

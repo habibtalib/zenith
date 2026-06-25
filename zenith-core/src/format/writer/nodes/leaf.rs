@@ -600,7 +600,7 @@ pub(super) fn write_chart(c: &ChartNode, out: &mut String, depth: usize) {
     }
 
     // Child block: always emitted (even when empty) so parse → format → parse is byte-stable.
-    // Order: categories line (when non-empty), then label-colors line (when non-empty), then series lines.
+    // Order: categories, then label-colors, then slice-colors (all when non-empty), then series lines.
     out.push_str(" {\n");
 
     // Categories child: emitted only when non-empty (empty = absent, byte-identical).
@@ -621,6 +621,18 @@ pub(super) fn write_chart(c: &ChartNode, out: &mut String, depth: usize) {
         indent(out, depth + 1);
         out.push_str("label-colors");
         for pv in &c.label_colors {
+            out.push(' ');
+            out.push_str(&fmt_property_value(pv));
+        }
+        out.push('\n');
+    }
+
+    // Slice-colors child: emitted only when non-empty (empty = absent, byte-identical).
+    // Each entry is a positional PropertyValue giving the fill color for that slice.
+    if !c.slice_colors.is_empty() {
+        indent(out, depth + 1);
+        out.push_str("slice-colors");
+        for pv in &c.slice_colors {
             out.push(' ');
             out.push_str(&fmt_property_value(pv));
         }

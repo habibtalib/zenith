@@ -317,6 +317,12 @@ pub(in crate::validate::check) fn check_chart(
             referenced_token_ids.insert(token_id.clone());
         }
     }
+    // slice-colors token refs — per-slice FILL color refs from the slice-colors child node.
+    for pv in &c.slice_colors {
+        if let crate::ast::value::PropertyValue::TokenRef(token_id) = pv {
+            referenced_token_ids.insert(token_id.clone());
+        }
+    }
 
     // Unknown properties.
     check_unknown_props("chart", &c.id, &c.unknown_props, c.source_span, diagnostics);
