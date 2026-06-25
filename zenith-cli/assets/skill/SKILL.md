@@ -62,9 +62,14 @@ Zenith is deterministic and auditable; lean into that instead of guessing.
 
 1. **Plan in source.** Capture the brief, palette, and layer plan as `note`/`role="guide"`
    content or a sidecar, so the design can be traced back to intent.
-2. **Author / edit.** Write `.zen` source (new work) or apply a typed transaction with
-   `zenith tx` (changes to existing nodes). Prefer `tx` for edits — it is dry-run by default,
-   shows a source + scene diff, and enforces id-uniqueness and referential integrity.
+2. **Author / edit.** For **new** work, start from `zenith new <path>` — it scaffolds a valid,
+   minimal top-level skeleton (`zenith version=1 { project … tokens … styles … document { page … } }`)
+   with a doc-id already minted; edit that rather than hand-writing the outer structure from memory
+   (run `zenith schema document` / `zenith schema page` for the exact top-level shape). For **changes**
+   to existing nodes, apply a typed transaction with `zenith tx` — prefer it for edits: it is dry-run
+   by default, shows a source + scene diff, and enforces id-uniqueness and referential integrity.
+   Note: KDL nodes are **one per line** — a node and all its attributes go on a single line (or end
+   each line with `\` to continue), and booleans are written `#true` / `#false`.
 3. **Validate.** Run `zenith validate <file> --json` after every change. **Never finalize
    while hard (Error) diagnostics remain.** Fix at the source.
 4. **Render to inspect.** `zenith render <file> --png out.png` (or `--all-pages <dir>` for a
@@ -98,7 +103,7 @@ These make designs editable, on-brand, and reproducible — and keep the agentic
   generate many nodes procedurally, record the parameters/seed in a note so it is replayable.
 - **Verify syntax against reality, not memory.** Exact node/attribute syntax lives in
   `zenith schema node <kind>` (authoritative). When unsure of a property, run `zenith schema node
-  <kind>` — then validate. Do not invent syntax.
+<kind>` — then validate. Do not invent syntax.
 
 ## Command surface
 
@@ -121,26 +126,28 @@ memorize flags from this file — ask the CLI.
 Read only the pack you need for the current sub-task (progressive disclosure). Each lives in
 `references/` next to this file.
 
-| The task involves…                                                                                    | Read / command                                             |
-| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Node/attribute names, types, required/optional status                                                 | `zenith schema node <kind>` · `zenith schema nodes`        |
-| Transaction op fields and semantics                                                                   | `zenith schema op <name>` · `zenith schema ops`            |
-| Command flags and usage                                                                               | `zenith <cmd> --help`                                      |
-| Syntax errors, type mismatches, "did you mean?" — act on the diagnostic                              | `zenith validate <file> --json`                            |
-| The full agent run: scratch experiments, multiple candidates, select, promote, clean up, provenance   | `references/agentic-workflow.md` + `zenith workspace --help` |
-| Driving Zenith where the CLI can't run (remote/CI/sandboxed/hosted agents) — the MCP server           | `references/agentic-workflow.md` (MCP section) + `zenith mcp --help` |
-| Procedural grid/scatter tiling — the `pattern` node or the `detach_pattern` op                        | `references/pattern.md`                                    |
-| Recording a generated motif as a `recipes` block (provenance, seed/params, recipe `tx` ops)           | `references/recipes-model.md`                              |
-| Picking or applying a ready-made visual theme (palette + shape language)                              | `references/themes.md` + `themes/*.zen`                    |
-| Generating a theme from a brand (logo, website, brand colors)                                         | `references/themes.md` → `zenith theme new --help`         |
-| Color, gradients, glows, texture, typography, "make it premium" — visual effects                      | `zenith schema node <kind>` · `zenith schema token <type>` + design judgment |
-| Page setup, anchors, safe zones, frames, grids, spreads                                               | `references/layout.md`                                     |
-| Bringing in a photo/illustration asset and composing around it                                        | `zenith schema node image` · `zenith schema node asset`    |
-| Defining or applying a brand/identity, or per-project style                                           | `references/brand.md`                                      |
-| Many outputs from one design — **sizes/formats** (`zenith variant`) or **data** rows (`zenith merge`) | `references/variants.md`                                   |
-| Diagnostic policy (`allow`/`deny`/`warn` codes, CI gating, config files, CLI flags)                   | `references/diagnostics.md` + `zenith schema diagnostics`  |
-| Local/system fonts, portability, deterministic rendering, `font.local` advisory                        | `references/diagnostics.md` · `zenith fonts`               |
-| Reporting a Zenith bug or feature request (the `gh` feedback loop)                                    | `references/reporting-issues.md`                           |
+| The task involves…                                                                                                                               | Read / command                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Starting a brand-new document, or the top-level file structure (`zenith { project tokens styles document { page } }`)                            | `zenith new <path>` · `zenith schema document` · `zenith schema page`        |
+| Node/attribute names, types, required/optional status                                                                                            | `zenith schema node <kind>` · `zenith schema nodes`                          |
+| Transaction op fields and semantics                                                                                                              | `zenith schema op <name>` · `zenith schema ops`                              |
+| Command flags and usage                                                                                                                          | `zenith <cmd> --help`                                                        |
+| Syntax errors, type mismatches, "did you mean?" — act on the diagnostic                                                                          | `zenith validate <file> --json`                                              |
+| The full agent run: scratch experiments, multiple candidates, select, promote, clean up, provenance                                              | `references/agentic-workflow.md` + `zenith workspace --help`                 |
+| Driving Zenith where the CLI can't run (remote/CI/sandboxed/hosted agents) — the MCP server                                                      | `references/agentic-workflow.md` (MCP section) + `zenith mcp --help`         |
+| Procedural grid/scatter tiling — the `pattern` node or the `detach_pattern` op                                                                   | `references/pattern.md`                                                      |
+| Recording a generated motif as a `recipes` block (provenance, seed/params, recipe `tx` ops)                                                      | `references/recipes-model.md`                                                |
+| Picking or applying a ready-made visual theme (palette + shape language)                                                                         | `references/themes.md` + `themes/*.zen`                                      |
+| Generating a theme from a brand (logo, website, brand colors)                                                                                    | `references/themes.md` → `zenith theme new --help`                           |
+| Color, gradients, glows, texture, typography, "make it premium" — visual effects                                                                 | `zenith schema node <kind>` · `zenith schema token <type>` + design judgment |
+| Page setup, anchors, safe zones, frames, grids, spreads                                                                                          | `references/layout.md`                                                       |
+| Bringing in a photo/illustration asset and composing around it                                                                                   | `zenith schema node image` · `zenith schema node asset`                      |
+| Defining or applying a brand/identity, or per-project style                                                                                      | `references/brand.md`                                                        |
+| Many outputs from one design — **sizes/formats** (`zenith variant`) or **data** rows (`zenith merge`, binding nodes with `role="data.<column>"`) | `references/variants.md` · `zenith merge --help`                             |
+| Per-variant tweaks (the `variants`/`override` block: hide nodes, swap text/fill, reposition with x/y/w/h)                                        | `zenith schema variant`                                                      |
+| Diagnostic policy (`allow`/`deny`/`warn` codes, CI gating, config files, CLI flags)                                                              | `references/diagnostics.md` + `zenith schema diagnostics`                    |
+| Local/system fonts, portability, deterministic rendering, `font.local` advisory                                                                  | `references/diagnostics.md` · `zenith fonts`                                 |
+| Reporting a Zenith bug or feature request (the `gh` feedback loop)                                                                               | `references/reporting-issues.md`                                             |
 
 ## Project configuration (brand / identity / style)
 
