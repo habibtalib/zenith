@@ -8,8 +8,8 @@
 
 /// Left margin: reserved for Y-axis tick labels.
 const LEFT: f64 = 44.0;
-/// Bottom margin: reserved for the X axis line and (future) category labels.
-const BOTTOM: f64 = 28.0;
+/// Bottom margin: reserved for the X axis line and category labels beneath it.
+const BOTTOM: f64 = 40.0;
 /// Extra top inset when a title is present.
 const TOP_TITLE: f64 = 24.0;
 /// Extra bottom inset when a caption is present.

@@ -36,7 +36,7 @@ pub(super) struct AxisColors {
 /// - Integers are printed without a decimal point: `42`.
 /// - Non-integers are printed with minimal trailing-zero trimming: `42.5`.
 /// - No locale, no thousands separators.
-fn format_tick_label(value: f64) -> String {
+pub(super) fn format_tick_label(value: f64) -> String {
     // Round to 10 decimal places to suppress floating-point noise.
     let rounded = (value * 1e10).round() / 1e10;
     if rounded.fract() == 0.0 && rounded.abs() < 1e15 {
@@ -51,20 +51,20 @@ fn format_tick_label(value: f64) -> String {
     }
 }
 
-// ── emit_axes_frame ───────────────────────────────────────────────────────────
+// ── emit_gridlines_and_labels ─────────────────────────────────────────────────
 
-/// Emit the axis frame for a bar or line chart.
+/// Emit Y gridlines and Y tick labels for a chart plot area.
 ///
-/// Pushes the following `SceneCommand`s (all reads are deterministic):
-/// 1. Y axis line (left edge of the plot area, top-to-bottom).
-/// 2. X axis line (bottom edge of the plot area, left-to-right).
-/// 3. For each Y tick: a horizontal gridline in `colors.grid` and a
-///    right-aligned numeric label in `colors.label` positioned just left of
-///    the Y axis.
+/// Pushes for each Y tick: a horizontal gridline in `colors.grid` and a
+/// right-aligned numeric label in `colors.label` positioned just left of the
+/// Y axis.
 ///
-/// Shaping errors are collected as advisory diagnostics; the frame is still
-/// emitted (with the label omitted for the failing tick).
-pub(super) fn emit_axes_frame(
+/// Separated from axis-line emission so that bars can be drawn OVER gridlines
+/// but UNDER the axis lines (z-order: gridlines → bars → axis lines).
+///
+/// Shaping errors are collected as advisory diagnostics; the gridlines are
+/// still emitted when a label fails to shape.
+pub(super) fn emit_gridlines_and_labels(
     plot: &PlotArea,
     y_ticks: &[Tick],
     colors: AxisColors,
@@ -78,33 +78,6 @@ pub(super) fn emit_axes_frame(
         return;
     }
 
-    // ── Y axis line ──────────────────────────────────────────────────────────
-    commands.push(SceneCommand::StrokeLine {
-        x1: plot.x,
-        y1: plot.y,
-        x2: plot.x,
-        y2: plot.y + plot.h,
-        color: colors.axis,
-        stroke_width: 1.0,
-        stroke_dash: None,
-        stroke_gap: None,
-        stroke_linecap: None,
-    });
-
-    // ── X axis line ──────────────────────────────────────────────────────────
-    commands.push(SceneCommand::StrokeLine {
-        x1: plot.x,
-        y1: plot.y + plot.h,
-        x2: plot.x + plot.w,
-        y2: plot.y + plot.h,
-        color: colors.axis,
-        stroke_width: 1.0,
-        stroke_dash: None,
-        stroke_gap: None,
-        stroke_linecap: None,
-    });
-
-    // ── Y gridlines and tick labels ──────────────────────────────────────────
     // Hoisted outside the tick loop: avoids one heap allocation per tick.
     let label_families = [String::from("Noto Sans")];
 
@@ -150,7 +123,7 @@ pub(super) fn emit_axes_frame(
                     None,
                     Some(chart_id.to_owned()),
                 ));
-                // Skip the label; frame lines still emitted.
+                // Skip the label; gridline still emitted.
             }
             Ok(result) => {
                 // Compute total advance width for right-alignment.
@@ -182,6 +155,70 @@ pub(super) fn emit_axes_frame(
             }
         }
     }
+}
+
+// ── emit_axis_lines ───────────────────────────────────────────────────────────
+
+/// Emit the Y axis line and X axis line for a chart plot area.
+///
+/// These are drawn LAST (after bars or series) so they paint over any bar that
+/// touches the axis edge.
+pub(super) fn emit_axis_lines(
+    plot: &PlotArea,
+    axis_color: Color,
+    commands: &mut Vec<SceneCommand>,
+) {
+    if plot.w <= 0.0 || plot.h <= 0.0 {
+        return;
+    }
+
+    // Y axis line: left edge, top-to-bottom.
+    commands.push(SceneCommand::StrokeLine {
+        x1: plot.x,
+        y1: plot.y,
+        x2: plot.x,
+        y2: plot.y + plot.h,
+        color: axis_color,
+        stroke_width: 1.0,
+        stroke_dash: None,
+        stroke_gap: None,
+        stroke_linecap: None,
+    });
+
+    // X axis line: bottom edge, left-to-right.
+    commands.push(SceneCommand::StrokeLine {
+        x1: plot.x,
+        y1: plot.y + plot.h,
+        x2: plot.x + plot.w,
+        y2: plot.y + plot.h,
+        color: axis_color,
+        stroke_width: 1.0,
+        stroke_dash: None,
+        stroke_gap: None,
+        stroke_linecap: None,
+    });
+}
+
+// ── emit_axes_frame ───────────────────────────────────────────────────────────
+
+/// Emit the full axis frame (gridlines + tick labels + axis lines) for a
+/// line chart.
+///
+/// This is a thin combinator that calls `emit_gridlines_and_labels` then
+/// `emit_axis_lines`, preserving the original z-order for the line-chart path.
+/// Bar charts call those two functions individually with bars emitted between
+/// them to achieve the correct z-order.
+pub(super) fn emit_axes_frame(
+    plot: &PlotArea,
+    y_ticks: &[Tick],
+    colors: AxisColors,
+    chart_id: &str,
+    cx: NodeCtx,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    emit_gridlines_and_labels(plot, y_ticks, colors, chart_id, cx, commands, diagnostics);
+    emit_axis_lines(plot, colors.axis, commands);
 }
 
 #[cfg(test)]

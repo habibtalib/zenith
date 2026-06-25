@@ -18,7 +18,8 @@ use super::super::RenderCtx;
 use super::super::paint::resolve_property_color;
 use super::super::text::run_to_scene_glyphs;
 use super::super::util::{missing_geometry_diag, resolve_anchored_axis, unsupported_unit_diag};
-use super::axis::{AxisColors, emit_axes_frame};
+use super::axis::{AxisColors, emit_axes_frame, emit_axis_lines, emit_gridlines_and_labels};
+use super::bar::{BarMode, emit_bars, emit_category_labels, stacked_max};
 use super::frame::plot_area;
 use super::scale::{LinearScale, data_range, nice_ticks};
 
@@ -152,7 +153,7 @@ pub(in crate::compile) fn compile_chart(
 
     // ── Y scale ──────────────────────────────────────────────────────────────
     // Build the scale even when there is no data so the empty frame is drawn.
-    let (mut data_lo, data_hi) =
+    let (mut data_lo, mut data_hi) =
         data_range(&chart.series, chart.axis_min, chart.axis_max).unwrap_or((0.0, 1.0)); // fallback: (0,1) keeps the frame visible
 
     // Bar charts grow from a zero baseline, so the domain must include 0 — a
@@ -160,6 +161,16 @@ pub(in crate::compile) fn compile_chart(
     // axis_min if the author pinned one; line charts keep their auto-fit range.
     if chart.kind.as_str() == "bar" && chart.axis_min.is_none() {
         data_lo = data_lo.min(0.0);
+    }
+
+    // Stacked bars reach the per-category SUM, not the max single value, so the
+    // value axis must be sized to the tallest column or the stack overflows the
+    // plot. Honor an explicit axis_max if the author pinned one.
+    if chart.kind.as_str() == "bar"
+        && BarMode::from_opt(chart.bar_mode.as_deref()) == BarMode::Stacked
+        && chart.axis_max.is_none()
+    {
+        data_hi = data_hi.max(stacked_max(chart));
     }
 
     // Inverted Y: data_min → pixel bottom, data_max → pixel top.
@@ -172,16 +183,56 @@ pub(in crate::compile) fn compile_chart(
 
     let y_ticks = nice_ticks(&y_scale, 5);
 
-    // ── Emit frame + gridlines + tick labels ─────────────────────────────────
-    emit_axes_frame(
-        &plot,
-        &y_ticks,
-        colors,
-        &chart.id,
-        cx,
-        commands,
-        diagnostics,
-    );
+    // ── Emit chart content (kind-specific z-order) ───────────────────────────
+    //
+    // Bar charts: gridlines → bars → axis lines (bars paint over gridlines,
+    // axis lines paint over bar edges that touch them).
+    // Line charts: the combined emit_axes_frame call preserves the existing
+    // order (gridlines + tick labels + axis lines together).
+    match chart.kind.as_str() {
+        "bar" => {
+            let n_categories = chart
+                .series
+                .iter()
+                .map(|s| s.values.len())
+                .max()
+                .unwrap_or(0);
+
+            emit_gridlines_and_labels(
+                &plot,
+                &y_ticks,
+                colors,
+                &chart.id,
+                cx,
+                commands,
+                diagnostics,
+            );
+            emit_bars(chart, &plot, &y_scale, cx, commands, diagnostics);
+            emit_category_labels(
+                &chart.categories,
+                n_categories,
+                &plot,
+                colors.label,
+                cx,
+                commands,
+                diagnostics,
+            );
+            emit_axis_lines(&plot, colors.axis, commands);
+        }
+        "line" => {
+            emit_axes_frame(
+                &plot,
+                &y_ticks,
+                colors,
+                &chart.id,
+                cx,
+                commands,
+                diagnostics,
+            );
+        }
+        // Non-axis kinds are filtered above; no wildcard here.
+        _ => {}
+    }
 
     // ── Title ────────────────────────────────────────────────────────────────
     if let Some(title) = &chart.title {
