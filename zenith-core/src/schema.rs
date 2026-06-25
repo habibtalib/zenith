@@ -196,6 +196,11 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
                 Zero or more `series` children carry the numeric data. \
                 Each series node takes its f64 data values as positional arguments \
                 and optional named props: label, color (token ref), label-color (token ref), data-ref. \
+                A `data-ref=\"field\"` binds the whole series to a numeric ARRAY field supplied at \
+                render via `--data` — JSON `{\"field\":[120,185,143]}` or a CSV column named `field` \
+                (one number per category). This is render-time binding, distinct from `zenith merge`, \
+                which substitutes per-row scalar text/image via `role=\"data.<column>\"` and does not \
+                vary chart series per row. \
                 Emit `categories` then `label-colors` then `slice-colors` before any `series` children.",
             example: concat!(
                 "categories \"Q1\" \"Q2\" \"Q3\" \"Q4\"\n",
