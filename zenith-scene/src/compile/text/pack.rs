@@ -227,18 +227,28 @@ pub(in crate::compile) fn pack_lines_core(
         // filled forces a break first (single-paragraph docs never hit this).
         let para_break = !cur.is_empty() && tok.src.paragraph != cur_para;
 
-        let overflow = !cur.is_empty() && line_w + space_advance + tok.advance > box_w;
+        // The inter-word gap BEFORE this word on a non-empty line: zero when the
+        // word is GLUED to its predecessor (source-adjacent, no whitespace) so it
+        // sits flush against it; otherwise the normal `space_advance`. A glued
+        // word never opens a line with a gap (the `cur.is_empty()` cases below all
+        // use a zero gap regardless). For non-glued words this is `space_advance`,
+        // byte-identical to before.
+        let lead_gap = if tok.glued { 0.0 } else { space_advance };
+
+        let overflow = !cur.is_empty() && line_w + lead_gap + tok.advance > box_w;
 
         if overflow && !para_break {
             // Try to hyphenate the word into the remaining space before wrapping.
             // `avail` is the width left on the current line after a space gap.
             if let Some(ctx) = hyph {
-                let avail = box_w - line_w - space_advance;
+                let avail = box_w - line_w - lead_gap;
                 if avail > 0.0
                     && let Some(split) = try_hyphenate(&tok, avail, ctx)
                 {
-                    // Head + hyphen joins the current line; close the line.
-                    line_w += space_advance + split.head.advance;
+                    // Head + hyphen joins the current line; close the line. The
+                    // head inherits the word's glue, so the gap before it matches
+                    // `lead_gap` (zero for a glued word, `space_advance` otherwise).
+                    line_w += lead_gap + split.head.advance;
                     cur.push(split.head);
                     lines.push(Line {
                         words: std::mem::take(&mut cur),
@@ -318,7 +328,9 @@ pub(in crate::compile) fn pack_lines_core(
         if cur.is_empty() {
             cur_para = tok.src.paragraph;
         }
-        let gap = if cur.is_empty() { 0.0 } else { space_advance };
+        // A line-opening word contributes no leading gap; otherwise use the
+        // glue-aware `lead_gap` (zero when glued, `space_advance` otherwise).
+        let gap = if cur.is_empty() { 0.0 } else { lead_gap };
         line_w += gap + tok.advance;
         cur.push(tok);
     }
@@ -361,6 +373,7 @@ mod packer_tests {
             code: false,
             link: None,
             baseline_dy: 0.0,
+            glued: false,
             src: WordSource {
                 text: String::new(),
                 weight: 400,

@@ -50,6 +50,14 @@ pub(in crate::compile) struct WordToken {
     /// Applied per-glyph-run by [`super::emit::emit_lines`] on top of the line
     /// baseline.
     pub(in crate::compile) baseline_dy: f64,
+    /// `true` when this word was source-adjacent to the PREVIOUS word with NO
+    /// whitespace between them (e.g. a bold span `"24%"` immediately followed by
+    /// a plain span `","` in the source). A glued word contributes ONLY its own
+    /// advance to the line width — no preceding inter-word space — and its x is
+    /// the previous word's end. The overwhelmingly common case (words separated
+    /// by real whitespace, within a span or across whitespace-bounded spans) has
+    /// `glued = false`, which is byte-identical to the historical behaviour.
+    pub(in crate::compile) glued: bool,
     /// The exact source text this word was shaped from, plus the weight/style/
     /// size needed to RE-shape a hyphenated fragment of it. Used ONLY by the
     /// optional hyphenation path in [`super::pack::pack_lines`]; the non-hyphenate
@@ -171,8 +179,38 @@ pub(in crate::compile) fn shape_words(
     // Accumulate chars with no glyph in any registered face across ALL words of
     // this node. Emitted as a single diagnostic after the word loop.
     let mut node_missing: BTreeSet<char> = BTreeSet::new();
+    // Whether the PREVIOUS span's source text ended with whitespace. Used to
+    // detect a no-whitespace span boundary: the first word of the current span is
+    // GLUED to the previous word iff neither this span starts with whitespace nor
+    // the previous span ended with whitespace (they were source-adjacent). `true`
+    // before the first span so the very first word of the node is never glued.
+    let mut prev_ends_with_ws = true;
 
     for shaped in spans {
+        // Inspect the ORIGINAL span text (before `split_whitespace` discards the
+        // leading/trailing whitespace) so source-adjacency across the span
+        // boundary can be detected. An empty span text leaves `prev_ends_with_ws`
+        // unchanged (it contributes no words and no boundary information).
+        let span_starts_with_ws = shaped
+            .text
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_whitespace());
+        let span_ends_with_ws = shaped
+            .text
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_whitespace());
+        // The first word produced from THIS span is glued to the previous word
+        // only when this span is source-adjacent to the previous one: neither
+        // side had whitespace at the boundary. All later words of this span are
+        // separated by the real whitespace `split_whitespace` split on, so they
+        // are never glued.
+        let mut first_word_of_span = true;
+        let span_first_glued = !span_starts_with_ws && !prev_ends_with_ws;
+        if !shaped.text.is_empty() {
+            prev_ends_with_ws = span_ends_with_ws;
+        }
         // A super/subscript span carries its own reduced size; a baseline span
         // uses the shared node `font_size`. Metrics (ascent/line_height) are
         // captured ONLY from a full-size word so the line grid stays uniform.
@@ -222,6 +260,12 @@ pub(in crate::compile) fn shape_words(
                             metrics.line_height = first.line_height as f64;
                             have_metrics = true;
                         }
+                        // Only the FIRST word emitted from this span can be glued
+                        // (to the previous span's last word). Every later word was
+                        // produced by splitting on real whitespace, so it keeps the
+                        // normal inter-word space.
+                        let glued = first_word_of_span && span_first_glued;
+                        first_word_of_span = false;
                         let advance: f64 = result.runs.iter().map(|r| r.advance_width as f64).sum();
                         tokens.push(WordToken {
                             advance,
@@ -232,6 +276,7 @@ pub(in crate::compile) fn shape_words(
                             code: shaped.code,
                             link: shaped.link.clone(),
                             baseline_dy: shaped.baseline_dy,
+                            glued,
                             runs: result.runs,
                             src: WordSource {
                                 text: word.to_owned(),

@@ -89,6 +89,12 @@ fn reshape_fragment(
         code: donor.code,
         link: donor.link.clone(),
         baseline_dy: donor.baseline_dy,
+        // A fragment inherits the original word's glue: the head starts exactly
+        // where the donor started (so its glue to the previous word is preserved);
+        // the tail begins a fresh line where glue is inert (a first-of-line word
+        // never gets a preceding space regardless). The merge reconstruction also
+        // restores the donor's glue.
+        glued: donor.glued,
         src: WordSource {
             text: text.to_owned(),
             weight: donor.src.weight,

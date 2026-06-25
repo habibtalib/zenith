@@ -83,105 +83,107 @@ pub(in crate::compile) fn emit_lines_profiled<F>(
             line.words.iter().collect()
         };
 
-        // `(base_x, gap)`: the line's left origin and inter-word gap. LTR keeps
+        // Whether the inter-word gap BEFORE visual word `vi` (1-based boundary;
+        // `vi` in `1..word_count`) is SUPPRESSED because the two words are glued
+        // (source-adjacent, no whitespace). The glue flag lives on the
+        // logically-LATER word. In LTR, visual order is logical order, so the
+        // later word of the pair is `visual[vi]`. In RTL, the words are reversed,
+        // so the later word is `visual[vi - 1]`. A line with no glued words has
+        // every gap present, byte-identical to before.
+        let gap_suppressed = |vi: usize| -> bool {
+            let later = if is_rtl { vi.checked_sub(1) } else { Some(vi) };
+            later.and_then(|j| visual.get(j)).is_some_and(|w| w.glued)
+        };
+        // Number of REAL (non-suppressed) gaps on the line — the count of
+        // boundaries justify can stretch. Equals `word_count - 1` when no word is
+        // glued, so justify is byte-identical for whitespace-only lines.
+        let real_gap_count = (1..word_count).filter(|&vi| !gap_suppressed(vi)).count();
+
+        // `(base_x, extra)`: the line's left origin and the PER-REAL-GAP stretch
+        // added on top of `space_advance` under justify (0 otherwise). LTR keeps
         // the historical mapping exactly. RTL flips the anchor: `start`
-        // right-anchors (line right edge at box right), `end` left-anchors,
-        // `center` is symmetric. Because `content_w` is order-independent, the
-        // right-anchor offset `box_w - content_w` is identical whichever order
-        // the words sit in.
-        let (base_x, gap) = if is_rtl {
+        // right-anchors, `end` left-anchors, `center` is symmetric. Because
+        // `content_w` is order-independent, the right-anchor offset
+        // `box_w - content_w` is identical whichever order the words sit in.
+        let (base_x, extra) = if is_rtl {
             match align {
-                "center" => (text_x + (box_w - line.content_w) / 2.0, space_advance),
+                "center" => (text_x + (box_w - line.content_w) / 2.0, 0.0),
                 // RTL `end` → left-anchor (left edge at box left).
-                "end" => (text_x, space_advance),
+                "end" => (text_x, 0.0),
                 "justify" => {
                     // RTL justify: stretch inter-word gaps to fill, right-
                     // anchored; the last line stays right-aligned (ragged left).
                     let is_final_line = i == last_idx && !justify_final_line;
-                    if !is_final_line && word_count > 1 {
-                        let extra = (box_w - line.content_w).max(0.0) / (word_count as f64 - 1.0);
-                        (text_x, space_advance + extra)
+                    if !is_final_line && real_gap_count > 0 {
+                        let extra = (box_w - line.content_w).max(0.0) / (real_gap_count as f64);
+                        (text_x, extra)
                     } else {
-                        (text_x + (box_w - line.content_w), space_advance)
+                        (text_x + (box_w - line.content_w), 0.0)
                     }
                 }
                 // RTL `start`/unknown → right-anchor.
-                _ => (text_x + (box_w - line.content_w), space_advance),
+                _ => (text_x + (box_w - line.content_w), 0.0),
             }
         } else {
             match align {
-                "center" => (text_x + (box_w - line.content_w) / 2.0, space_advance),
-                "end" => (text_x + (box_w - line.content_w), space_advance),
+                "center" => (text_x + (box_w - line.content_w) / 2.0, 0.0),
+                "end" => (text_x + (box_w - line.content_w), 0.0),
                 "justify" => {
                     // Justify stretches inter-word gaps so a non-final, multi-word
-                    // line fills the box. The final line and single-word lines stay
-                    // at the start offset (paragraph semantics). `extra` is clamped
-                    // ≥ 0 so an overlong line (content_w > box_w) never SHRINKS gaps
-                    // below the normal space; `word_count > 1` guards the divisor.
-                    // A continuation chain box (`justify_final_line`) justifies its
+                    // line fills the box. The final line and lines with no real gap
+                    // stay at the start offset (paragraph semantics). `extra` is
+                    // clamped ≥ 0 so an overlong line never SHRINKS gaps below the
+                    // normal space; `real_gap_count > 0` guards the divisor. A
+                    // continuation chain box (`justify_final_line`) justifies its
                     // own last line too, since the paragraph flows on past it.
                     let is_final_line = i == last_idx && !justify_final_line;
-                    if !is_final_line && word_count > 1 {
-                        let extra = (box_w - line.content_w).max(0.0) / (word_count as f64 - 1.0);
-                        (text_x, space_advance + extra)
+                    if !is_final_line && real_gap_count > 0 {
+                        let extra = (box_w - line.content_w).max(0.0) / (real_gap_count as f64);
+                        (text_x, extra)
                     } else {
-                        (text_x, space_advance)
+                        (text_x, 0.0)
                     }
                 }
-                _ => (text_x, space_advance),
+                _ => (text_x, 0.0),
             }
         };
 
-        // Precompute each VISUAL word's left x along the line, left-to-right.
+        // Precompute each VISUAL word's left x along the line, left-to-right. A
+        // suppressed (glued) boundary adds NO gap, so the glued word sits flush
+        // against its neighbour; every other boundary adds `space_advance + extra`
+        // (`extra` is non-zero only under justify).
         let mut word_x: Vec<f64> = Vec::with_capacity(word_count);
         {
             let mut x = base_x;
             for (wi, word) in visual.iter().enumerate() {
                 word_x.push(x);
                 x += word.advance;
-                if wi + 1 < word_count {
-                    x += gap;
+                let next = wi + 1;
+                if next < word_count && !gap_suppressed(next) {
+                    x += space_advance + extra;
                 }
             }
         }
 
         // Background rects FIRST (painted before decorations and glyphs so
-        // everything sits on top). One FillRect per word for each active
-        // background: `highlight` (author color) and/or `code` (CODE_BG).
-        // Words without either emit nothing (byte-identical).
-        for (wi, word) in visual.iter().enumerate() {
-            if let Some(hl_color) = word.highlight {
-                let wx = word_x.get(wi).copied().unwrap_or(base_x);
-                // Use the first run's metrics for the highlight band height.
-                // When a word has no runs (empty token) there is nothing to
-                // highlight; the `if let Some` below guards this.
-                if let Some(first_run) = word.runs.first() {
-                    let hl_y = baseline_y - first_run.ascent as f64;
-                    let hl_h = (first_run.ascent + first_run.descent) as f64;
-                    commands.push(SceneCommand::FillRect {
-                        x: wx,
-                        y: hl_y,
-                        w: word.advance,
-                        h: hl_h,
-                        paint: Paint::solid(hl_color),
-                    });
-                }
-            }
-            if word.code {
-                let wx = word_x.get(wi).copied().unwrap_or(base_x);
-                if let Some(first_run) = word.runs.first() {
-                    let bg_y = baseline_y - first_run.ascent as f64;
-                    let bg_h = (first_run.ascent + first_run.descent) as f64;
-                    commands.push(SceneCommand::FillRect {
-                        x: wx,
-                        y: bg_y,
-                        w: word.advance,
-                        h: bg_h,
-                        paint: Paint::solid(CODE_BG),
-                    });
-                }
-            }
-        }
+        // everything sits on top). A multi-word highlighted run (or `code` run)
+        // is coalesced into ONE FillRect spanning from the first word's start to
+        // the last word's end, INCLUDING the inter-word spaces between them, so
+        // the background is continuous with no gaps. Consecutive words are grouped
+        // while they share the same background key (the same highlight color, or
+        // both `code`); a colour change, a `None`, or a line break starts a fresh
+        // rect. A single highlighted/code word yields one rect exactly as before,
+        // so a document without multi-word runs is byte-identical.
+        //
+        // `highlight` and `code` are independent passes (a word may carry both),
+        // mirroring the underline/strikethrough decoration grouping below. The
+        // band geometry (y/h) is taken from the FIRST run-bearing word of the run.
+        emit_background_run(&visual, &word_x, base_x, baseline_y, commands, |w| {
+            w.highlight
+        });
+        emit_background_run(&visual, &word_x, base_x, baseline_y, commands, |w| {
+            if w.code { Some(CODE_BG) } else { None }
+        });
 
         // Decorations FIRST (so glyphs paint on top), one FillRect per maximal
         // contiguous same-flag run of words (in visual order).
@@ -246,6 +248,96 @@ pub(in crate::compile) fn emit_lines_profiled<F>(
     }
 }
 
+/// Emit coalesced background FillRects for one background channel of a line's
+/// VISUAL words. `key(word)` returns `Some(color)` when the word carries this
+/// background (the highlight color, or [`CODE_BG`] for a `code` word) and `None`
+/// otherwise. Maximal runs of consecutive words sharing the SAME `Some(color)`
+/// are merged into a single rect spanning the first word's left edge to the last
+/// word's right edge — which INCLUDES the inter-word spaces between them, since
+/// `word_x` already encodes each word's placed origin. A `None`, a colour change,
+/// or the end of the line closes the current run. The band's vertical geometry
+/// (`y`/`h`) is taken from the FIRST run-bearing word of the run; a run made
+/// entirely of empty (run-less) words emits nothing, matching the prior per-word
+/// guard. A line with at most one background word per run is byte-identical to
+/// the previous per-word emission.
+fn emit_background_run<F>(
+    visual: &[&WordToken],
+    word_x: &[f64],
+    base_x: f64,
+    baseline_y: f64,
+    commands: &mut Vec<SceneCommand>,
+    key: F,
+) where
+    F: Fn(&WordToken) -> Option<Color>,
+{
+    // Open run state: the active color, the run's left/right x, and the band
+    // geometry (set from the first run-bearing word; `None` until then).
+    let mut run: Option<BgRun> = None;
+
+    let flush = |run: Option<BgRun>, commands: &mut Vec<SceneCommand>| {
+        if let Some(BgRun {
+            color,
+            left,
+            right,
+            band: Some((y, h)),
+        }) = run
+        {
+            commands.push(SceneCommand::FillRect {
+                x: left,
+                y,
+                w: right - left,
+                h,
+                paint: Paint::solid(color),
+            });
+        }
+    };
+
+    for (wi, word) in visual.iter().enumerate() {
+        let wx = word_x.get(wi).copied().unwrap_or(base_x);
+        let band = word.runs.first().map(|r| {
+            let y = baseline_y - r.ascent as f64;
+            let h = (r.ascent + r.descent) as f64;
+            (y, h)
+        });
+        match key(word) {
+            Some(color) => match run.take() {
+                // Extend the current run when the color matches.
+                Some(cur) if cur.color == color => {
+                    run = Some(BgRun {
+                        color,
+                        left: cur.left,
+                        right: wx + word.advance,
+                        // Adopt the band from the first run-bearing word if not yet set.
+                        band: cur.band.or(band),
+                    });
+                }
+                // A different color (or no open run): flush, then open a new run.
+                other => {
+                    flush(other, commands);
+                    run = Some(BgRun {
+                        color,
+                        left: wx,
+                        right: wx + word.advance,
+                        band,
+                    });
+                }
+            },
+            None => flush(run.take(), commands),
+        }
+    }
+    flush(run.take(), commands);
+}
+
+/// One open background run accumulated by [`emit_background_run`]: the active
+/// fill color, the run's left/right x extent, and its vertical band `(y, h)`
+/// (taken from the first run-bearing word; `None` until one is seen).
+struct BgRun {
+    color: Color,
+    left: f64,
+    right: f64,
+    band: Option<(f64, f64)>,
+}
+
 #[cfg(test)]
 mod rtl_tests {
     use super::{EmitStyle, Line, WordToken, emit_lines};
@@ -277,6 +369,7 @@ mod rtl_tests {
             code: false,
             link: None,
             baseline_dy: 0.0,
+            glued: false,
             src: WordSource {
                 text: String::new(),
                 weight: 400,

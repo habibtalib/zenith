@@ -799,6 +799,7 @@ mod indent_tests {
             code: false,
             link: None,
             baseline_dy: 0.0,
+            glued: false,
             src: WordSource {
                 text: String::new(),
                 weight: 400,
