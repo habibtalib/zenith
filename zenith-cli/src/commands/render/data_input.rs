@@ -1,8 +1,10 @@
 //! Data-context loading from JSON or CSV files for `zenith render --data`.
 //!
 //! [`load_data_context`] reads a JSON object/array or CSV file and returns a
-//! [`DataContext`] populated with flat string fields.  JSON nested objects are
-//! flattened to dot-paths (`revenue.total`); CSV takes the first data row.
+//! [`DataContext`] populated with flat string scalar fields AND named array
+//! columns. JSON nested objects are flattened to dot-paths (`revenue.total`);
+//! JSON arrays become named columns in `arrays`. CSV takes the first data row
+//! for scalar `fields` and ALL rows as per-column `arrays`.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -116,16 +118,23 @@ fn load_from_json(path: &Path) -> Result<DataContext, DataInputError> {
     };
 
     let mut fields: BTreeMap<String, String> = BTreeMap::new();
-    flatten_object(&obj, String::new(), &mut fields);
-    Ok(DataContext { fields })
+    let mut arrays: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    flatten_object(&obj, String::new(), &mut fields, &mut arrays);
+    Ok(DataContext { fields, arrays })
 }
 
-/// Recursively flatten a JSON object into dot-path keys.
-/// Arrays inside the object are skipped (documented behaviour).
+/// Recursively flatten a JSON object into dot-path scalar keys and array columns.
+///
+/// Scalar values (string, number, bool, null) are written into `out_fields`
+/// under their dot-path key. Array values whose elements are all scalars are
+/// collected into `out_arrays` under the same dot-path key; nested-object or
+/// nested-array elements within an array are silently skipped (the rest of the
+/// array still populates the column).
 fn flatten_object(
     obj: &serde_json::Map<String, serde_json::Value>,
     prefix: String,
-    out: &mut BTreeMap<String, String>,
+    out_fields: &mut BTreeMap<String, String>,
+    out_arrays: &mut BTreeMap<String, Vec<String>>,
 ) {
     for (key, val) in obj {
         let path = if prefix.is_empty() {
@@ -135,22 +144,35 @@ fn flatten_object(
         };
         match val {
             serde_json::Value::Object(inner) => {
-                flatten_object(inner, path, out);
+                flatten_object(inner, path, out_fields, out_arrays);
             }
-            serde_json::Value::Array(_) => {
-                // Skip nested arrays — documented, no insertion.
+            serde_json::Value::Array(arr) => {
+                // Collect scalar elements in order; skip nested objects/arrays.
+                let strings: Vec<String> = arr
+                    .iter()
+                    .filter_map(|e| match e {
+                        serde_json::Value::Number(n) => Some(n.to_string()),
+                        serde_json::Value::String(s) => Some(s.clone()),
+                        serde_json::Value::Bool(b) => Some(b.to_string()),
+                        serde_json::Value::Null => Some(String::new()),
+                        _ => None,
+                    })
+                    .collect();
+                if !strings.is_empty() {
+                    out_arrays.insert(path, strings);
+                }
             }
             serde_json::Value::String(s) => {
-                out.insert(path, s.clone());
+                out_fields.insert(path, s.clone());
             }
             serde_json::Value::Number(n) => {
-                out.insert(path, n.to_string());
+                out_fields.insert(path, n.to_string());
             }
             serde_json::Value::Bool(b) => {
-                out.insert(path, b.to_string());
+                out_fields.insert(path, b.to_string());
             }
             serde_json::Value::Null => {
-                out.insert(path, String::new());
+                out_fields.insert(path, String::new());
             }
         }
     }
@@ -182,7 +204,11 @@ fn load_from_csv(path: &Path) -> Result<DataContext, DataInputError> {
         ))
     })?;
 
-    let mut reader = csv::Reader::from_reader(text.as_bytes());
+    // Flexible: tolerate rows with fewer/more fields than the header; short
+    // rows are padded per-column below so a series stays category-aligned.
+    let mut reader = csv::ReaderBuilder::new()
+        .flexible(true)
+        .from_reader(text.as_bytes());
     let headers = reader
         .headers()
         .map_err(|e| {
@@ -194,30 +220,53 @@ fn load_from_csv(path: &Path) -> Result<DataContext, DataInputError> {
         })?
         .clone();
 
-    let first_record = reader
-        .records()
-        .next()
-        .ok_or_else(|| {
-            DataInputError::new(format!(
-                "--data: '{}' has a header but no data rows",
-                path.display()
-            ))
-        })?
-        .map_err(|e| {
+    // Collect ALL data rows so we can build per-column arrays.
+    let mut all_records: Vec<csv::StringRecord> = Vec::new();
+    for result in reader.records() {
+        let record = result.map_err(|e| {
             DataInputError::new(format!(
                 "--data: CSV parse error in '{}': {}",
                 path.display(),
                 e
             ))
         })?;
+        all_records.push(record);
+    }
 
-    let fields: BTreeMap<String, String> = headers
-        .iter()
-        .zip(first_record.iter())
-        .map(|(h, v)| (h.to_owned(), v.to_owned()))
-        .collect();
+    // Require at least one data row (preserves the existing documented contract).
+    if all_records.is_empty() {
+        return Err(DataInputError::new(format!(
+            "--data: '{}' has a header but no data rows",
+            path.display()
+        )));
+    }
 
-    Ok(DataContext { fields })
+    // `fields`: first data row only (scalar KPI use — existing behaviour unchanged).
+    // all_records is non-empty: the is_empty() guard above returned early on empty.
+    let fields: BTreeMap<String, String> = all_records
+        .first()
+        .map(|first_record| {
+            headers
+                .iter()
+                .zip(first_record.iter())
+                .map(|(h, v)| (h.to_owned(), v.to_owned()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // `arrays`: per-column slices across ALL rows, keyed by header name.
+    // Short rows have missing cells filled with an empty string to keep
+    // per-series length consistent with the category count.
+    let mut arrays: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (col_idx, header) in headers.iter().enumerate() {
+        let column: Vec<String> = all_records
+            .iter()
+            .map(|rec| rec.get(col_idx).unwrap_or("").to_owned())
+            .collect();
+        arrays.insert(header.to_owned(), column);
+    }
+
+    Ok(DataContext { fields, arrays })
 }
 
 // ── Unit tests ─────────────────────────────────────────────────────────────
@@ -226,6 +275,12 @@ fn load_from_csv(path: &Path) -> Result<DataContext, DataInputError> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// Collect an array accessor's `&[String]` into borrowed `&str`s for ergonomic
+    /// comparison against `&str` literals in assertions.
+    fn as_strs(arr: Option<&[String]>) -> Option<Vec<&str>> {
+        arr.map(|a| a.iter().map(String::as_str).collect())
+    }
 
     fn write_temp(suffix: &str, content: &[u8]) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::TempDir::new().unwrap();
@@ -368,5 +423,84 @@ mod tests {
         let ctx = load_data_context(&path).unwrap();
         let keys: Vec<&str> = ctx.fields.keys().map(String::as_str).collect();
         assert_eq!(keys, vec!["a", "m", "z"]);
+    }
+
+    // ── JSON: array values populate arrays map ────────────────────────────
+
+    #[test]
+    fn json_array_value_populates_arrays() {
+        let (_dir, path) = write_temp(".json", br#"{"sales": [12, 18, 15]}"#);
+        let ctx = load_data_context(&path).unwrap();
+        assert_eq!(
+            as_strs(ctx.get_array("sales")),
+            Some(vec!["12", "18", "15"]),
+            "numeric JSON array must populate arrays map"
+        );
+        // The key must NOT appear in scalar fields.
+        assert_eq!(ctx.get("sales"), None);
+    }
+
+    #[test]
+    fn json_array_with_mixed_scalars() {
+        let (_dir, path) = write_temp(".json", br#"{"vals": [1, "two", true, null]}"#);
+        let ctx = load_data_context(&path).unwrap();
+        assert_eq!(
+            as_strs(ctx.get_array("vals")),
+            Some(vec!["1", "two", "true", ""]),
+        );
+    }
+
+    #[test]
+    fn json_empty_array_is_not_inserted() {
+        let (_dir, path) = write_temp(".json", br#"{"empty": [], "x": "y"}"#);
+        let ctx = load_data_context(&path).unwrap();
+        assert!(
+            ctx.get_array("empty").is_none(),
+            "empty array must not be inserted"
+        );
+        assert_eq!(ctx.get("x"), Some("y"));
+    }
+
+    #[test]
+    fn json_scalar_and_array_coexist() {
+        let (_dir, path) = write_temp(".json", br#"{"name": "Alice", "scores": [10, 20, 30]}"#);
+        let ctx = load_data_context(&path).unwrap();
+        assert_eq!(ctx.get("name"), Some("Alice"));
+        assert_eq!(
+            as_strs(ctx.get_array("scores")),
+            Some(vec!["10", "20", "30"])
+        );
+    }
+
+    // ── CSV: all rows populate arrays map ────────────────────────────────
+
+    #[test]
+    fn csv_all_rows_populate_arrays() {
+        let (_dir, path) = write_temp(".csv", b"month,revenue\nJan,100\nFeb,200\nMar,150");
+        let ctx = load_data_context(&path).unwrap();
+        // Scalar fields: first row only.
+        assert_eq!(ctx.get("month"), Some("Jan"));
+        assert_eq!(ctx.get("revenue"), Some("100"));
+        // Array columns: all rows.
+        assert_eq!(
+            as_strs(ctx.get_array("month")),
+            Some(vec!["Jan", "Feb", "Mar"]),
+        );
+        assert_eq!(
+            as_strs(ctx.get_array("revenue")),
+            Some(vec!["100", "200", "150"]),
+        );
+    }
+
+    #[test]
+    fn csv_short_row_pads_with_empty_string() {
+        // Second row is missing the revenue cell.
+        let (_dir, path) = write_temp(".csv", b"month,revenue\nJan,100\nFeb");
+        let ctx = load_data_context(&path).unwrap();
+        assert_eq!(
+            as_strs(ctx.get_array("revenue")),
+            Some(vec!["100", ""]),
+            "short CSV row must pad missing cells with empty string"
+        );
     }
 }

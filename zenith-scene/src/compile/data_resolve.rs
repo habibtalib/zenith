@@ -391,6 +391,7 @@ fn substitute_chart(n: &mut ChartNode, ctx: &DataContext, diagnostics: &mut Vec<
         substitute_color_prop(pv, ctx, &id, "label-colors", diagnostics);
     }
     // Series color props and per-series label-color are token refs; substitute in place.
+    // Also resolve data-ref bindings: populate values from the named array column.
     for s in &mut n.series {
         substitute_color_prop_opt(&mut s.color, ctx, &id, "series.color", diagnostics);
         substitute_color_prop_opt(
@@ -400,6 +401,26 @@ fn substitute_chart(n: &mut ChartNode, ctx: &DataContext, diagnostics: &mut Vec<
             "series.label-color",
             diagnostics,
         );
+        if let Some(key) = s.data_ref.as_deref() {
+            match ctx.get_array(key) {
+                Some(arr) => {
+                    // Parse each element as f64; non-finite or unparseable → 0.0
+                    // so the series length stays aligned with the category count.
+                    s.values = arr
+                        .iter()
+                        .map(|v| {
+                            let f = v.trim().parse::<f64>().unwrap_or(0.0);
+                            if f.is_finite() { f } else { 0.0 }
+                        })
+                        .collect();
+                }
+                None => {
+                    // Missing array key: leave inline values as the authored
+                    // fallback and emit the standard data advisory.
+                    diagnostics.push(missing_field_diag(&id, "series.data-ref", key));
+                }
+            }
+        }
     }
 }
 

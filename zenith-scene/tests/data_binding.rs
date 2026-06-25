@@ -310,6 +310,77 @@ fn no_data_ref_doc_byte_identical_with_data_none() {
     );
 }
 
+// ── Chart series data-ref binding ─────────────────────────────────────────────
+
+// A minimal chart with two series bound via data-ref.
+const CHART_DATAREF_SRC: &str = r##"zenith version=1 {
+  project id="proj.cd" name="CD"
+  assets {
+  }
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.cd" title="CD" {
+    page id="page.cd" w=(px)400 h=(px)300 {
+      chart id="chart.cd" x=(px)20 y=(px)20 w=(px)360 h=(px)260 kind="bar" {
+        series label="Revenue" data-ref="rev"
+        series label="Cost"    data-ref="cost"
+      }
+    }
+  }
+}"##;
+
+/// When DataContext has array columns matching the data-ref keys, the series
+/// values are populated from those columns and no data advisory is emitted.
+#[test]
+fn chart_series_data_ref_resolves_values() {
+    let doc = parse(CHART_DATAREF_SRC);
+    let mut ctx = DataContext::default();
+    ctx.arrays.insert(
+        "rev".to_owned(),
+        vec!["100".to_owned(), "200".to_owned(), "150".to_owned()],
+    );
+    ctx.arrays.insert(
+        "cost".to_owned(),
+        vec!["80".to_owned(), "90".to_owned(), "70".to_owned()],
+    );
+
+    let result = compile_page(&doc, &default_provider(), 0, Some(&ctx));
+
+    let data_diags: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code.starts_with("data."))
+        .collect();
+    assert!(
+        data_diags.is_empty(),
+        "no data diagnostics expected when all series array keys resolve; got: {data_diags:?}"
+    );
+}
+
+/// When a series data-ref key is absent from the arrays map, a
+/// data.missing_field advisory is emitted and the inline values (empty) are
+/// left unchanged.
+#[test]
+fn chart_series_data_ref_missing_key_emits_advisory() {
+    let doc = parse(CHART_DATAREF_SRC);
+    let ctx = DataContext::default(); // empty — no arrays
+
+    let result = compile_page(&doc, &default_provider(), 0, Some(&ctx));
+
+    let missing: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "data.missing_field")
+        .collect();
+    assert_eq!(
+        missing.len(),
+        2,
+        "expected one data.missing_field per unresolved series data-ref; got: {missing:?}"
+    );
+}
+
 /// A no-data-ref doc compiled with `data: Some(empty)` is byte-identical to the
 /// same doc compiled with `data: None`. The pre-pass clones + substitutes but
 /// finds nothing to change, so the rendered scene is unchanged.
