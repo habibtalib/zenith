@@ -89,6 +89,7 @@ fn find_container_with_all_children(children: &[Node], node_ids: &[String]) -> O
             | Node::Shape(_)
             | Node::Connector(_)
             | Node::Pattern(_)
+            | Node::Chart(_)
             | Node::Unknown(_) => continue,
         };
         if node_ids.iter().all(|id| {
@@ -275,6 +276,7 @@ pub(in crate::engine) fn apply_ungroup(
                     | Node::Shape(_)
                     | Node::Connector(_)
                     | Node::Pattern(_)
+                    | Node::Chart(_)
                     | Node::Unknown(_) => Err("not a group"),
                 };
                 result = Some(info);
@@ -363,6 +365,7 @@ fn splice_ungroup(children: &mut Vec<Node>, group_id: &str) -> bool {
             | Some(Node::Shape(_))
             | Some(Node::Connector(_))
             | Some(Node::Pattern(_))
+            | Some(Node::Chart(_))
             | Some(Node::Unknown(_))
             | None => return false,
         };
@@ -394,6 +397,7 @@ fn splice_ungroup(children: &mut Vec<Node>, group_id: &str) -> bool {
             | Node::Shape(_)
             | Node::Connector(_)
             | Node::Pattern(_)
+            | Node::Chart(_)
             | Node::Unknown(_) => continue,
         };
         if splice_ungroup(grandchildren, group_id) {

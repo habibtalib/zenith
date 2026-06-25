@@ -17,6 +17,7 @@
 
 mod anchor;
 mod chain;
+mod chart;
 mod container;
 mod crop;
 mod ctx;
@@ -46,6 +47,7 @@ use crate::ir::{Paint, Rect, Scene, SceneCommand};
 
 use anchor::build_anchor_map;
 use chain::resolve_chains_document;
+use chart::compile_chart;
 use container::{compile_frame, compile_group, compile_instance};
 pub(in crate::compile) use ctx::NodeCtx;
 use data_resolve::{scan_for_data_refs, substitute_data_refs};
@@ -654,6 +656,7 @@ pub(super) fn node_role(node: &Node) -> Option<&str> {
         Node::Shape(n) => n.role.as_deref(),
         Node::Connector(n) => n.role.as_deref(),
         Node::Pattern(n) => n.role.as_deref(),
+        Node::Chart(n) => n.role.as_deref(),
         Node::Unknown(_) => None,
     }
 }
@@ -900,6 +903,7 @@ pub(in crate::compile) fn compile_node(
             0.0
         }
         Node::Pattern(p) => compile_pattern(p, cx, commands, diagnostics, ctx),
+        Node::Chart(c) => compile_chart(c, cx, commands, diagnostics, ctx),
         Node::Footnote(_) => {
             // Footnotes are NON-flowing page furniture: they carry no x/y/w/h
             // and are NOT rendered in the normal z-order dispatch. The page-level

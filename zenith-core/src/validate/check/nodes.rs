@@ -265,6 +265,19 @@ pub(super) fn walk_node(
                 &mut motif_diags,
             );
         }
+        Node::Chart(c) => {
+            // The chart is validated as a leaf; its series children are pure DATA
+            // (not renderable nodes), so they are never descended into here.
+            node::check_chart(
+                c,
+                ctx,
+                seen_ids,
+                referenced_token_ids,
+                geom_required,
+                parent_ctx,
+                diagnostics,
+            );
+        }
         Node::Polygon(poly) => {
             node::check_polygon(poly, ctx, seen_ids, referenced_token_ids, diagnostics);
         }

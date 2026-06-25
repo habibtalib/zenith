@@ -4,8 +4,8 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    CodeNode, EllipseNode, ImageNode, LineNode, PatternNode, PolygonNode, PolylineNode, RectNode,
-    TextNode,
+    ChartNode, CodeNode, EllipseNode, ImageNode, LineNode, PatternNode, PolygonNode, PolylineNode,
+    RectNode, TextNode,
 };
 
 use crate::format::writer::{
@@ -512,6 +512,109 @@ pub(super) fn write_pattern(p: &PatternNode, out: &mut String, depth: usize) {
     // The single motif template, emitted as the sole child of the block.
     out.push_str(" {\n");
     write_node(&p.motif, out, depth + 1);
+    indent(out, depth);
+    out.push_str("}\n");
+}
+
+pub(super) fn write_chart(c: &ChartNode, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("chart");
+
+    // Canonical property order mirrors `pattern`, with the chart-specific props
+    // (kind, title, caption, legend, axis-min, axis-max, axis-style) emitted right
+    // after the common geometry/visual spread, then unknown props, then the series
+    // block.
+    out.push_str(" id=\"");
+    out.push_str(&c.id);
+    out.push('"');
+    out.push_str(" kind=\"");
+    out.push_str(&escape_kdl_string(&c.kind));
+    out.push('"');
+    write_opt_str(out, "name", &c.name);
+    write_opt_str(out, "role", &c.role);
+    write_opt_str(out, "anchor", &c.anchor);
+    write_opt_str(out, "anchor-zone", &c.anchor_zone);
+    write_opt_str(out, "anchor-sibling", &c.anchor_sibling);
+    write_opt_str(out, "anchor-edge", &c.anchor_edge);
+    write_opt_dimension(out, "anchor-gap", &c.anchor_gap);
+    write_opt_bool(out, "anchor-parent", &c.anchor_parent);
+    write_opt_dimension(out, "x", &c.x);
+    write_opt_dimension(out, "y", &c.y);
+    write_opt_dimension(out, "w", &c.w);
+    write_opt_dimension(out, "h", &c.h);
+    write_opt_str(out, "title", &c.title);
+    write_opt_str(out, "caption", &c.caption);
+    write_opt_bool(out, "legend", &c.legend);
+    if let Some(v) = c.axis_min {
+        let _ = write!(out, " axis-min={v}");
+    }
+    if let Some(v) = c.axis_max {
+        let _ = write!(out, " axis-max={v}");
+    }
+    write_opt_str(out, "axis-style", &c.axis_style);
+    write_opt_property_value(out, "radius", &c.radius);
+    write_opt_property_value(out, "radius-tl", &c.radius_tl);
+    write_opt_property_value(out, "radius-tr", &c.radius_tr);
+    write_opt_property_value(out, "radius-br", &c.radius_br);
+    write_opt_property_value(out, "radius-bl", &c.radius_bl);
+    write_opt_property_value(out, "fill", &c.fill);
+    write_opt_property_value(out, "stroke", &c.stroke);
+    write_opt_property_value(out, "stroke-width", &c.stroke_width);
+    write_opt_str(out, "stroke-alignment", &c.stroke_alignment);
+    write_opt_property_value(out, "stroke-dash", &c.stroke_dash);
+    write_opt_property_value(out, "stroke-gap", &c.stroke_gap);
+    write_opt_str(out, "stroke-linecap", &c.stroke_linecap);
+    write_opt_property_value(out, "border-top", &c.border_top);
+    write_opt_property_value(out, "border-bottom", &c.border_bottom);
+    write_opt_property_value(out, "border-left", &c.border_left);
+    write_opt_property_value(out, "border-right", &c.border_right);
+    write_opt_property_value(out, "border-width", &c.border_width);
+    write_opt_property_value(out, "stroke-outer", &c.stroke_outer);
+    write_opt_property_value(out, "stroke-outer-width", &c.stroke_outer_width);
+    write_opt_property_value(out, "shadow", &c.shadow);
+    write_opt_property_value(out, "filter", &c.filter);
+    write_opt_property_value(out, "mask", &c.mask);
+    write_opt_str(out, "blend-mode", &c.blend_mode);
+    write_opt_dimension(out, "blur", &c.blur);
+    write_opt_f64(out, "opacity", &c.opacity);
+    write_opt_bool(out, "visible", &c.visible);
+    write_opt_bool(out, "locked", &c.locked);
+    write_opt_dimension(out, "rotate", &c.rotate);
+    write_opt_str(out, "style", &c.style);
+
+    // Unknown properties in sorted key order (BTreeMap iteration is sorted).
+    for (key, prop) in &c.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_property(prop));
+    }
+
+    // Series children: one `series` line per entry with data values as positional
+    // args and label/color/data-ref as named props. The block is always emitted
+    // (even when empty) so parse → format → parse is byte-stable.
+    out.push_str(" {\n");
+    for s in &c.series {
+        indent(out, depth + 1);
+        out.push_str("series");
+        // Named props first (canonical order: label, color, data-ref).
+        if let Some(label) = &s.label {
+            out.push_str(" label=\"");
+            out.push_str(&escape_kdl_string(label));
+            out.push('"');
+        }
+        write_opt_property_value(out, "color", &s.color);
+        if let Some(dr) = &s.data_ref {
+            out.push_str(" data-ref=\"");
+            out.push_str(&escape_kdl_string(dr));
+            out.push('"');
+        }
+        // Positional f64 values.
+        for v in &s.values {
+            let _ = write!(out, " {v}");
+        }
+        out.push('\n');
+    }
     indent(out, depth);
     out.push_str("}\n");
 }

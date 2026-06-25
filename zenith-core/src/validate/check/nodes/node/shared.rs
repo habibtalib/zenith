@@ -142,6 +142,13 @@ pub(in crate::validate::check) fn node_bbox(
             let h = resolve_axis(n.h.as_ref()?, page_h)?;
             Some((x, y, w, h))
         }
+        Node::Chart(n) => {
+            let x = resolve_axis(n.x.as_ref()?, page_w)?;
+            let y = resolve_axis(n.y.as_ref()?, page_h)?;
+            let w = resolve_axis(n.w.as_ref()?, page_w)?;
+            let h = resolve_axis(n.h.as_ref()?, page_h)?;
+            Some((x, y, w, h))
+        }
         // A connector has no authored bbox: its endpoints are DERIVED from the
         // resolved boxes of its `from`/`to` targets at compile time and are not
         // known at validate time, so there is no off_canvas check here.
@@ -216,6 +223,7 @@ pub(in crate::validate::check) fn node_rotate_deg(node: &Node) -> Option<f64> {
         Node::Shape(n) => n.rotate.as_ref(),
         Node::Connector(n) => n.rotate.as_ref(),
         Node::Pattern(n) => n.rotate.as_ref(),
+        Node::Chart(n) => n.rotate.as_ref(),
         Node::Line(_)
         | Node::Instance(_)
         | Node::Field(_)
@@ -251,6 +259,7 @@ pub(in crate::validate::check) fn node_role(node: &Node) -> Option<&str> {
         Node::Shape(n) => n.role.as_deref(),
         Node::Connector(n) => n.role.as_deref(),
         Node::Pattern(n) => n.role.as_deref(),
+        Node::Chart(n) => n.role.as_deref(),
         Node::Unknown(_) => None,
     }
 }
@@ -278,6 +287,7 @@ pub(in crate::validate::check) fn node_id_and_span(
         Node::Shape(n) => (&n.id, n.source_span),
         Node::Connector(n) => (&n.id, n.source_span),
         Node::Pattern(n) => (&n.id, n.source_span),
+        Node::Chart(n) => (&n.id, n.source_span),
         Node::Unknown(n) => (n.id.as_deref().unwrap_or(&n.kind), n.source_span),
     }
 }
@@ -526,6 +536,7 @@ fn node_sibling_fields(node: &Node) -> Option<(&str, Option<&str>, Option<crate:
         Node::Field(n) => (n.id.as_str(), n.anchor_sibling.as_deref(), n.source_span),
         Node::Toc(n) => (n.id.as_str(), n.anchor_sibling.as_deref(), n.source_span),
         Node::Pattern(n) => (n.id.as_str(), n.anchor_sibling.as_deref(), n.source_span),
+        Node::Chart(n) => (n.id.as_str(), n.anchor_sibling.as_deref(), n.source_span),
         // Kinds that never carry an `anchor` are not sibling-bearing.
         Node::Line(_)
         | Node::Connector(_)

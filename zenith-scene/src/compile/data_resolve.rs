@@ -26,7 +26,7 @@
 //! [`compile_page`]: super::compile_page
 
 use zenith_core::{
-    CodeNode, ConnectorNode, DataContext, Diagnostic, Document, EllipseNode, FieldNode,
+    ChartNode, CodeNode, ConnectorNode, DataContext, Diagnostic, Document, EllipseNode, FieldNode,
     FootnoteNode, ImageNode, InstanceNode, LineNode, Node, PatternNode, PropertyValue, RectNode,
     ShapeNode, TableCell, TableNode, TextNode, TextSpan, TocNode, UnknownNode, format_data_value,
 };
@@ -118,6 +118,13 @@ fn node_has_data_ref(node: &Node) -> bool {
                 || any_prop(&pattern_dim_props(n))
                 || node_has_data_ref(&n.motif)
         }
+        Node::Chart(n) => {
+            any_prop(&chart_color_props(n))
+                || any_prop(&chart_dim_props(n))
+                || n.series.iter().any(|s| {
+                    matches!(s.color, Some(PropertyValue::DataRef(_))) || s.data_ref.is_some()
+                })
+        }
         Node::Frame(n) => n.children.iter().any(node_has_data_ref),
         Node::Group(n) => n.children.iter().any(node_has_data_ref),
         Node::Instance(n) => instance_has_data_ref(n),
@@ -187,6 +194,7 @@ fn substitute_node(node: &mut Node, ctx: &DataContext, diagnostics: &mut Vec<Dia
         Node::Shape(n) => substitute_shape(n, ctx, diagnostics),
         Node::Connector(n) => substitute_connector(n, ctx, diagnostics),
         Node::Pattern(n) => substitute_pattern(n, ctx, diagnostics),
+        Node::Chart(n) => substitute_chart(n, ctx, diagnostics),
         Node::Frame(n) => substitute_children(&mut n.children, ctx, diagnostics),
         Node::Group(n) => substitute_children(&mut n.children, ctx, diagnostics),
         Node::Instance(n) => substitute_instance(n, ctx, diagnostics),
@@ -347,6 +355,35 @@ fn substitute_pattern(n: &mut PatternNode, ctx: &DataContext, diagnostics: &mut 
     // The motif is a template that expands into native shapes; resolve its refs
     // so the expanded copies paint resolved values.
     substitute_node(&mut n.motif, ctx, diagnostics);
+}
+
+fn substitute_chart(n: &mut ChartNode, ctx: &DataContext, diagnostics: &mut Vec<Diagnostic>) {
+    let id = n.id.clone();
+    substitute_color_prop_opt(&mut n.fill, ctx, &id, "fill", diagnostics);
+    substitute_color_prop_opt(&mut n.stroke, ctx, &id, "stroke", diagnostics);
+    substitute_color_prop_opt(&mut n.border_top, ctx, &id, "border-top", diagnostics);
+    substitute_color_prop_opt(&mut n.border_bottom, ctx, &id, "border-bottom", diagnostics);
+    substitute_color_prop_opt(&mut n.border_left, ctx, &id, "border-left", diagnostics);
+    substitute_color_prop_opt(&mut n.border_right, ctx, &id, "border-right", diagnostics);
+    substitute_color_prop_opt(&mut n.stroke_outer, ctx, &id, "stroke-outer", diagnostics);
+    substitute_dim_prop_opt(&mut n.radius, ctx, &id, "radius", diagnostics);
+    substitute_dim_prop_opt(&mut n.radius_tl, ctx, &id, "radius-tl", diagnostics);
+    substitute_dim_prop_opt(&mut n.radius_tr, ctx, &id, "radius-tr", diagnostics);
+    substitute_dim_prop_opt(&mut n.radius_br, ctx, &id, "radius-br", diagnostics);
+    substitute_dim_prop_opt(&mut n.radius_bl, ctx, &id, "radius-bl", diagnostics);
+    substitute_dim_prop_opt(&mut n.stroke_width, ctx, &id, "stroke-width", diagnostics);
+    substitute_dim_prop_opt(&mut n.border_width, ctx, &id, "border-width", diagnostics);
+    substitute_dim_prop_opt(
+        &mut n.stroke_outer_width,
+        ctx,
+        &id,
+        "stroke-outer-width",
+        diagnostics,
+    );
+    // Series color props are token refs on ChartSeries; substitute them in place.
+    for s in &mut n.series {
+        substitute_color_prop_opt(&mut s.color, ctx, &id, "series.color", diagnostics);
+    }
 }
 
 fn substitute_instance(n: &mut InstanceNode, ctx: &DataContext, diagnostics: &mut Vec<Diagnostic>) {
@@ -570,6 +607,31 @@ fn pattern_color_props(n: &PatternNode) -> [&Option<PropertyValue>; 7] {
 }
 
 fn pattern_dim_props(n: &PatternNode) -> [&Option<PropertyValue>; 8] {
+    [
+        &n.radius,
+        &n.radius_tl,
+        &n.radius_tr,
+        &n.radius_br,
+        &n.radius_bl,
+        &n.stroke_width,
+        &n.border_width,
+        &n.stroke_outer_width,
+    ]
+}
+
+fn chart_color_props(n: &ChartNode) -> [&Option<PropertyValue>; 7] {
+    [
+        &n.fill,
+        &n.stroke,
+        &n.border_top,
+        &n.border_bottom,
+        &n.border_left,
+        &n.border_right,
+        &n.stroke_outer,
+    ]
+}
+
+fn chart_dim_props(n: &ChartNode) -> [&Option<PropertyValue>; 8] {
     [
         &n.radius,
         &n.radius_tl,

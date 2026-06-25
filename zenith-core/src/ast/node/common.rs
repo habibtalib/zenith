@@ -6,8 +6,8 @@ use crate::data::DataFormat;
 
 use super::container::{FrameNode, GroupNode, TableNode};
 use super::leaf::{
-    CodeNode, EllipseNode, ImageNode, LineNode, PatternNode, PolygonNode, PolylineNode, RectNode,
-    TextNode,
+    ChartNode, CodeNode, EllipseNode, ImageNode, LineNode, PatternNode, PolygonNode, PolylineNode,
+    RectNode, TextNode,
 };
 use super::special::{
     ConnectorNode, FieldNode, FootnoteNode, InstanceNode, ShapeNode, TocNode, UnknownNode,
@@ -156,4 +156,8 @@ pub enum Node {
     // motif. Boxing keeps `Node` compact for the `large_enum_variant` lint,
     // mirroring `Rect`/`Text`/`Table`/`Shape`.
     Pattern(Box<PatternNode>),
+    // Boxed: `ChartNode` carries the full common-field spread plus a Vec of
+    // series. Boxing keeps `Node` compact for the `large_enum_variant` lint,
+    // mirroring `Rect`/`Text`/`Table`/`Shape`/`Pattern`.
+    Chart(Box<ChartNode>),
 }

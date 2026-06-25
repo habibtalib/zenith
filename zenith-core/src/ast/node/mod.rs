@@ -16,8 +16,8 @@ pub use container::{
     FrameNode, GroupNode, ProtectedRegion, TableCell, TableColumn, TableNode, TableRow,
 };
 pub use leaf::{
-    CodeNode, EllipseNode, ImageNode, LineNode, PatternNode, PolygonNode, PolylineNode, RectNode,
-    TextNode,
+    ChartNode, ChartSeries, CodeNode, EllipseNode, ImageNode, LineNode, PatternNode, PolygonNode,
+    PolylineNode, RectNode, TextNode,
 };
 pub use special::{
     ConnectorNode, FieldNode, FootnoteNode, InstanceNode, Override, ShapeNode, TocNode, UnknownNode,

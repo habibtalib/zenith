@@ -63,6 +63,8 @@ pub(in crate::engine) fn node_geometry_mut(node: &mut Node) -> Option<GeometryMu
         Node::Shape(s) => Some((&mut s.x, &mut s.y, &mut s.w, &mut s.h)),
         // A pattern carries a real x/y/w/h box (the region it tiles over).
         Node::Pattern(p) => Some((&mut p.x, &mut p.y, &mut p.w, &mut p.h)),
+        // A chart carries a real x/y/w/h box.
+        Node::Chart(c) => Some((&mut c.x, &mut c.y, &mut c.w, &mut c.h)),
         // `Instance` is excluded: it carries only an x/y origin, no w/h box, so
         // the four-slot bbox setter does not apply. A set_geometry on an instance
         // honestly surfaces tx.unsupported_property rather than silently dropping
@@ -117,6 +119,7 @@ fn node_rotate_mut(node: &mut Node) -> Option<&mut Option<Dimension>> {
         Node::Shape(n) => Some(&mut n.rotate),
         Node::Connector(n) => Some(&mut n.rotate),
         Node::Pattern(n) => Some(&mut n.rotate),
+        Node::Chart(n) => Some(&mut n.rotate),
         // Line has no rotate field.
         // Instance has no rotate field.
         // Field has no rotate field.
@@ -246,6 +249,7 @@ fn read_geometry_px(node: &Node) -> Option<(f64, f64, f64, f64)> {
         Node::Group(g) => (g.x.as_ref(), g.y.as_ref(), g.w.as_ref(), g.h.as_ref()),
         Node::Shape(s) => (s.x.as_ref(), s.y.as_ref(), s.w.as_ref(), s.h.as_ref()),
         Node::Pattern(p) => (p.x.as_ref(), p.y.as_ref(), p.w.as_ref(), p.h.as_ref()),
+        Node::Chart(c) => (c.x.as_ref(), c.y.as_ref(), c.w.as_ref(), c.h.as_ref()),
         Node::Line(_)
         | Node::Polygon(_)
         | Node::Polyline(_)

@@ -55,6 +55,7 @@ fn index_nodes(children: &[Node], page_index_1based: usize, map: &mut BTreeMap<S
             | Node::Shape(_)
             | Node::Connector(_)
             | Node::Pattern(_)
+            | Node::Chart(_)
             | Node::Unknown(_) => {}
         }
     }
@@ -131,6 +132,7 @@ fn collect_node_boxes(
             // its targets' boxes), so it contributes nothing to the box map.
             | Node::Connector(_)
             | Node::Pattern(_)
+            | Node::Chart(_)
             | Node::Unknown(_) => {}
         }
     }
@@ -165,6 +167,8 @@ fn node_rect(node: &Node) -> Option<(f64, f64, f64, f64)> {
         Node::Toc(n) => rect(&n.x, &n.y, &n.w, &n.h),
         Node::Table(n) => rect(&n.x, &n.y, &n.w, &n.h),
         Node::Shape(n) => rect(&n.x, &n.y, &n.w, &n.h),
+        Node::Pattern(n) => rect(&n.x, &n.y, &n.w, &n.h),
+        Node::Chart(n) => rect(&n.x, &n.y, &n.w, &n.h),
         // An `instance` has no intrinsic w/h (its box is the expanded subtree),
         // and line/polygon/polyline have no rectangular box — none can serve as a
         // rectangular exclusion, so they are skipped.
@@ -174,7 +178,6 @@ fn node_rect(node: &Node) -> Option<(f64, f64, f64, f64)> {
         | Node::Polyline(_)
         | Node::Footnote(_)
         | Node::Connector(_)
-        | Node::Pattern(_)
         | Node::Unknown(_) => None,
     }
 }
@@ -200,6 +203,7 @@ fn node_id(node: &Node) -> Option<&str> {
         Node::Shape(n) => Some(&n.id),
         Node::Connector(n) => Some(&n.id),
         Node::Pattern(n) => Some(&n.id),
+        Node::Chart(n) => Some(&n.id),
         Node::Unknown(_) => None,
     }
 }

@@ -481,6 +481,10 @@ pub fn strip_node_span(node: &mut Node) {
             // must be stripped too for span-agnostic round-trip equality.
             strip_node_span(&mut p.motif);
         }
+        Node::Chart(c) => {
+            c.source_span = None;
+            // Series are pure data (no sub-nodes), so no recursion needed.
+        }
         Node::Unknown(u) => {
             u.source_span = None;
             for child in &mut u.children {

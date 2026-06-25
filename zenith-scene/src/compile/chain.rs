@@ -153,6 +153,7 @@ fn collect_chains<'a>(
             | Node::Shape(_)
             | Node::Connector(_)
             | Node::Pattern(_)
+            | Node::Chart(_)
             | Node::Unknown(_) => {}
         }
     }

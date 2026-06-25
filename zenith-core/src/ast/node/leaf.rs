@@ -1,6 +1,6 @@
 //! Leaf node structs: shapes and text-bearing primitives that have no child
 //! `Node`s of their own (rect, line, ellipse, image, text, code, polygon,
-//! polyline, pattern).
+//! polyline, pattern, chart).
 
 use std::collections::BTreeMap;
 
@@ -679,6 +679,129 @@ pub struct PatternNode {
     /// This is a TEMPLATE, NOT an addressable/rendered node: id-collection,
     /// validation, anchor, and tx passes never descend into it.
     pub motif: Box<Node>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+}
+
+/// One data series within a [`ChartNode`].
+///
+/// A series is PURE DATA — it is not a renderable [`Node`] and is never
+/// descended into by id-collection, validation, anchor, or tx passes. It
+/// carries an ordered list of numeric values and optional legend/styling hints.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChartSeries {
+    /// Optional legend or category label for this series.
+    pub label: Option<String>,
+    /// Optional series color; a `(token)` color ref. When absent the renderer
+    /// picks a palette color by series index.
+    pub color: Option<PropertyValue>,
+    /// Optional binding to a whole series from a [`DataContext`] field.
+    /// `None` means the values are inline in [`ChartSeries::values`].
+    pub data_ref: Option<String>,
+    /// Ordered numeric data points for this series.
+    pub values: Vec<f64>,
+}
+
+/// A `chart` node — a compact data-visualization primitive.
+///
+/// A `chart` declares its data inline via [`series`](ChartNode::series) children
+/// (one child KDL node per series, each with positional f64 arguments) and
+/// paints into its `[x, y, w, h]` bounding box. The node currently renders
+/// nothing; chart rendering is deferred. The series children are pure DATA,
+/// not renderable nodes: id-collection, validation, anchor, and tx passes
+/// treat the chart as a LEAF and never descend into them.
+///
+/// The common visual/geometry fields mirror [`PatternNode`]; the chart-specific
+/// fields (`kind`, `title`, `caption`, `legend`, `axis_*`, `series`) describe
+/// the chart content.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChartNode {
+    pub id: String,
+    pub name: Option<String>,
+    pub role: Option<String>,
+    pub x: Option<Dimension>,
+    pub y: Option<Dimension>,
+    pub w: Option<Dimension>,
+    pub h: Option<Dimension>,
+    pub radius: Option<PropertyValue>,
+    /// Per-corner radius overrides (top-left, top-right, bottom-right, bottom-left).
+    pub radius_tl: Option<PropertyValue>,
+    pub radius_tr: Option<PropertyValue>,
+    pub radius_br: Option<PropertyValue>,
+    pub radius_bl: Option<PropertyValue>,
+    pub style: Option<String>,
+    pub fill: Option<PropertyValue>,
+    pub stroke: Option<PropertyValue>,
+    pub stroke_width: Option<PropertyValue>,
+    pub stroke_alignment: Option<String>,
+    /// Dash segment length in pixels; `None` = solid stroke.
+    pub stroke_dash: Option<PropertyValue>,
+    /// Gap length in pixels between dashes; defaults to `stroke_dash` when absent.
+    pub stroke_gap: Option<PropertyValue>,
+    /// Dash end-cap style: `"butt"` (default), `"round"`, or `"square"`.
+    pub stroke_linecap: Option<String>,
+    /// Per-side border color for the top edge. Token-required (color token).
+    pub border_top: Option<PropertyValue>,
+    /// Per-side border color for the bottom edge. Token-required (color token).
+    pub border_bottom: Option<PropertyValue>,
+    /// Per-side border color for the left edge. Token-required (color token).
+    pub border_left: Option<PropertyValue>,
+    /// Per-side border color for the right edge. Token-required (color token).
+    pub border_right: Option<PropertyValue>,
+    /// Shared border width for per-side borders. Token-required (dimension).
+    pub border_width: Option<PropertyValue>,
+    /// Outer stroke color: a SECOND stroke painted OUTSIDE the geometry.
+    pub stroke_outer: Option<PropertyValue>,
+    /// Outer stroke width for `stroke_outer`. Token-required (dimension).
+    pub stroke_outer_width: Option<PropertyValue>,
+    /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
+    pub shadow: Option<PropertyValue>,
+    /// Color/image filter ops, as a `(token)` ref to a `filter` token.
+    pub filter: Option<PropertyValue>,
+    /// Spatial coverage mask, as a `(token)` ref to a `mask` token.
+    pub mask: Option<PropertyValue>,
+    /// Compositing blend mode: `"normal"` (default) or one of the separable blends.
+    pub blend_mode: Option<String>,
+    /// Gaussian blur radius applied to the node's own rendered ink.
+    pub blur: Option<Dimension>,
+    pub opacity: Option<f64>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    pub rotate: Option<Dimension>,
+    /// Page-relative placement anchor. See [`RectNode::anchor`].
+    pub anchor: Option<String>,
+    /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`].
+    pub anchor_zone: Option<String>,
+    /// Optional sibling node id for sibling-relative anchor positioning.
+    pub anchor_sibling: Option<String>,
+    /// Adjacent-placement edge relative to `anchor-sibling`: `above`/`below`/`before`/`after`.
+    /// See [`RectNode::anchor_edge`].
+    pub anchor_edge: Option<String>,
+    /// Gap (px) between this node and its `anchor-sibling` edge when `anchor-edge` is set.
+    /// See [`RectNode::anchor_gap`].
+    pub anchor_gap: Option<Dimension>,
+    /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`].
+    pub anchor_parent: Option<bool>,
+    /// Required: the chart kind (`"bar"` | `"line"` | `"sparkline"` | `"pie"` | `"donut"`;
+    /// freeform, validated later).
+    pub kind: String,
+    /// Optional chart title rendered above the plot area.
+    pub title: Option<String>,
+    /// Optional caption rendered below the chart.
+    pub caption: Option<String>,
+    /// Whether to render a legend. `None` defers to the renderer default.
+    pub legend: Option<bool>,
+    /// Minimum value for the value axis. `None` = auto-fit to data.
+    pub axis_min: Option<f64>,
+    /// Maximum value for the value axis. `None` = auto-fit to data.
+    pub axis_max: Option<f64>,
+    /// Style string for the axis (e.g. `"hidden"`, `"minimal"`); freeform for now.
+    pub axis_style: Option<String>,
+    /// Ordered data series. Each series carries labels, an optional color, and
+    /// a list of f64 data points.
+    pub series: Vec<ChartSeries>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.

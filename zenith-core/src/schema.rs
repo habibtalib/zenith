@@ -37,6 +37,7 @@ pub fn node_kinds() -> &'static [&'static str] {
         "frame",
         "group",
         "image",
+        "chart",
         "instance",
         "line",
         "pattern",
@@ -77,6 +78,9 @@ pub fn node_summary(kind: &str) -> Option<&'static str> {
         "shape" => Some("Preset geometric shape with an optional text label."),
         "connector" => Some("Directed connector line between two anchor points on nodes."),
         "pattern" => Some("Procedural grid or scatter tiling of one motif node."),
+        "chart" => Some(
+            "Data-visualization chart (bar, line, sparkline, pie, donut) with inline series data.",
+        ),
         _ => None,
     }
 }
@@ -172,6 +176,17 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
                 May also include `protected-region id=... x=... y=... w=... h=...` \
                 and `editable-param id=...` metadata children.",
             example: "rect id=\"box\" x=(px)0 y=(px)0 w=(px)100 h=(px)100",
+        }),
+
+        // ── Series-bearing kind ───────────────────────────────────────────────
+        "chart" => Some(NodeContentDescriptor {
+            description: "Zero or more `series` children carry the numeric data. \
+                Each series node takes its f64 data values as positional arguments \
+                and optional named props: label, color (token ref), data-ref.",
+            example: concat!(
+                "series label=\"Revenue\" color=(token)\"color.primary\" 120.0 200.0 150.0 310.0\n",
+                "series label=\"Costs\" color=(token)\"color.secondary\" 80.0 90.0 100.0 120.0",
+            ),
         }),
 
         // ── Motif-bearing kind ────────────────────────────────────────────────
@@ -350,7 +365,7 @@ fn attribute_type_for_kind_inner(kind: &str, name: &str, fallback: &'static str)
         // fill: ColorOrGradient — rect (leaf.rs check_visual_props→shared.rs:804),
         //   ellipse (leaf.rs:218), polygon (special.rs:83), polyline (special.rs:213),
         //   pattern (pattern.rs:101→shared.rs:804).
-        ("rect" | "ellipse" | "polygon" | "polyline" | "pattern", "fill") => {
+        ("rect" | "ellipse" | "polygon" | "polyline" | "pattern" | "chart", "fill") => {
             "token ref: color/gradient"
         }
         // fill: Color — text (text.rs:113), shape (shape.rs:108), code (leaf.rs:561).
@@ -388,6 +403,12 @@ fn attribute_type_for_kind_inner(kind: &str, name: &str, fallback: &'static str)
         // The attribute name alone is insufficient — each surface has a distinct enum.
         ("shape", "kind") => "enum: process|decision|terminator|ellipse",
         ("pattern", "kind") => "enum: grid|scatter",
+        ("chart", "kind") => "enum: bar|line|sparkline|pie|donut",
+        // chart axis/legend/caption: chart-only attributes (validate/check/nodes/node/chart.rs).
+        ("chart", "legend") => "bool",
+        ("chart", "caption") => "string",
+        ("chart", "axis-min" | "axis-max") => "f64",
+        ("chart", "axis-style") => "string",
         // Asset surface (non-node): kind="" is used by attribute_type() / the
         // completeness drift test for non-node attributes.
         ("", "kind") => "enum: image|svg|font",
@@ -852,6 +873,7 @@ mod tests {
             Node::Shape(_) => 1,
             Node::Connector(_) => 1,
             Node::Pattern(_) => 1,
+            Node::Chart(_) => 1,
             // Unknown is intentionally excluded from the authorable kind list.
             // This arm is required for exhaustiveness; the count still returns 1
             // so the total reflects all variants (authorable + Unknown).
@@ -864,7 +886,7 @@ mod tests {
     /// This is the count returned by `node_variant_count_exhaustive` for any
     /// `Node`, summed across all variants — i.e. the total variant count.
     /// Updated by hand when a variant is added (compile error forces it).
-    const TOTAL_NODE_VARIANTS: usize = 19; // 18 authorable + 1 Unknown
+    const TOTAL_NODE_VARIANTS: usize = 20; // 19 authorable + 1 Unknown
 
     #[test]
     fn node_summary_covers_every_node_kind() {
@@ -900,8 +922,8 @@ mod tests {
     /// return `Some` from `node_content`, and the example must be non-empty.
     ///
     /// Kinds confirmed to carry authorable child content (parser-verified):
-    /// text, shape, footnote, polygon, polyline, table, frame, group, pattern, instance, code,
-    /// connector (optional span label).
+    /// text, shape, footnote, polygon, polyline, table, frame, group, pattern, chart, instance,
+    /// code, connector (optional span label).
     #[test]
     fn node_content_returns_some_for_content_bearing_kinds() {
         let content_kinds = &[
@@ -914,6 +936,7 @@ mod tests {
             "frame",
             "group",
             "pattern",
+            "chart",
             "instance",
             "code",
             "connector",

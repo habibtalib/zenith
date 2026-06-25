@@ -333,6 +333,7 @@ pub(super) fn kdl_value_to_unknown_value(v: &KdlValue) -> UnknownValue {
 /// The kind strings match the KDL node-name strings (lowercase, no namespace).
 pub(crate) fn known_props_for_kind(kind: &str) -> &'static [&'static str] {
     // Import the per-submodule consts here at the point of use.
+    use super::chart::CHART_KNOWN_PROPS;
     use super::container::{
         CELL_KNOWN_PROPS, COLUMN_KNOWN_PROPS, FRAME_KNOWN_PROPS, GROUP_KNOWN_PROPS,
         INSTANCE_KNOWN_PROPS, ROW_KNOWN_PROPS, TABLE_KNOWN_PROPS,
@@ -368,6 +369,7 @@ pub(crate) fn known_props_for_kind(kind: &str) -> &'static [&'static str] {
         "toc" => TOC_KNOWN_PROPS,
         "footnote" => FOOTNOTE_KNOWN_PROPS,
         "pattern" => PATTERN_KNOWN_PROPS,
+        "chart" => CHART_KNOWN_PROPS,
         "instance" => INSTANCE_KNOWN_PROPS,
         _ => &[],
     }

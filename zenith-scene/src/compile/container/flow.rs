@@ -33,6 +33,7 @@ fn node_visible(node: &Node) -> Option<bool> {
         Node::Shape(n) => n.visible,
         Node::Connector(n) => n.visible,
         Node::Pattern(n) => n.visible,
+        Node::Chart(n) => n.visible,
         // A footnote has no `visible` flag.
         Node::Footnote(_) => None,
         Node::Unknown(_) => None,
@@ -56,6 +57,7 @@ pub(super) fn node_declared_w(node: &Node) -> Option<f64> {
         Node::Table(n) => n.w.as_ref(),
         Node::Shape(n) => n.w.as_ref(),
         Node::Pattern(n) => n.w.as_ref(),
+        Node::Chart(n) => n.w.as_ref(),
         Node::Line(_)
         | Node::Polygon(_)
         | Node::Polyline(_)
@@ -83,6 +85,7 @@ pub(super) fn node_declared_h(node: &Node) -> Option<f64> {
         Node::Table(n) => n.h.as_ref(),
         Node::Shape(n) => n.h.as_ref(),
         Node::Pattern(n) => n.h.as_ref(),
+        Node::Chart(n) => n.h.as_ref(),
         Node::Line(_)
         | Node::Polygon(_)
         | Node::Polyline(_)
@@ -180,6 +183,12 @@ pub(super) fn with_flow_box(node: &Node, x: f64, y: f64, w: f64, h: Option<f64>)
             n.h = h_dim;
         }
         Node::Pattern(n) => {
+            n.x = px(x);
+            n.y = px(y);
+            n.w = px(w);
+            n.h = h_dim;
+        }
+        Node::Chart(n) => {
             n.x = px(x);
             n.y = px(y);
             n.w = px(w);

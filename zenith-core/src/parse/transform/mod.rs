@@ -11,8 +11,10 @@
 //! - [`node`]: the per-node-kind dispatch edge ([`node::transform_node`]).
 //! - [`page`]: `page { … }` block transform and `PAGE_KNOWN_PROPS`.
 //! - [`pattern`]: `pattern` node transform.
+//! - [`chart`]: `chart` node transform.
 //! - [`leaf`]/[`container`]/[`special`]: the renderable node transforms.
 
+mod chart;
 mod container;
 mod document;
 mod helpers;

@@ -229,6 +229,7 @@ fn collect_entries(
             | Node::Shape(_)
             | Node::Connector(_)
             | Node::Pattern(_)
+            | Node::Chart(_)
             | Node::Unknown(_) => {}
         }
     }
