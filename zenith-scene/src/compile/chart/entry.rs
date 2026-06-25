@@ -22,6 +22,7 @@ use super::super::util::{missing_geometry_diag, resolve_anchored_axis, unsupport
 use super::axis::{AxisColors, emit_axis_lines, emit_gridlines_and_labels};
 use super::bar::{BarMode, CatLabels, emit_bars, emit_category_labels, stacked_max};
 use super::frame::{PlotArea, plot_area};
+use super::hbar::emit_hbar;
 use super::legend::{
     LegendAlign, LegendArea, LegendConfig, LegendLayout, LegendPosition, emit_legend,
     legend_reserve,
@@ -329,36 +330,53 @@ pub(in crate::compile) fn compile_chart(
     // Line/area: gridlines → (area fills) → line strokes → axis lines → cat labels.
     match chart.kind.as_str() {
         "bar" => {
-            let n_categories = chart
-                .series
-                .iter()
-                .map(|s| s.values.len())
-                .max()
-                .unwrap_or(0);
+            // Horizontal bars take a completely separate path: their own plot
+            // rect (left margin sized for category labels, bottom for X numeric
+            // labels), their own X value scale, and independent axis emission.
+            // The outer y_scale/y_ticks are unused by this branch — that is
+            // intentional; line/area/vertical-bar still use them.
+            if chart.orientation.as_deref() == Some("horizontal") {
+                emit_hbar(
+                    chart,
+                    (bbox_x, bbox_y, bbox_w, bbox_h),
+                    colors,
+                    cx,
+                    commands,
+                    diagnostics,
+                );
+            } else {
+                // Vertical bar (orientation None or "vertical") — unchanged.
+                let n_categories = chart
+                    .series
+                    .iter()
+                    .map(|s| s.values.len())
+                    .max()
+                    .unwrap_or(0);
 
-            emit_gridlines_and_labels(
-                &plot,
-                &y_ticks,
-                colors,
-                &chart.id,
-                cx,
-                commands,
-                diagnostics,
-            );
-            emit_bars(chart, &plot, &y_scale, cx, commands, diagnostics);
-            emit_category_labels(
-                &chart.categories,
-                n_categories,
-                CatLabels {
-                    plot: &plot,
-                    color: colors.label,
-                    slot_center: true,
-                },
-                cx,
-                commands,
-                diagnostics,
-            );
-            emit_axis_lines(&plot, colors.axis, commands);
+                emit_gridlines_and_labels(
+                    &plot,
+                    &y_ticks,
+                    colors,
+                    &chart.id,
+                    cx,
+                    commands,
+                    diagnostics,
+                );
+                emit_bars(chart, &plot, &y_scale, cx, commands, diagnostics);
+                emit_category_labels(
+                    &chart.categories,
+                    n_categories,
+                    CatLabels {
+                        plot: &plot,
+                        color: colors.label,
+                        slot_center: true,
+                    },
+                    cx,
+                    commands,
+                    diagnostics,
+                );
+                emit_axis_lines(&plot, colors.axis, commands);
+            }
         }
         "line" | "area" => {
             let is_area = chart.kind.as_str() == "area";

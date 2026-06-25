@@ -27,7 +27,7 @@ const CATEGORY_PAD_FRAC: f64 = 0.20;
 const BAR_GAP_FRAC: f64 = 0.15;
 
 /// Color for value labels drawn above (or inside) each bar.
-const VALUE_LABEL_COLOR: Color = Color::srgb(60, 60, 60, 255);
+pub(super) const VALUE_LABEL_COLOR: Color = Color::srgb(60, 60, 60, 255);
 
 // ── BarMode ───────────────────────────────────────────────────────────────────
 
