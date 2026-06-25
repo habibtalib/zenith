@@ -135,6 +135,10 @@ fn build_resolved_spans(
             color: Color::srgb(0, 0, 0, 255),
             underline: span.underline == Some(true),
             strikethrough: span.strikethrough == Some(true),
+            // Measure path does not render highlights, but the field must be
+            // present for the shared `shape_words` signature; `None` is safe
+            // because measurement only accumulates advances.
+            highlight: None,
             weight,
             style,
             font_size: span_font_size,

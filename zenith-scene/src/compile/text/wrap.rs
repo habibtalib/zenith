@@ -795,6 +795,7 @@ mod indent_tests {
             color: Color::srgb(0, 0, 0, 255),
             underline: false,
             strikethrough: false,
+            highlight: None,
             baseline_dy: 0.0,
             src: WordSource {
                 text: String::new(),

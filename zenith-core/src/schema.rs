@@ -110,7 +110,9 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
         "text" => Some(NodeContentDescriptor {
             description: "One or more `span` children carry the text runs. \
                 Each span takes a string argument and optional inline style props: \
-                fill, font-weight, italic, underline, strikethrough, vertical-align, footnote-ref.",
+                fill, font-weight, italic, underline, strikethrough, highlight, vertical-align, footnote-ref. \
+                `highlight` is a per-span background color (token ref or raw color string) \
+                rendered behind the glyph run like a marker-pen highlight.",
             example: concat!(
                 "span \"Hello \"\n",
                 "span \"world\" font-weight=(token)\"weight.bold\" italic=#true",

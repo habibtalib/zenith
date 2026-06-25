@@ -86,6 +86,12 @@ pub struct TextSpan {
     /// meaningful when `data_ref` is `Some`. `None` substitutes the raw field
     /// value verbatim. KDL: `format="currency" precision=2`.
     pub data_format: Option<DataFormat>,
+    /// Per-span highlight (text background) color; usually a token ref. `None` =
+    /// no highlight (byte-identical to a span without it). When `Some`, the
+    /// renderer emits a filled rect behind the span's glyphs covering the full
+    /// ascent-to-descent band so the text reads like a marker-pen highlight.
+    /// KDL: `span highlight=(token)"color.mark" "text"`.
+    pub highlight: Option<PropertyValue>,
 }
 
 /// How an `image` node aligns its content within the declared box when the

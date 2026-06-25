@@ -232,6 +232,12 @@ fn resolve_chain_style(
         let color = fill_prop
             .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &source.id))
             .unwrap_or(Color::srgb(0, 0, 0, 255));
+        // Per-span highlight background color (token ref or raw color string).
+        // Absent → `None` (no highlight, byte-identical to a span without it).
+        let highlight: Option<Color> = span
+            .highlight
+            .as_ref()
+            .and_then(|hp| resolve_property_color(hp, resolved, diagnostics, &source.id));
         let weight_prop = span.font_weight.as_ref().or(node_weight_prop);
         let weight = resolve_font_weight(weight_prop, resolved, 400);
         let style = if span.italic == Some(true) {
@@ -248,6 +254,7 @@ fn resolve_chain_style(
             color,
             underline: span.underline == Some(true),
             strikethrough: span.strikethrough == Some(true),
+            highlight,
             weight,
             style,
             font_size: span_font_size,

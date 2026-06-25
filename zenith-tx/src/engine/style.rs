@@ -571,6 +571,7 @@ fn op_spans_to_text_spans(spans: &[OpSpan]) -> Vec<TextSpan> {
             footnote_ref: s.footnote_ref.clone(),
             data_ref: None,
             data_format: None,
+            highlight: None,
         })
         .collect()
 }

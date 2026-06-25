@@ -24,6 +24,10 @@ pub(in crate::compile) struct WordToken {
     pub(in crate::compile) color: Color,
     pub(in crate::compile) underline: bool,
     pub(in crate::compile) strikethrough: bool,
+    /// Per-span highlight background color. `None` = no highlight (byte-identical
+    /// to a span without it); `Some(c)` causes a background FillRect to be
+    /// emitted behind the glyph run by the emit path.
+    pub(in crate::compile) highlight: Option<Color>,
     /// Super/subscript baseline shift in pixels (negative = up; 0 = baseline).
     /// Applied per-glyph-run by [`super::emit::emit_lines`] on top of the line
     /// baseline.
@@ -71,6 +75,8 @@ pub(in crate::compile) struct ResolvedSpan {
     pub(in crate::compile) color: Color,
     pub(in crate::compile) underline: bool,
     pub(in crate::compile) strikethrough: bool,
+    /// Per-span highlight background color (`None` = no highlight).
+    pub(in crate::compile) highlight: Option<Color>,
     pub(in crate::compile) weight: u16,
     pub(in crate::compile) style: FontStyle,
     /// The span's OWN font size (reduced for super/subscript). When equal to the
@@ -188,6 +194,7 @@ pub(in crate::compile) fn shape_words(
                             color: shaped.color,
                             underline: shaped.underline,
                             strikethrough: shaped.strikethrough,
+                            highlight: shaped.highlight,
                             baseline_dy: shaped.baseline_dy,
                             runs: result.runs,
                             src: WordSource {

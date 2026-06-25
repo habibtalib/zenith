@@ -85,6 +85,7 @@ fn reshape_fragment(
         color: donor.color,
         underline: donor.underline,
         strikethrough: donor.strikethrough,
+        highlight: donor.highlight,
         baseline_dy: donor.baseline_dy,
         src: WordSource {
             text: text.to_owned(),
@@ -277,6 +278,7 @@ mod break_word_tests {
             color: Color::srgb(0, 0, 0, 255),
             underline: false,
             strikethrough: false,
+            highlight: None,
             weight: 400,
             style: FontStyle::Normal,
             font_size: 16.0,

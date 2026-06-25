@@ -922,6 +922,12 @@ pub(super) fn transform_span(node: &KdlNode) -> Result<TextSpan, ParseError> {
     let data_ref = optional_string_prop_aliased(node, "data-ref", "data_ref").map(str::to_owned);
     let data_format = parse_span_data_format(node);
 
+    // Per-span highlight background color (token ref or raw color string),
+    // mirroring the `fill` read path. Absent → `None` (no highlight).
+    let highlight = node
+        .entry("highlight")
+        .and_then(|e| entry_to_property_value(e).ok());
+
     Ok(TextSpan {
         text,
         fill,
@@ -933,6 +939,7 @@ pub(super) fn transform_span(node: &KdlNode) -> Result<TextSpan, ParseError> {
         footnote_ref,
         data_ref,
         data_format,
+        highlight,
     })
 }
 

@@ -140,6 +140,7 @@ pub(super) fn resolve_toc_to_text(
             footnote_ref: None,
             data_ref: None,
             data_format: None,
+            highlight: None,
         }],
         source_span: toc.source_span,
         unknown_props: BTreeMap::new(),
@@ -256,6 +257,7 @@ mod tests {
             footnote_ref: None,
             data_ref: None,
             data_format: None,
+            highlight: None,
         }
     }
 

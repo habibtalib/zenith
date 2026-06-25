@@ -145,6 +145,30 @@ pub(in crate::compile) fn emit_lines_profiled<F>(
             }
         }
 
+        // Highlight background rects FIRST (painted before decorations and
+        // glyphs so everything sits on top). One FillRect per highlighted word
+        // covering the full ascent-to-descent band of that word's run.
+        // Words without a highlight color emit nothing (byte-identical).
+        for (wi, word) in visual.iter().enumerate() {
+            if let Some(hl_color) = word.highlight {
+                let wx = word_x.get(wi).copied().unwrap_or(base_x);
+                // Use the first run's metrics for the highlight band height.
+                // When a word has no runs (empty token) there is nothing to
+                // highlight; the `if let Some` below guards this.
+                if let Some(first_run) = word.runs.first() {
+                    let hl_y = baseline_y - first_run.ascent as f64;
+                    let hl_h = (first_run.ascent + first_run.descent) as f64;
+                    commands.push(SceneCommand::FillRect {
+                        x: wx,
+                        y: hl_y,
+                        w: word.advance,
+                        h: hl_h,
+                        paint: Paint::solid(hl_color),
+                    });
+                }
+            }
+        }
+
         // Decorations FIRST (so glyphs paint on top), one FillRect per maximal
         // contiguous same-flag run of words (in visual order).
         let underline_y = baseline_y + font_size as f64 * 0.12;
@@ -235,6 +259,7 @@ mod rtl_tests {
             color: Color::srgb(0, 0, 0, 255),
             underline: false,
             strikethrough: false,
+            highlight: None,
             baseline_dy: 0.0,
             src: WordSource {
                 text: String::new(),

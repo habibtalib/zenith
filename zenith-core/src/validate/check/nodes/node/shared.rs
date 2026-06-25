@@ -721,6 +721,15 @@ pub(super) fn check_spans(
             resolved_tokens,
             diagnostics,
         );
+        check_visual_prop(
+            node_id,
+            "highlight",
+            span.highlight.as_ref(),
+            VisualExpect::Color,
+            referenced_token_ids,
+            resolved_tokens,
+            diagnostics,
+        );
     }
 }
 

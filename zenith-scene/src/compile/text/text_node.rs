@@ -328,6 +328,7 @@ pub(in crate::compile) fn compile_text_sized(
                         footnote_ref: None,
                         data_ref: None,
                         data_format: None,
+                        highlight: None,
                     }),
                     None => diagnostics.push(Diagnostic::advisory(
                         "footnote.unresolved_ref",
@@ -514,6 +515,8 @@ pub(in crate::compile) fn compile_text_sized(
         color: Color,
         underline: bool,
         strikethrough: bool,
+        /// Per-span highlight background color (`None` = no highlight).
+        highlight: Option<Color>,
         text: String,
         weight: u16,
         style: FontStyle,
@@ -553,6 +556,13 @@ pub(in crate::compile) fn compile_text_sized(
             .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &text.id))
             .unwrap_or(Color::srgb(0, 0, 0, 255));
         color.a = (color.a as f64 * color_opacity).round() as u8;
+
+        // Per-span highlight background color. Absent → `None` (no highlight,
+        // byte-identical to a span without the attribute).
+        let highlight: Option<Color> = span
+            .highlight
+            .as_ref()
+            .and_then(|hp| resolve_property_color(hp, resolved, diagnostics, &text.id));
 
         // Per-span weight: span.font_weight overrides node weight; 400.
         let weight_prop = span.font_weight.as_ref().or(node_weight_prop);
@@ -621,6 +631,7 @@ pub(in crate::compile) fn compile_text_sized(
                         color,
                         underline: span.underline == Some(true),
                         strikethrough: span.strikethrough == Some(true),
+                        highlight,
                         text: run_text,
                         weight,
                         style,
@@ -798,6 +809,22 @@ pub(in crate::compile) fn compile_text_sized(
             };
             let glyphs = run_to_scene_glyphs(&shaped.run);
 
+            // Per-span highlight: a filled background rect covering the full
+            // ascent-to-descent band behind the span's glyphs and decorations.
+            // Emitted FIRST so that underline, strikethrough, and glyphs all
+            // paint on top of it. Absent (`None`) → no rect, byte-identical.
+            if let Some(hl_color) = shaped.highlight {
+                let hl_y = baseline_y - shaped.run.ascent as f64;
+                let hl_h = (shaped.run.ascent + shaped.run.descent) as f64;
+                commands.push(SceneCommand::FillRect {
+                    x: x_cursor,
+                    y: hl_y,
+                    w: run_advance,
+                    h: hl_h,
+                    paint: Paint::solid(hl_color),
+                });
+            }
+
             // Per-span decorations: a thin filled rule in the span's own
             // color, spanning the run's advance. Position/thickness are
             // derived from the SPAN's font size (reduced for super/subscript) —
@@ -849,6 +876,7 @@ pub(in crate::compile) fn compile_text_sized(
                 color: s.color,
                 underline: s.underline,
                 strikethrough: s.strikethrough,
+                highlight: s.highlight,
                 weight: s.weight,
                 style: s.style,
                 font_size: s.font_size,
