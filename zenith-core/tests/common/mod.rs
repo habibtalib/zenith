@@ -131,6 +131,7 @@ pub fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
         w: Some(px(200.0)),
         h: Some(px(40.0)),
         align: None,
+        v_align: None,
         direction: None,
         overflow: None,
         overflow_wrap: None,

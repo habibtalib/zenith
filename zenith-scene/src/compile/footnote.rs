@@ -108,6 +108,7 @@ fn synth_footnote_text(fnote: &FootnoteNode, marker: &str, x: f64, y: f64, w: f6
         w: Some(px(w)),
         h: None,
         align: Some("start".to_owned()),
+        v_align: None,
         direction: None,
         // The zone is reserved bottom-up; the footnote text may exceed its (open)
         // box without a hard fail, so use "visible" to avoid an overflow warning.

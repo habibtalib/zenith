@@ -169,6 +169,7 @@ pub(in crate::compile) fn resolve_field_to_text(
         // an explicit field-level note: fields do not expose `align` in v0, so
         // the per-type default is authoritative.
         align: Some(default_align.to_owned()),
+        v_align: None,
         direction: None,
         overflow: Some("clip".to_owned()),
         overflow_wrap: None,

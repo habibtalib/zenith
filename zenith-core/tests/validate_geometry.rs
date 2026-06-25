@@ -94,6 +94,7 @@ fn text_font_family_with_font_family_token_is_clean() {
                 w: Some(px(200.0)),
                 h: Some(px(40.0)),
                 align: None,
+                v_align: None,
                 direction: None,
                 overflow: None,
                 overflow_wrap: None,

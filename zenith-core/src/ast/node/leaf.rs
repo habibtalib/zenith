@@ -315,6 +315,12 @@ pub struct TextNode {
     pub w: Option<Dimension>,
     pub h: Option<Dimension>,
     pub align: Option<String>,
+    /// Vertical text-block alignment within the box (`top`/`middle`/`bottom`,
+    /// default `top` = today's behavior: no y offset applied). When the box
+    /// height exceeds the laid-out text block height, the block is offset by
+    /// `0` (top), `(box_h - text_h)/2` (middle), or `box_h - text_h`
+    /// (bottom). Unknown values are treated as `top` (byte-identical to absent).
+    pub v_align: Option<String>,
     pub direction: Option<String>,
     pub overflow: Option<String>,
     /// Overflow-wrap mode. `Some("break-word")` lets the line packer break an

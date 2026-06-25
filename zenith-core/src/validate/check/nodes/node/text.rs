@@ -228,6 +228,21 @@ pub(in crate::validate::check) fn check_text(
         diagnostics,
     );
 
+    // Validate v-align value (advisory warning, unknown → top at compile time).
+    if let Some(va) = t.v_align.as_deref()
+        && !matches!(va, "top" | "middle" | "bottom")
+    {
+        diagnostics.push(Diagnostic::warning(
+            "text.invalid_v_align",
+            format!(
+                "text '{}': v-align '{va}' is not one of top/middle/bottom",
+                t.id
+            ),
+            t.source_span,
+            Some(t.id.clone()),
+        ));
+    }
+
     // Text-runaround exclusion: an `text-exclusion` naming an id that
     // does not exist among the document's node ids is advisory (the
     // render proceeds with no exclusion, byte-identical to a node

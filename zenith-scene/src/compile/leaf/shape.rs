@@ -309,6 +309,7 @@ fn emit_shape_label(
         w: Some(px(content_w)),
         h: Some(px(content_h)),
         align,
+        v_align: None,
         direction: None,
         overflow: None,
         overflow_wrap: None,

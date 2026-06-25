@@ -470,6 +470,8 @@ pub(crate) const TEXT_KNOWN_PROPS: &[&str] = &[
     "w",
     "h",
     "align",
+    "v-align",
+    "v_align",
     "direction",
     "overflow",
     "overflow-wrap",
@@ -579,6 +581,7 @@ pub(super) fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         w: optional_dimension_prop(node, "w"),
         h: optional_dimension_prop(node, "h"),
         align: optional_string_prop(node, "align").map(str::to_owned),
+        v_align: optional_string_prop_aliased(node, "v-align", "v_align").map(str::to_owned),
         direction: optional_string_prop(node, "direction").map(str::to_owned),
         overflow: optional_string_prop(node, "overflow").map(str::to_owned),
         overflow_wrap: optional_string_prop(node, "overflow-wrap")

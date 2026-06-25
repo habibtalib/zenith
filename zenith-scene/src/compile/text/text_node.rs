@@ -22,7 +22,9 @@ use super::super::style_prop;
 use super::super::util::{resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag};
 use super::chain_member::render_chain_member;
 use super::ctx::{ChainMemberPlace, ShapeEnv, TabLeaderArgs, TextCompileEnv};
-use super::measure::{font_size_px, resolve_text_families};
+use super::measure::{
+    MeasureEnv, font_size_px, measure_text_wrapped_height, resolve_text_families,
+};
 use super::shape::{
     ResolvedSpan, emit_glyph_missing, resolve_font_weight, resolve_vertical_align,
     run_to_scene_glyphs,
@@ -254,7 +256,7 @@ pub(in crate::compile) fn compile_text_sized(
 
     // Apply group translation offset.
     let text_x = text_x_raw + ctx.dx;
-    let text_y = text_y_raw + ctx.dy;
+    let mut text_y = text_y_raw + ctx.dy;
 
     // Resolve glyph stroke early (before chain early-return) so it can be
     // threaded to render_chain_member as well. Both fields are None when the
@@ -349,6 +351,45 @@ pub(in crate::compile) fn compile_text_sized(
 
     // Resolve font size in pixels with style cascade; default to 16.0 if absent.
     let font_size: f32 = font_size_px(text, resolved, style_map);
+
+    // ── Vertical alignment pre-offset ─────────────────────────────────────
+    // When `v_align` is `"middle"` or `"bottom"` AND the box height is
+    // available, pre-offset `text_y` by the measured text-block height relative
+    // to the box height. Default (absent / "top" / unrecognized) applies 0
+    // offset — byte-identical to today's behavior.
+    //
+    // Mirrors the shape node's label v-align exactly: measure wrapped height via
+    // `measure_text_wrapped_height` then apply `(box_h - wrapped_h) / 2` or
+    // `box_h - wrapped_h` before any other emit path sees `text_y`.
+    //
+    // Chain members use a pre-distributed layout and are unaffected: v-align on
+    // a chain source is a documented no-op for chain continuations (the
+    // distribution already positions each member's lines).
+    if matches!(text.v_align.as_deref(), Some("middle") | Some("bottom")) {
+        if let Some(box_h) = text.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)) {
+            if let Some(box_w) = text.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)) {
+                let wrapped_h = measure_text_wrapped_height(
+                    text,
+                    box_w,
+                    &families,
+                    MeasureEnv {
+                        resolved,
+                        style_map,
+                        fonts,
+                        engine,
+                    },
+                    diagnostics,
+                )
+                .unwrap_or(0.0);
+                let v_offset = match text.v_align.as_deref() {
+                    Some("bottom") => (box_h - wrapped_h).max(0.0),
+                    // "middle" and any other matched arm center vertically.
+                    _ => ((box_h - wrapped_h) / 2.0).max(0.0),
+                };
+                text_y += v_offset;
+            }
+        }
+    }
 
     // Node opacity, applied once and cascaded with ctx.opacity onto
     // every span's alpha below.

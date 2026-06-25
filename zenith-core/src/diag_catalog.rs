@@ -629,6 +629,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Text with `overflow: fit` could not be scaled to fit its frame.",
     ),
     info(
+        "text.invalid_v_align",
+        Severity::Warning,
+        "Text `v-align` value is not recognized.",
+    ),
+    info(
         "text.forced_break",
         Severity::Warning,
         "A text line was force-broken during wrapping to prevent infinite layout.",

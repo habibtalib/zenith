@@ -246,6 +246,7 @@ pub(super) fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     write_opt_dimension(out, "w", &t.w);
     write_opt_dimension(out, "h", &t.h);
     write_opt_str(out, "align", &t.align);
+    write_opt_str(out, "v-align", &t.v_align);
     write_opt_str(out, "direction", &t.direction);
     write_opt_str(out, "overflow", &t.overflow);
     write_opt_str(out, "overflow-wrap", &t.overflow_wrap);
