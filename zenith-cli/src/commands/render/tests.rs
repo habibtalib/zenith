@@ -385,3 +385,136 @@ fn to_pdf_all_pages_is_deterministic() {
         "two all-pages PDF renders must be byte-identical"
     );
 }
+
+// ── text src="..." integration tests ─────────────────────────────────────
+
+/// Build the KDL for a document whose single text node has `src="<rel>"`.
+fn text_src_doc(src_rel: &str) -> String {
+    format!(
+        r##"zenith version=1 {{
+  project id="proj.src" name="Src Test"
+  tokens format="zenith-token-v1" {{
+    token id="color.bg" type="color" value="#ffffff"
+    token id="color.ink" type="color" value="#000000"
+    token id="font.body" type="fontFamily" value="Noto Sans"
+    token id="size.body" type="dimension" value=(px)16
+    token id="weight.regular" type="fontWeight" value=400
+  }}
+  styles {{}}
+  document id="doc.src" title="Src Test" {{
+    page id="page.src" w=(px)400 h=(px)200 background=(token)"color.bg" {{
+      text id="text.src" x=(px)10 y=(px)10 w=(px)380 h=(px)180 fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" font-weight=(token)"weight.regular" src="{src_rel}" format="markdown" {{
+      }}
+    }}
+  }}
+}}
+"##
+    )
+}
+
+/// A document with a text node that has `src` absent — must render identically
+/// to a text node without the attribute (byte-identical guarantee).
+const TEXT_SRC_ABSENT_DOC: &str = r##"zenith version=1 {
+  project id="proj.nosrc" name="No Src"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#ffffff"
+    token id="color.ink" type="color" value="#000000"
+    token id="font.body" type="fontFamily" value="Noto Sans"
+    token id="size.body" type="dimension" value=(px)16
+    token id="weight.regular" type="fontWeight" value=400
+  }
+  styles {}
+  document id="doc.nosrc" title="No Src" {
+    page id="page.nosrc" w=(px)400 h=(px)200 background=(token)"color.bg" {
+      text id="text.nosrc" x=(px)10 y=(px)10 w=(px)380 h=(px)180 fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" font-weight=(token)"weight.regular" {
+        span "Hello world"
+      }
+    }
+  }
+}
+"##;
+
+#[test]
+fn text_src_loads_file_and_renders_png() {
+    use std::io::Write as _;
+    let dir = tempfile::tempdir().expect("temp dir must be created");
+    let md_path = dir.path().join("article.md");
+    let mut f = std::fs::File::create(&md_path).expect("temp file must be created");
+    write!(f, "**bold** and plain").expect("write must succeed");
+    drop(f);
+
+    let doc_src = text_src_doc("article.md");
+    let artifact = to_png_with_dir(
+        &doc_src,
+        Some(dir.path()),
+        1,
+        false,
+        &CliPolicyFlags::default(),
+        None,
+    )
+    .expect("render with src file must succeed");
+
+    // Must produce a valid PNG.
+    assert!(
+        artifact.png.starts_with(&[0x89, 0x50, 0x4E, 0x47]),
+        "output must be a valid PNG"
+    );
+    // Must have no text.src_missing diagnostic.
+    let missing: Vec<_> = artifact
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "text.src_missing")
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "no text.src_missing diagnostic expected; got: {:?}",
+        missing
+    );
+}
+
+#[test]
+fn text_src_missing_file_yields_error_diagnostic() {
+    use zenith_core::Severity;
+
+    let doc_src = text_src_doc("__does_not_exist__.md");
+    // Use a real directory that exists but does not contain the file.
+    let dir = tempfile::tempdir().expect("temp dir must be created");
+    let artifact = to_png_with_dir(
+        &doc_src,
+        Some(dir.path()),
+        1,
+        false,
+        &CliPolicyFlags::default(),
+        None,
+    )
+    .expect("render must still return Ok (gate is at lib.rs dispatch level)");
+
+    let has_src_missing = artifact
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "text.src_missing" && d.severity == Severity::Error);
+    assert!(
+        has_src_missing,
+        "artifact must carry a text.src_missing Error diagnostic; got: {:?}",
+        artifact
+            .diagnostics
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn text_src_absent_is_byte_identical_to_no_src_attr() {
+    // A text node without `src` must not be affected at all by the loader pass.
+    // We just verify the render succeeds cleanly with no text.src_missing code.
+    let artifact = to_png(TEXT_SRC_ABSENT_DOC, 1).expect("render must succeed");
+    let has_src_missing = artifact
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "text.src_missing");
+    assert!(
+        !has_src_missing,
+        "a text node without src must produce no text.src_missing diagnostic"
+    );
+}

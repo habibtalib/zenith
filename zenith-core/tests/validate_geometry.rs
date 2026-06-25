@@ -122,6 +122,7 @@ fn text_font_family_with_font_family_token_is_clean() {
                 padding_left: None,
                 text_indent: None,
                 content_format: None,
+                src: None,
                 bullet: None,
                 bullet_gap: None,
                 anchor: None,

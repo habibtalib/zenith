@@ -476,6 +476,25 @@ pub struct TextNode {
     ///
     /// KDL: `format="markdown"`.
     pub content_format: Option<String>,
+    /// Path to an external text or markdown file whose contents become this
+    /// node's text content, relative to the document's project directory.
+    ///
+    /// When `Some(path)`, the CLI render layer reads the file and replaces
+    /// `spans` with a single plain span carrying the file's raw UTF-8 text
+    /// before compilation. When `format="markdown"` is also set, the existing
+    /// `markdown_resolve` compile pass then parses the loaded text into styled
+    /// spans automatically. When the file cannot be read, a `text.src_missing`
+    /// Error diagnostic is emitted and the node's existing spans are left
+    /// unchanged.
+    ///
+    /// The field is retained on the node after loading so that a future editor
+    /// can write edits back to the original file.
+    ///
+    /// A text node WITHOUT `src` is completely unaffected by the loader
+    /// (byte-identical to before).
+    ///
+    /// KDL: `src="copy/article.md"`.
+    pub src: Option<String>,
     /// Inline text spans.
     pub spans: Vec<TextSpan>,
     /// Page-relative placement anchor (one of the nine named positions, e.g.

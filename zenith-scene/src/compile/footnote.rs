@@ -146,6 +146,7 @@ fn synth_footnote_text(fnote: &FootnoteNode, marker: &str, x: f64, y: f64, w: f6
         padding_left: None,
         text_indent: None,
         content_format: None,
+        src: None,
         bullet: None,
         bullet_gap: None,
         anchor: None,

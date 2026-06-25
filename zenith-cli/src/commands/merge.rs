@@ -18,6 +18,7 @@ use crate::json_types::{DiagnosticJson, MergeOutput, MergeRowResult};
 
 use crate::commands::render::{
     build_asset_provider, build_font_provider, collect_missing_asset_diagnostics,
+    resolve_text_sources,
 };
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -485,7 +486,7 @@ pub fn run(
         }
 
         // Re-parse source_after → row document.
-        let row_doc = match KdlAdapter.parse(tx_result.source_after.as_bytes()) {
+        let mut row_doc = match KdlAdapter.parse(tx_result.source_after.as_bytes()) {
             Ok(d) => d,
             Err(e) => {
                 push_failure(
@@ -497,6 +498,27 @@ pub fn run(
                 continue;
             }
         };
+
+        // Resolve external text-file sources on the per-row document.
+        // Any text.src_missing Error is a per-row failure (same gate as asset.missing).
+        {
+            let mut text_src_diags: Vec<zenith_core::Diagnostic> = Vec::new();
+            resolve_text_sources(&mut row_doc, project_dir, &mut text_src_diags);
+            let hard: Vec<String> = text_src_diags
+                .iter()
+                .filter(|d| d.severity == Severity::Error)
+                .map(crate::commands::format_error_diag)
+                .collect();
+            if !hard.is_empty() {
+                push_failure(
+                    &mut rows,
+                    row_idx,
+                    row_key,
+                    format!("text source error(s): {}", hard.join("; ")),
+                );
+                continue;
+            }
+        }
 
         // Build per-row asset provider: template assets + row-specific images.
         // BytesAssetProvider is not Clone, so we rebuild from template doc and

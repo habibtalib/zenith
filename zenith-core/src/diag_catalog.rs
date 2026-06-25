@@ -719,6 +719,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Text content overflows its containing frame.",
     ),
     info(
+        "text.src_missing",
+        Severity::Error,
+        "A text node's `src` file was not found or could not be read at render time.",
+    ),
+    info(
         "toc.no_selector",
         Severity::Warning,
         "A `toc` node declares no selector.",
@@ -1023,6 +1028,14 @@ mod tests {
         let asset_missing =
             lookup("asset.missing").expect("asset.missing must be in the diagnostic catalog");
         assert_eq!(asset_missing.severity, Severity::Error);
+
+        let text_src_missing =
+            lookup("text.src_missing").expect("text.src_missing must be in the diagnostic catalog");
+        assert_eq!(text_src_missing.severity, Severity::Error);
+        assert!(
+            !text_src_missing.is_governable(),
+            "text.src_missing must not be governable (always-Error)"
+        );
 
         let image_overflow =
             lookup("image.overflow").expect("image.overflow must be in the diagnostic catalog");

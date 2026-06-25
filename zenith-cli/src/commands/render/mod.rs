@@ -22,6 +22,7 @@ mod assets;
 pub mod data_input;
 mod entry;
 mod pipeline;
+mod text_source;
 
 #[cfg(test)]
 mod tests;
@@ -36,3 +37,4 @@ pub use entry::{
     to_pdf_all_pages_with_dir, to_pdf_with_dir, to_png, to_png_all_pages, to_png_spread,
     to_png_with_dir, to_scene_json,
 };
+pub(crate) use text_source::resolve_text_sources;

@@ -284,6 +284,7 @@ pub(super) fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     write_opt_str(out, "tab-leader", &t.tab_leader);
     write_opt_str(out, "text-exclusion", &t.text_exclusion);
     write_opt_str(out, "format", &t.content_format);
+    write_opt_str(out, "src", &t.src);
     write_opt_str(out, "bullet", &t.bullet);
     write_opt_dimension(out, "bullet-gap", &t.bullet_gap);
 

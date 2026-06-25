@@ -200,6 +200,7 @@ pub(in crate::compile) fn resolve_field_to_text(
         padding_left: None,
         text_indent: None,
         content_format: None,
+        src: None,
         bullet: None,
         bullet_gap: None,
         anchor: None,

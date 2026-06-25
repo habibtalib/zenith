@@ -428,6 +428,7 @@ fn emit_connector_label(
         padding_left: None,
         text_indent: None,
         content_format: None,
+        src: None,
         bullet: None,
         bullet_gap: None,
         anchor: None,

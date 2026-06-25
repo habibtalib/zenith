@@ -10,6 +10,7 @@ use crate::config::CliPolicyFlags;
 
 use super::assets::{build_asset_provider, build_font_provider, disk_diagnostics};
 use super::pipeline::{govern_compile_diagnostics, parse_validate, resolve_page_index};
+use super::text_source::resolve_text_sources;
 
 // ── Error type ────────────────────────────────────────────────────────────────
 
@@ -93,7 +94,9 @@ pub fn to_scene_json(
     flags: &CliPolicyFlags,
     data: Option<&DataContext>,
 ) -> Result<SceneArtifact, RenderCmdErr> {
-    let (doc, policy) = parse_validate(src, project_dir, flags)?;
+    let (mut doc, policy) = parse_validate(src, project_dir, flags)?;
+    let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
+    resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
     let fonts = build_font_provider(&doc, project_dir, false)?;
     let page_index = resolve_page_index(&doc, page)?;
     let compile_result = compile_page(&doc, &fonts, page_index, data);
@@ -101,7 +104,8 @@ pub fn to_scene_json(
         .scene
         .to_json()
         .map_err(|e| RenderCmdErr::new(format!("scene serialisation error: {e}"), 2))?;
-    let mut diagnostics = disk_diagnostics(&doc, project_dir);
+    let mut diagnostics = text_src_diagnostics;
+    diagnostics.extend(disk_diagnostics(&doc, project_dir));
     diagnostics.extend(govern_compile_diagnostics(
         compile_result.diagnostics,
         &policy,
@@ -161,7 +165,9 @@ pub fn to_png_with_dir(
     flags: &CliPolicyFlags,
     data: Option<&DataContext>,
 ) -> Result<PngArtifact, RenderCmdErr> {
-    let (doc, policy) = parse_validate(src, project_dir, flags)?;
+    let (mut doc, policy) = parse_validate(src, project_dir, flags)?;
+    let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
+    resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
     let fonts = build_font_provider(&doc, project_dir, locked)?;
     let page_index = resolve_page_index(&doc, page)?;
     let assets = match project_dir {
@@ -171,7 +177,8 @@ pub fn to_png_with_dir(
     let compile_result = compile_page(&doc, &fonts, page_index, data);
     let png = render_png(&compile_result.scene, &fonts, &assets)
         .map_err(|e| RenderCmdErr::new(format!("render error: {e}"), 2))?;
-    let mut diagnostics = disk_diagnostics(&doc, project_dir);
+    let mut diagnostics = text_src_diagnostics;
+    diagnostics.extend(disk_diagnostics(&doc, project_dir));
     diagnostics.extend(govern_compile_diagnostics(
         compile_result.diagnostics,
         &policy,
@@ -201,7 +208,9 @@ pub fn to_pdf_with_dir(
     flags: &CliPolicyFlags,
     data: Option<&DataContext>,
 ) -> Result<PdfArtifact, RenderCmdErr> {
-    let (doc, policy) = parse_validate(src, project_dir, flags)?;
+    let (mut doc, policy) = parse_validate(src, project_dir, flags)?;
+    let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
+    resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
     let fonts = build_font_provider(&doc, project_dir, locked)?;
     let page_index = resolve_page_index(&doc, page)?;
     let assets = match project_dir {
@@ -210,7 +219,8 @@ pub fn to_pdf_with_dir(
     };
     let compile_result = compile_page(&doc, &fonts, page_index, data);
     let pdf = render_pdf(&compile_result.scene, &fonts, &assets);
-    let mut diagnostics = disk_diagnostics(&doc, project_dir);
+    let mut diagnostics = text_src_diagnostics;
+    diagnostics.extend(disk_diagnostics(&doc, project_dir));
     diagnostics.extend(govern_compile_diagnostics(
         compile_result.diagnostics,
         &policy,
@@ -245,7 +255,9 @@ pub fn to_pdf_all_pages_with_dir(
     flags: &CliPolicyFlags,
     data: Option<&DataContext>,
 ) -> Result<PdfArtifact, RenderCmdErr> {
-    let (doc, policy) = parse_validate(src, project_dir, flags)?;
+    let (mut doc, policy) = parse_validate(src, project_dir, flags)?;
+    let mut diagnostics: Vec<Diagnostic> = Vec::new();
+    resolve_text_sources(&mut doc, project_dir, &mut diagnostics);
     let fonts = build_font_provider(&doc, project_dir, locked)?;
     let page_count = doc.body.pages.len();
     if page_count == 0 {
@@ -256,7 +268,7 @@ pub fn to_pdf_all_pages_with_dir(
         None => BytesAssetProvider::new(),
     };
     let mut scenes: Vec<Scene> = Vec::with_capacity(page_count);
-    let mut diagnostics = disk_diagnostics(&doc, project_dir);
+    diagnostics.extend(disk_diagnostics(&doc, project_dir));
     for page_index in 0..page_count {
         let compile_result = compile_page(&doc, &fonts, page_index, data);
         scenes.push(compile_result.scene);
@@ -292,7 +304,9 @@ pub fn to_png_all_pages(
     flags: &CliPolicyFlags,
     data: Option<&DataContext>,
 ) -> Result<Vec<PngArtifact>, RenderCmdErr> {
-    let (doc, policy) = parse_validate(src, project_dir, flags)?;
+    let (mut doc, policy) = parse_validate(src, project_dir, flags)?;
+    let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
+    resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
     let fonts = build_font_provider(&doc, project_dir, locked)?;
     let page_count = doc.body.pages.len();
     if page_count == 0 {
@@ -302,13 +316,16 @@ pub fn to_png_all_pages(
         Some(dir) => build_asset_provider(&doc, dir, locked)?,
         None => BytesAssetProvider::new(),
     };
-    let disk_diagnostics = disk_diagnostics(&doc, project_dir);
+    let base_diagnostics: Vec<Diagnostic> = text_src_diagnostics
+        .into_iter()
+        .chain(disk_diagnostics(&doc, project_dir))
+        .collect();
     let mut artifacts = Vec::with_capacity(page_count);
     for page_index in 0..page_count {
         let compile_result = compile_page(&doc, &fonts, page_index, data);
         let png = render_png(&compile_result.scene, &fonts, &assets)
             .map_err(|e| RenderCmdErr::new(format!("render error on page {page_index}: {e}"), 2))?;
-        let mut diagnostics = disk_diagnostics.clone();
+        let mut diagnostics = base_diagnostics.clone();
         diagnostics.extend(govern_compile_diagnostics(
             compile_result.diagnostics,
             &policy,
@@ -369,7 +386,9 @@ pub fn to_png_spread(
         flags,
         data,
     } = opts;
-    let (doc, policy) = parse_validate(src, project_dir, flags)?;
+    let (mut doc, policy) = parse_validate(src, project_dir, flags)?;
+    let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
+    resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
     let fonts = build_font_provider(&doc, project_dir, locked)?;
     let index_a = resolve_page_index(&doc, page_a)?;
     let index_b = resolve_page_index(&doc, page_b)?;
@@ -397,7 +416,8 @@ pub fn to_png_spread(
     .map_err(|e| RenderCmdErr::new(format!("spread render error: {e}"), 2))?;
     let mut compile_diagnostics = compile_a.diagnostics;
     compile_diagnostics.extend(compile_b.diagnostics);
-    let mut diagnostics = disk_diagnostics(&doc, project_dir);
+    let mut diagnostics = text_src_diagnostics;
+    diagnostics.extend(disk_diagnostics(&doc, project_dir));
     diagnostics.extend(govern_compile_diagnostics(compile_diagnostics, &policy));
     Ok(PngArtifact { png, diagnostics })
 }

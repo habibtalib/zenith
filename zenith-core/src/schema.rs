@@ -125,7 +125,15 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
                 `++underline++`, `` `code` ``, and `[label](url)` into styled spans. \
                 Pairs well with a single `data-ref` span to parse external content as markdown \
                 without encoding marks in the document. `format=\"plain\"` or absent = literal \
-                (byte-identical to today's behavior).",
+                (byte-identical to today's behavior). \
+                The `src` node attribute (`src=\"path/to/file.md\"`) loads the file at the \
+                given path (resolved relative to the document's project directory) and uses its \
+                UTF-8 contents as the node's text content, replacing any inline `span` children \
+                at render time. This keeps the `.zen` file lean for long-form prose. When paired \
+                with `format=\"markdown\"`, the loaded text is parsed as inline markdown by the \
+                scene compile pass. A missing or unreadable file emits a `text.src_missing` \
+                Error diagnostic (same gate as `asset.missing`). The `src` field is retained \
+                on the node so a future editor can write edits back to the original file.",
             example: concat!(
                 "span \"Hello \"\n",
                 "span \"world\" font-weight=(token)\"weight.bold\" italic=#true",
