@@ -9,6 +9,7 @@ mod entry;
 mod frame;
 mod line;
 mod palette;
+mod pie;
 mod scale;
 
 pub(in crate::compile) use entry::compile_chart;

@@ -249,16 +249,11 @@ impl ValueLabelMode {
     }
 }
 
-/// Pick a readable label color for text drawn ON `fill`: dark text on light
-/// fills, light text on dark fills. Uses the perceptual luminance weighting.
-fn contrast_color(fill: Color) -> Color {
-    let lum = (0.299 * fill.r as f64 + 0.587 * fill.g as f64 + 0.114 * fill.b as f64) / 255.0;
-    if lum > 0.55 {
-        Color::srgb(20, 20, 20, 255)
-    } else {
-        Color::srgb(255, 255, 255, 255)
-    }
-}
+/// Default color for value labels drawn ON a bar/slice fill. White by default
+/// (consistent across slices); overridable via the chart's `value-color` or a
+/// per-label color. Labels drawn ABOVE a bar (on the plot background) use
+/// [`VALUE_LABEL_COLOR`] instead so they stay legible on a light page.
+pub(super) const ON_FILL_LABEL_COLOR: Color = Color::srgb(255, 255, 255, 255);
 
 // ── emit_bars ─────────────────────────────────────────────────────────────────
 
@@ -334,7 +329,6 @@ pub(super) fn emit_bars(
                 emit_value_label(
                     value,
                     *rect,
-                    color,
                     LabelCtx {
                         plot,
                         families: &value_label_families,
@@ -362,12 +356,12 @@ struct LabelCtx<'a> {
     families: &'a [String],
     chart_id: &'a str,
     placement: ValueLabelMode,
-    /// Explicit `value-color` override; when `None` the color is derived from
-    /// the final placement (contrast on a fill, dark on the plot background).
+    /// Resolved label-color override (per-label or chart `value-color`); when
+    /// `None` the color is the placement default (white on a fill, dark above).
     explicit: Option<Color>,
 }
 
-/// Shape and emit a numeric value label for one bar, given the bar's `fill`.
+/// Shape and emit a numeric value label for one bar.
 ///
 /// Placement follows `lc.placement`:
 /// - `Top`: 3 px above the bar; if that clips the plot top it falls inside.
@@ -375,15 +369,14 @@ struct LabelCtx<'a> {
 ///   the label height are skipped so text never overflows its segment.
 ///
 /// Color: `lc.explicit` wins if set; otherwise a label that ends up ON the bar
-/// fill (centered, or a top label that fell inside) uses a contrasting color
-/// against `fill`, while a label above the bar uses the dark plot-background color.
+/// fill (centered, or a top label that fell inside) uses the white on-fill
+/// default, while a label above the bar uses the dark plot-background color.
 ///
 /// `lc` bundles the per-chart context shared across every bar so the allocation
 /// stays out of the per-bar loop and the argument list stays bounded.
 fn emit_value_label(
     value: f64,
     rect: BarRect,
-    fill: Color,
     lc: LabelCtx,
     cx: NodeCtx,
     commands: &mut Vec<SceneCommand>,
@@ -436,10 +429,10 @@ fn emit_value_label(
                 }
             };
 
-            // Color: explicit override wins; else contrast on the fill when the
-            // label sits on the bar, dark on the plot background when above it.
+            // Color: explicit override wins; else the white on-fill default when
+            // the label sits on the bar, dark on the plot background when above it.
             let color = lc.explicit.unwrap_or(if on_fill {
-                contrast_color(fill)
+                ON_FILL_LABEL_COLOR
             } else {
                 VALUE_LABEL_COLOR
             });
@@ -622,15 +615,6 @@ mod tests {
         assert_eq!(ValueLabelMode::resolve(None, true), Center);
         assert_eq!(ValueLabelMode::resolve(None, false), Top);
         assert_eq!(ValueLabelMode::resolve(Some("???"), true), Center);
-    }
-
-    #[test]
-    fn contrast_color_picks_readable_text() {
-        // Dark fill → light text; light fill → dark text.
-        let dark = contrast_color(Color::srgb(20, 40, 80, 255));
-        assert_eq!((dark.r, dark.g, dark.b), (255, 255, 255));
-        let light = contrast_color(Color::srgb(240, 240, 200, 255));
-        assert_eq!((light.r, light.g, light.b), (20, 20, 20));
     }
 
     #[test]

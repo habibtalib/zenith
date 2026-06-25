@@ -3,7 +3,8 @@
 //! Resolves geometry, computes the scale and plot area, and emits the axis
 //! frame, series geometry, and labels for axis-bearing chart kinds (`bar`,
 //! `line`, `area`). Sparklines render directly into their bbox with a small
-//! inset and no axes. Non-renderable kinds (`pie`, `donut`) emit nothing.
+//! inset and no axes. Pie and donut charts tessellate wedge polygons into the
+//! bbox via `pie::emit_pie` (no axes, no Y scale).
 //!
 //! Returns `0.0`: charts are absolute-positioned and do not participate in
 //! flow layout (same contract as `compile_pattern`).
@@ -23,6 +24,7 @@ use super::bar::{BarMode, CatLabels, emit_bars, emit_category_labels, stacked_ma
 use super::frame::{PlotArea, plot_area};
 use super::line::{emit_area_fill, emit_line_series, line_points};
 use super::palette::series_color;
+use super::pie::emit_pie;
 use super::scale::{LinearScale, data_range, nice_ticks};
 
 // ── Default colors ─────────────────────────────────────────────────────────────
@@ -34,7 +36,7 @@ const DEFAULT_GRID_COLOR: Color = Color::srgb(225, 225, 225, 255);
 /// Default tick label color (dark gray).
 const DEFAULT_LABEL_COLOR: Color = Color::srgb(90, 90, 90, 255);
 /// Default title color (near-black).
-const DEFAULT_TITLE_COLOR: Color = Color::srgb(40, 40, 40, 255);
+pub(super) const DEFAULT_TITLE_COLOR: Color = Color::srgb(40, 40, 40, 255);
 
 // ── compile_chart ─────────────────────────────────────────────────────────────
 
@@ -49,8 +51,9 @@ const DEFAULT_TITLE_COLOR: Color = Color::srgb(40, 40, 40, 255);
 /// - The title (if present) above the plot area.
 ///
 /// Sparklines render directly into their bbox (no axes, no labels, no title).
-/// Non-renderable kinds (`pie`, `donut`) emit nothing. Any other kind string
-/// also emits nothing — see the gate comment for the reasoning.
+/// Pie and donut charts tessellate wedge polygons into the bbox with percentage
+/// labels and an optional title — no axes, no Y scale. Any unknown kind string
+/// emits nothing — see the gate comment for the reasoning.
 ///
 /// Returns `0.0`: charts are absolute-positioned and do not participate in
 /// flow layout.
@@ -70,8 +73,7 @@ pub(in crate::compile) fn compile_chart(
     // early. Sparkline is handled via its own branch below (after geometry
     // resolution) because it needs x/y/w/h but NOT the full axis machinery.
     match chart.kind.as_str() {
-        "bar" | "line" | "area" | "sparkline" => {}
-        "pie" | "donut" => return 0.0,
+        "bar" | "line" | "area" | "sparkline" | "pie" | "donut" => {}
         // Forward-compat: unknown kind strings emit nothing. We enumerate the
         // known non-renderable kinds explicitly rather than using a wildcard so
         // that a newly added known kind causes a compile error at every match
@@ -140,6 +142,15 @@ pub(in crate::compile) fn compile_chart(
     // are available. Returns immediately after emitting.
     if chart.kind.as_str() == "sparkline" {
         return emit_sparkline(chart, (x, y, w, h), cx, commands, diagnostics);
+    }
+
+    // ── Pie / donut early branch ─────────────────────────────────────────────
+    // Pie and donut charts need no axes, no plot area, and no Y scale. They
+    // tessellate wedge polygons directly from the chart bbox. Handled here,
+    // after geometry resolution, so x/y/w/h are available. Returns immediately.
+    if matches!(chart.kind.as_str(), "pie" | "donut") {
+        let is_donut = chart.kind.as_str() == "donut";
+        return emit_pie(chart, (x, y, w, h), is_donut, cx, commands, diagnostics);
     }
 
     // ── Axis style "hidden" ──────────────────────────────────────────────────
@@ -371,7 +382,7 @@ fn emit_sparkline(
 ///
 /// The title is placed at the top-left of the chart bbox, vertically just
 /// inside the top margin, using Noto Sans 13 px.
-fn emit_title(
+pub(super) fn emit_title(
     title: &str,
     origin: (f64, f64),
     color: Color,
