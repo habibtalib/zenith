@@ -195,6 +195,17 @@ pub struct SchemaNodeDetail {
     pub kind: String,
     pub summary: String,
     pub attributes: Vec<SchemaAttr>,
+    /// Child-content descriptor for kinds that accept authorable children.
+    /// Absent from JSON for kinds with no authorable child content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<SchemaNodeContent>,
+}
+
+/// Child-content descriptor embedded in [`SchemaNodeDetail`].
+#[derive(Debug, Serialize)]
+pub struct SchemaNodeContent {
+    pub description: String,
+    pub example: String,
 }
 
 /// A single op entry in the `schema ops` JSON output.

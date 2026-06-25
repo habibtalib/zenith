@@ -9,11 +9,11 @@ use zenith_tx::schema as tx_schema;
 
 use crate::commands::serialize_pretty;
 use crate::json_types::{
-    SchemaAttr, SchemaDiagnosticCode, SchemaDiagnosticsOutput, SchemaNodeDetail, SchemaNodeEntry,
-    SchemaNodeOutput, SchemaNodesOutput, SchemaOpDetail, SchemaOpEntry, SchemaOpFieldEntry,
-    SchemaOpOutput, SchemaOpsOutput, SchemaOverridePropEntry, SchemaOverviewOutput,
-    SchemaSurfaceOutput, SchemaTokenDetail, SchemaTokenEntry, SchemaTokenOutput,
-    SchemaTokensOutput, SchemaVariantOutput,
+    SchemaAttr, SchemaDiagnosticCode, SchemaDiagnosticsOutput, SchemaNodeContent, SchemaNodeDetail,
+    SchemaNodeEntry, SchemaNodeOutput, SchemaNodesOutput, SchemaOpDetail, SchemaOpEntry,
+    SchemaOpFieldEntry, SchemaOpOutput, SchemaOpsOutput, SchemaOverridePropEntry,
+    SchemaOverviewOutput, SchemaSurfaceOutput, SchemaTokenDetail, SchemaTokenEntry,
+    SchemaTokenOutput, SchemaTokensOutput, SchemaVariantOutput,
 };
 
 /// Precedence note shown on the `schema diagnostics` surface.
@@ -124,13 +124,20 @@ pub fn node_detail(kind: &str, json: bool) -> (String, u8) {
         })
         .collect();
 
+    let content_desc = core_schema::node_content(kind);
+
     if json {
+        let content = content_desc.map(|d| SchemaNodeContent {
+            description: d.description.to_owned(),
+            example: d.example.to_owned(),
+        });
         let out = SchemaNodeOutput {
             schema: "zenith-schema-v1",
             node: SchemaNodeDetail {
                 kind: kind.to_owned(),
                 summary: summary.to_owned(),
                 attributes: attrs,
+                content,
             },
         };
         (serialize_pretty(&out), 0)
@@ -141,6 +148,14 @@ pub fn node_detail(kind: &str, json: bool) -> (String, u8) {
         } else {
             text.push_str("Attributes:\n");
             text.push_str(&format_attr_table(&attrs));
+        }
+        if let Some(d) = content_desc {
+            text.push_str("\nContent:\n");
+            text.push_str(&format!("  {}\n", d.description));
+            text.push_str("  Example:\n");
+            for line in d.example.lines() {
+                text.push_str(&format!("    {line}\n"));
+            }
         }
         text.push_str(
             "\nNote: required-ness and full valid values are enforced by\n\
@@ -1108,6 +1123,103 @@ mod tests {
         assert!(
             !text.contains("\"700\""),
             "fontWeight must not suggest string form"
+        );
+    }
+
+    // ── Content section tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn node_detail_shape_human_shows_content_section() {
+        let (text, code) = node_detail("shape", false);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("Content:"),
+            "shape detail must include Content section; got:\n{text}"
+        );
+        assert!(
+            text.contains("span"),
+            "shape Content section must mention span children; got:\n{text}"
+        );
+        assert!(
+            text.contains("label") || text.contains("centered"),
+            "shape Content section must describe the owned label behaviour; got:\n{text}"
+        );
+        assert!(
+            text.contains("Example:"),
+            "shape Content section must include an example; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn node_detail_shape_json_has_content_field() {
+        let (text, code) = node_detail("shape", true);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("\"content\""),
+            "shape JSON must carry a content field; got:\n{text}"
+        );
+        assert!(
+            text.contains("\"description\""),
+            "shape JSON content must carry a description; got:\n{text}"
+        );
+        assert!(
+            text.contains("\"example\""),
+            "shape JSON content must carry an example; got:\n{text}"
+        );
+        // content must be non-null
+        assert!(
+            !text.contains("\"content\": null"),
+            "shape JSON content must be non-null; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn node_detail_polygon_human_shows_content_section() {
+        let (text, code) = node_detail("polygon", false);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("Content:"),
+            "polygon detail must include Content section; got:\n{text}"
+        );
+        assert!(
+            text.contains("point"),
+            "polygon Content section must mention point children; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn node_detail_text_human_shows_content_section() {
+        let (text, code) = node_detail("text", false);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("Content:"),
+            "text detail must include Content section; got:\n{text}"
+        );
+        assert!(
+            text.contains("span"),
+            "text Content section must mention span children; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn node_detail_rect_human_no_content_section() {
+        // rect has no child content; the Content section must be absent.
+        let (text, code) = node_detail("rect", false);
+        assert_eq!(code, 0);
+        assert!(
+            !text.contains("Content:"),
+            "rect detail must NOT include a Content section; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn node_detail_rect_json_content_is_absent() {
+        let (text, code) = node_detail("rect", true);
+        assert_eq!(code, 0);
+        // For a leaf node with no child content, the content field must be absent entirely.
+        assert!(
+            !text.contains("\"content\""),
+            "rect JSON must not carry a content field (skip_serializing_if = None); got:\n{text}"
         );
     }
 }

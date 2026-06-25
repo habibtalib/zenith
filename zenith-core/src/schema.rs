@@ -81,6 +81,135 @@ pub fn node_summary(kind: &str) -> Option<&'static str> {
     }
 }
 
+// ── Child content descriptors ─────────────────────────────────────────────────
+
+/// Full content descriptor for a node kind that accepts authorable child content.
+///
+/// Returned by [`node_content`].
+pub struct NodeContentDescriptor {
+    /// Short prose description of what the child content represents.
+    pub description: &'static str,
+    /// A minimal, syntactically correct example of the child content written
+    /// inside the parent node's block (without the surrounding node wrapper).
+    pub example: &'static str,
+}
+
+/// Return the child-content descriptor for the given node kind, or `None` if
+/// the kind accepts no authorable child content (e.g. `rect`, `ellipse`, `line`).
+///
+/// The match here is exhaustive over all authorable node kinds so that adding a
+/// new kind forces a deliberate decision about child content at compile time.
+/// Kinds with no child content return `None`.
+pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
+    match kind {
+        // ── Span-bearing kinds ────────────────────────────────────────────────
+        "text" => Some(NodeContentDescriptor {
+            description: "One or more `span` children carry the text runs. \
+                Each span takes a string argument and optional inline style props: \
+                fill, font-weight, italic, underline, strikethrough, vertical-align, footnote-ref.",
+            example: concat!(
+                "span \"Hello \"\n",
+                "span \"world\" font-weight=(token)\"weight.bold\" italic=#true",
+            ),
+        }),
+        "shape" => Some(NodeContentDescriptor {
+            description: "Optional `span` children form a text label rendered centered inside the \
+                shape. Use h-align/v-align on the shape node to adjust alignment. \
+                Omit the block entirely for an unlabelled shape.",
+            example: "span \"Approve\"",
+        }),
+        "footnote" => Some(NodeContentDescriptor {
+            description: "One or more `span` children carry the footnote body text, \
+                using the same span model as `text`.",
+            example: "span \"See also Chapter 3.\"",
+        }),
+
+        // ── Vertex-bearing kinds ──────────────────────────────────────────────
+        "polygon" => Some(NodeContentDescriptor {
+            description: "Two or more `point` children define the closed vertex list in order. \
+                Each point carries `x` and `y` as px-literal dimensions.",
+            example: concat!(
+                "point x=(px)0 y=(px)0\n",
+                "point x=(px)100 y=(px)0\n",
+                "point x=(px)50 y=(px)86",
+            ),
+        }),
+        "polyline" => Some(NodeContentDescriptor {
+            description: "Two or more `point` children define the open vertex list in order. \
+                Each point carries `x` and `y` as px-literal dimensions.",
+            example: concat!(
+                "point x=(px)0 y=(px)0\n",
+                "point x=(px)100 y=(px)50\n",
+                "point x=(px)200 y=(px)0",
+            ),
+        }),
+
+        // ── Structured container kinds ────────────────────────────────────────
+        "table" => Some(NodeContentDescriptor {
+            description: "Optional `column` children (each with `width=(px)N`) declare column \
+                widths; then `row` children each containing `cell` children. \
+                Each cell accepts colspan, rowspan, fill, border, h-align, v-align, \
+                and arbitrary renderable child nodes for cell content.",
+            example: concat!(
+                "column width=(px)120\n",
+                "column width=(px)80\n",
+                "row {\n",
+                "    cell { text id=\"h1\" x=(px)0 y=(px)0 w=(px)120 h=(px)24 { span \"Name\" } }\n",
+                "    cell { text id=\"h2\" x=(px)0 y=(px)0 w=(px)80 h=(px)24 { span \"Score\" } }\n",
+                "}",
+            ),
+        }),
+
+        // ── Generic container kinds ───────────────────────────────────────────
+        "frame" => Some(NodeContentDescriptor {
+            description: "Arbitrary renderable child nodes (any node kind). \
+                The frame clips its children to its bounding box. \
+                Use layout=\"grid\" with columns/rows attrs for grid layout.",
+            example: "rect id=\"bg\" x=(px)0 y=(px)0 w=(px)400 h=(px)300 fill=(token)\"color.bg\"",
+        }),
+        "group" => Some(NodeContentDescriptor {
+            description: "Arbitrary renderable child nodes (any node kind). \
+                May also include `protected-region id=... x=... y=... w=... h=...` \
+                and `editable-param id=...` metadata children.",
+            example: "rect id=\"box\" x=(px)0 y=(px)0 w=(px)100 h=(px)100",
+        }),
+
+        // ── Motif-bearing kind ────────────────────────────────────────────────
+        "pattern" => Some(NodeContentDescriptor {
+            description: "Exactly one required child node — the motif — which is the template \
+                node that gets tiled. Any authorable node kind is valid as the motif.",
+            example: "rect id=\"dot\" x=(px)0 y=(px)0 w=(px)8 h=(px)8 fill=(token)\"color.accent\"",
+        }),
+
+        // ── Override-bearing kind ─────────────────────────────────────────────
+        "instance" => Some(NodeContentDescriptor {
+            description: "Zero or more `override` children apply per-node property overrides \
+                to descendants of the referenced component. Each override targets a node by \
+                `ref=\"id\"` and accepts fill, visible, and optional `span` children to \
+                replace text content.",
+            example: concat!(
+                "override ref=\"headline\" fill=(token)\"color.alt\" {\n",
+                "    span \"New headline text\"\n",
+                "}",
+            ),
+        }),
+
+        // ── Verbatim-content kind ─────────────────────────────────────────────
+        "code" => Some(NodeContentDescriptor {
+            description: "A single `content` child carries the verbatim source string as its \
+                first positional argument. Newlines and tabs are expressed as \\n and \\t \
+                escape sequences in the string literal.",
+            example: "content \"fn main() {\\n    println!(\\\"hello\\\");\\n}\"",
+        }),
+
+        // ── No authorable child content ───────────────────────────────────────
+        "rect" | "ellipse" | "line" | "image" | "field" | "toc" | "connector" => None,
+
+        // Any unrecognised kind also has no content description.
+        _ => None,
+    }
+}
+
 // ── Attribute names ───────────────────────────────────────────────────────────
 
 /// Return the recognized attribute names for the given node kind.
@@ -745,6 +874,57 @@ mod tests {
             assert!(
                 node_summary(kind).is_some(),
                 "node_summary(\"{kind}\") returned None — add a one-liner to node_summary()",
+            );
+        }
+    }
+
+    // ── node_content drift guard ──────────────────────────────────────────────
+
+    /// Every authorable node kind that is expected to have child content must
+    /// return `Some` from `node_content`, and the example must be non-empty.
+    ///
+    /// Kinds confirmed to carry authorable child content (parser-verified):
+    /// text, shape, footnote, polygon, polyline, table, frame, group, pattern, instance, code.
+    #[test]
+    fn node_content_returns_some_for_content_bearing_kinds() {
+        let content_kinds = &[
+            "text", "shape", "footnote", "polygon", "polyline", "table", "frame", "group",
+            "pattern", "instance", "code",
+        ];
+        for &kind in content_kinds {
+            let desc = node_content(kind);
+            assert!(
+                desc.is_some(),
+                "node_content(\"{kind}\") returned None — expected Some for a content-bearing kind",
+            );
+            let d = desc.unwrap();
+            assert!(
+                !d.description.is_empty(),
+                "node_content(\"{kind}\").description is empty",
+            );
+            assert!(
+                !d.example.is_empty(),
+                "node_content(\"{kind}\").example is empty",
+            );
+        }
+    }
+
+    /// Kinds with no authorable child content must return `None` from `node_content`.
+    #[test]
+    fn node_content_returns_none_for_no_content_kinds() {
+        let no_content_kinds = &[
+            "rect",
+            "ellipse",
+            "line",
+            "image",
+            "field",
+            "toc",
+            "connector",
+        ];
+        for &kind in no_content_kinds {
+            assert!(
+                node_content(kind).is_none(),
+                "node_content(\"{kind}\") returned Some — expected None for a leaf-only kind",
             );
         }
     }
