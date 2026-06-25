@@ -516,7 +516,10 @@ pub fn diagnostics(json: bool) -> (String, u8) {
 
         text.push_str(
             "\nNote: integrity Errors cannot be suppressed or weakened — `allow`/`warn` on an \
-             Error code is reported as `policy.ineffective_on_error`.",
+             Error code is reported as `policy.ineffective_on_error`. Only governable \
+             (Warning/Advisory) codes are listed above; for the COMPLETE catalog including the \
+             always-enforced Error codes (e.g. `token.raw_visual_literal`), run \
+             `zenith schema diagnostics --json`.",
         );
         (text.trim_end().to_owned(), 0)
     }

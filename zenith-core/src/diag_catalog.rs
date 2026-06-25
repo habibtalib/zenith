@@ -124,6 +124,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "`asset` src is empty or malformed.",
     ),
     info(
+        "asset.missing",
+        Severity::Error,
+        "A declared asset file was not found on disk at render time.",
+    ),
+    info(
         "asset.unknown_property",
         Severity::Warning,
         "Unrecognized property on an `asset` declaration.",
@@ -132,6 +137,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "asset.unknown_reference",
         Severity::Error,
         "Image references an undeclared asset id.",
+    ),
+    info(
+        "baseline-grid.snap_failed",
+        Severity::Warning,
+        "A text column could not be snapped to the baseline grid.",
     ),
     info(
         "component.unknown_override_target",
@@ -249,6 +259,16 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "A text/code node's font family is unavailable; falling back to a default.",
     ),
     info(
+        "footnote.body_overlap",
+        Severity::Advisory,
+        "A footnote body overlaps another footnote or the page live area.",
+    ),
+    info(
+        "footnote.no_live_area",
+        Severity::Advisory,
+        "Footnotes cannot be placed: the page has no live area defined.",
+    ),
+    info(
         "footnote.unresolved_ref",
         Severity::Warning,
         "Text span footnote-ref names an unknown footnote.",
@@ -304,9 +324,19 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Image source-crop rectangle is invalid.",
     ),
     info(
+        "image.overflow",
+        Severity::Advisory,
+        "Image pixel content overflows the node box at the current fit mode.",
+    ),
+    info(
         "image.partial_src_rect",
         Severity::Error,
         "Image source-crop rectangle is only partially specified.",
+    ),
+    info(
+        "image.upscale",
+        Severity::Advisory,
+        "Image is being scaled up beyond its native resolution.",
     ),
     info(
         "layout.off_canvas",
@@ -342,6 +372,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "node.invalid_geometry",
         Severity::Error,
         "A node geometry attribute uses an unknown unit.",
+    ),
+    info(
+        "node.locked",
+        Severity::Error,
+        "A transaction attempted to modify a locked node.",
     ),
     info(
         "node.missing_geometry",
@@ -444,6 +479,56 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Content violates a declared safe/dead zone.",
     ),
     info(
+        "scene.invalid_color",
+        Severity::Advisory,
+        "A paint value could not be resolved to a valid color at compile time.",
+    ),
+    info(
+        "scene.missing_geometry",
+        Severity::Advisory,
+        "A node's geometry could not be resolved; the node is skipped in the scene.",
+    ),
+    info(
+        "scene.no_pages",
+        Severity::Advisory,
+        "The document has no pages; an empty scene is produced.",
+    ),
+    info(
+        "scene.page_out_of_range",
+        Severity::Advisory,
+        "The requested page index is outside the document's page range.",
+    ),
+    info(
+        "scene.text_unshaped",
+        Severity::Advisory,
+        "A text or code node could not be shaped and is omitted from the scene.",
+    ),
+    info(
+        "scene.unknown_component",
+        Severity::Advisory,
+        "An instance references a component that could not be found at compile time.",
+    ),
+    info(
+        "scene.unresolved_token",
+        Severity::Advisory,
+        "A paint references a token that could not be resolved at compile time.",
+    ),
+    info(
+        "scene.unsupported_node",
+        Severity::Advisory,
+        "A node kind is not supported by the scene compiler and is skipped.",
+    ),
+    info(
+        "scene.unsupported_unit",
+        Severity::Advisory,
+        "A dimension uses a unit the scene compiler cannot resolve to pixels.",
+    ),
+    info(
+        "scene.wrong_token_type",
+        Severity::Advisory,
+        "A paint references a token that is not a color type.",
+    ),
+    info(
         "section.duplicate_start_page",
         Severity::Error,
         "Two sections start on the same page.",
@@ -514,6 +599,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "A table cell's content overflows its cell box.",
     ),
     info(
+        "table.flow_overflow",
+        Severity::Advisory,
+        "Table text content overflows the table body area.",
+    ),
+    info(
         "table.invalid_border_collapse",
         Severity::Warning,
         "Table `border-collapse` value is not recognized.",
@@ -532,6 +622,21 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "text-exclusion.unresolved_ref",
         Severity::Warning,
         "Text `text-exclusion` references an unknown node.",
+    ),
+    info(
+        "text.fit_failed",
+        Severity::Error,
+        "Text with `overflow: fit` could not be scaled to fit its frame.",
+    ),
+    info(
+        "text.forced_break",
+        Severity::Warning,
+        "A text line was force-broken during wrapping to prevent infinite layout.",
+    ),
+    info(
+        "text.overflow",
+        Severity::Warning,
+        "Text content overflows its containing frame.",
     ),
     info(
         "toc.no_selector",
@@ -582,6 +687,91 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "token.unused",
         Severity::Advisory,
         "A token is declared but never referenced.",
+    ),
+    info(
+        "tx.duplicate_id",
+        Severity::Error,
+        "A transaction tried to add a node or asset with an id already in use.",
+    ),
+    info(
+        "tx.geometry_unresolved",
+        Severity::Warning,
+        "An align/distribute target has no resolvable geometry and was skipped.",
+    ),
+    info(
+        "tx.invalid_node_spec",
+        Severity::Error,
+        "A transaction `add` op specifies a node that cannot be parsed.",
+    ),
+    info(
+        "tx.invalid_parent",
+        Severity::Error,
+        "A transaction op targets an invalid or incompatible parent node.",
+    ),
+    info(
+        "tx.invalid_value",
+        Severity::Error,
+        "A transaction op carries a value that fails validation.",
+    ),
+    info(
+        "tx.locked_skipped",
+        Severity::Warning,
+        "A transaction op was skipped because the target node is locked.",
+    ),
+    info(
+        "tx.noop",
+        Severity::Advisory,
+        "A transaction op produced no change (the document is already in the requested state).",
+    ),
+    info(
+        "tx.not_a_pattern",
+        Severity::Error,
+        "A pattern-expand op targets a node that is not a pattern.",
+    ),
+    info(
+        "tx.out_of_range",
+        Severity::Error,
+        "A transaction op value is outside the allowed range for the target property.",
+    ),
+    info(
+        "tx.pattern_not_expandable",
+        Severity::Error,
+        "A pattern cannot be expanded because its bounds or count are not resolved.",
+    ),
+    info(
+        "tx.pattern_unresolved_bounds",
+        Severity::Error,
+        "A pattern-expand op could not resolve the pattern bounds node.",
+    ),
+    info(
+        "tx.unknown_node",
+        Severity::Error,
+        "A transaction op references a node id that does not exist in the document.",
+    ),
+    info(
+        "tx.unknown_recipe",
+        Severity::Error,
+        "A transaction op references a recipe id that is not declared.",
+    ),
+    info(
+        "tx.unknown_style",
+        Severity::Error,
+        "A transaction op references a style id that is not declared.",
+    ),
+    info(
+        "tx.unknown_token",
+        Severity::Error,
+        "A transaction op references a token id that is not declared.",
+    ),
+    info(
+        "tx.unsupported_property",
+        Severity::Error,
+        "A transaction op targets a property that cannot be set on the node kind.",
+    ),
+    info(
+        "tx.wrong_node_type",
+        Severity::Error,
+        "A transaction op targets a node of the wrong kind for that operation.",
     ),
     info(
         "value.out_of_range",
@@ -712,5 +902,96 @@ mod tests {
         let local = lookup("font.local").expect("font.local must be catalogued");
         assert_eq!(local.severity, Severity::Advisory);
         assert!(local.is_governable(), "font.local must be governable");
+    }
+
+    #[test]
+    fn scene_diagnostics_are_catalogued() {
+        // Codes emitted by zenith-scene during compilation must be in the catalog
+        // so that `diagnostics { … }` blocks can govern them.
+        let cases: &[(&str, Severity)] = &[
+            ("baseline-grid.snap_failed", Severity::Warning),
+            ("footnote.body_overlap", Severity::Advisory),
+            ("footnote.no_live_area", Severity::Advisory),
+            ("scene.invalid_color", Severity::Advisory),
+            ("scene.missing_geometry", Severity::Advisory),
+            ("scene.no_pages", Severity::Advisory),
+            ("scene.page_out_of_range", Severity::Advisory),
+            ("scene.text_unshaped", Severity::Advisory),
+            ("scene.unknown_component", Severity::Advisory),
+            ("scene.unresolved_token", Severity::Advisory),
+            ("scene.unsupported_node", Severity::Advisory),
+            ("scene.unsupported_unit", Severity::Advisory),
+            ("scene.wrong_token_type", Severity::Advisory),
+            ("table.flow_overflow", Severity::Advisory),
+            ("text.fit_failed", Severity::Error),
+            ("text.forced_break", Severity::Warning),
+            ("text.overflow", Severity::Warning),
+        ];
+        for (code, expected_severity) in cases {
+            let entry =
+                lookup(code).unwrap_or_else(|| panic!("{code} must be in the diagnostic catalog"));
+            assert_eq!(
+                entry.severity, *expected_severity,
+                "{code} catalog severity mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn render_diagnostics_are_catalogued() {
+        // Codes emitted by zenith-cli at render time must be in the catalog.
+        let asset_missing =
+            lookup("asset.missing").expect("asset.missing must be in the diagnostic catalog");
+        assert_eq!(asset_missing.severity, Severity::Error);
+
+        let image_overflow =
+            lookup("image.overflow").expect("image.overflow must be in the diagnostic catalog");
+        assert_eq!(image_overflow.severity, Severity::Advisory);
+        assert!(
+            image_overflow.is_governable(),
+            "image.overflow must be governable"
+        );
+
+        let image_upscale =
+            lookup("image.upscale").expect("image.upscale must be in the diagnostic catalog");
+        assert_eq!(image_upscale.severity, Severity::Advisory);
+        assert!(
+            image_upscale.is_governable(),
+            "image.upscale must be governable"
+        );
+    }
+
+    #[test]
+    fn transaction_diagnostics_are_catalogued() {
+        // Codes emitted by zenith-tx must be in the catalog so that policy
+        // validation can recognise them as known codes.
+        let known_tx_codes: &[(&str, Severity)] = &[
+            ("node.locked", Severity::Error),
+            ("tx.duplicate_id", Severity::Error),
+            ("tx.geometry_unresolved", Severity::Warning),
+            ("tx.invalid_node_spec", Severity::Error),
+            ("tx.invalid_parent", Severity::Error),
+            ("tx.invalid_value", Severity::Error),
+            ("tx.locked_skipped", Severity::Warning),
+            ("tx.noop", Severity::Advisory),
+            ("tx.not_a_pattern", Severity::Error),
+            ("tx.out_of_range", Severity::Error),
+            ("tx.pattern_not_expandable", Severity::Error),
+            ("tx.pattern_unresolved_bounds", Severity::Error),
+            ("tx.unknown_node", Severity::Error),
+            ("tx.unknown_recipe", Severity::Error),
+            ("tx.unknown_style", Severity::Error),
+            ("tx.unknown_token", Severity::Error),
+            ("tx.unsupported_property", Severity::Error),
+            ("tx.wrong_node_type", Severity::Error),
+        ];
+        for (code, expected_severity) in known_tx_codes {
+            let entry =
+                lookup(code).unwrap_or_else(|| panic!("{code} must be in the diagnostic catalog"));
+            assert_eq!(
+                entry.severity, *expected_severity,
+                "{code} catalog severity mismatch"
+            );
+        }
     }
 }

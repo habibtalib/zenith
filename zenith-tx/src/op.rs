@@ -480,7 +480,7 @@ pub enum Op {
     ///
     /// Only nodes supported by `set_geometry` (`rect`, `ellipse`, `frame`,
     /// `image`) with resolvable `x/y/w/h` in px/pt are alignable. Any node
-    /// that lacks full geometry is skipped with a `tx.unsupported_property`
+    /// that lacks full geometry is skipped with a `tx.geometry_unresolved`
     /// warning; the rest are still aligned.
     ///
     /// An unknown `align` value is rejected with `tx.unsupported_property`.

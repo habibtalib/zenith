@@ -124,8 +124,8 @@ fn align_skips_non_geometry_node() {
         result
             .diagnostics
             .iter()
-            .any(|d| d.code == "tx.unsupported_property" && d.message.contains("grp1")),
-        "expected tx.unsupported_property advisory for grp1; got: {:?}",
+            .any(|d| d.code == "tx.geometry_unresolved" && d.message.contains("grp1")),
+        "expected tx.geometry_unresolved advisory for grp1; got: {:?}",
         result.diagnostics
     );
     // r1 and r2 must still have been aligned (x=20, the minimum).

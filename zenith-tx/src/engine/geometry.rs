@@ -353,7 +353,7 @@ pub(super) fn apply_align_nodes(
                 // Use Warning so the caller sees AcceptedWithWarnings and knows a
                 // node was silently skipped.
                 diagnostics.push(Diagnostic::warning(
-                    "tx.unsupported_property",
+                    "tx.geometry_unresolved",
                     format!(
                         "align_nodes: node {:?} has no resolvable x/y/w/h geometry; skipped",
                         node_id
@@ -735,7 +735,7 @@ pub(super) fn apply_distribute_nodes(
             }
             Some(None) => {
                 diagnostics.push(Diagnostic::warning(
-                    "tx.unsupported_property",
+                    "tx.geometry_unresolved",
                     format!(
                         "distribute_nodes: node {:?} has no resolvable x/y/w/h geometry; skipped",
                         node_id
