@@ -1,6 +1,6 @@
 ---
 name: zenith
-description: "Author, edit, and render deterministic .zen design documents (posters, decks/slides, social graphics, flyers, books, magazines, diagrams, ads) with the zenith CLI. Use when the task is to create or change a visual design as structured, editable, version-controllable source — not a flat AI image. Covers: design tokens & color (sRGB + CMYK), gradients, typography, layout & anchors, frames/groups, images, visual recipes & procedural backgrounds, transactions (typed edits), variants/mail-merge, PNG/PDF rendering, validation, brand kits, and the agentic author->validate->render->inspect->edit loop. Triggers: design, poster, deck, slide, social graphic, flyer, brochure, banner, diagram, flowchart, .zen, zenith, brand kit, render to PNG/PDF."
+description: "Author, edit, and render deterministic .zen design documents (posters, decks/slides, social graphics, flyers, books, magazines, diagrams, ads) with the zenith CLI. Use when the task is to create or change a visual design as structured, editable, version-controllable source — not a flat AI image. Covers: design tokens & color (sRGB + CMYK), gradients, typography, layout & anchors, frames/groups, images, visual recipes & procedural backgrounds, transactions (typed edits), variants/mail-merge, PNG/PDF rendering, validation, brand kits, and the agentic author->validate->render->inspect->edit loop. Triggers: design, poster, deck, slide, social graphic, flyer, brochure, banner, diagram, flowchart, chart, bar chart, line chart, pie chart, donut chart, data visualization, graph, legend, .zen, zenith, brand kit, render to PNG/PDF."
 allowed-tools:
   - Bash(zenith:*)
   - Read
@@ -106,6 +106,9 @@ These make designs editable, on-brand, and reproducible — and keep the agentic
   (and `align="center"`) on the text so the label is actually centered — a bare `text` sits at the
   TOP of its box. For flowcharts, connect nodes with `connector` (`from`/`to` + `marker-end`),
   never hand-drawn lines.
+- **For quantitative/data content** (comparisons, trends, proportions) use the `chart` node
+  (bar/line/area/pie/donut/sparkline) — run `zenith schema node chart` for the series/categories
+  child syntax; bind a series to a `--data` JSON array or CSV column with `data-ref`.
 - **Group semantically.** Put related layers in `group`/`frame` with a stable id so a whole
   motif can be moved, dimmed (`set_opacity`), or removed in one operation.
 - **Validate before render, render before finalize.** Hard diagnostics block finalization.
@@ -160,6 +163,7 @@ Read only the pack you need for the current sub-task (progressive disclosure). E
 | Many outputs from one design — **sizes/formats** (`zenith variant`) or **data** rows (`zenith merge`, binding nodes with `role="data.<column>"`) | `references/variants.md` · `zenith merge --help`                             |
 | Per-variant tweaks (the `variants`/`override` block: hide nodes, swap text/fill, reposition with x/y/w/h)                                        | `zenith schema variant`                                                      |
 | Flowcharts / diagrams / labeled boxes & buttons (boxes with centered labels + arrows)                                                            | `zenith schema node shape` (kind, owned label) · `zenith schema node connector` |
+| Charts / data visualization (bar, line, area, pie, donut, sparkline; grouped/stacked/horizontal bars; legend; value labels)                      | `zenith schema node chart` · bind series to data with `render --data <file.json\|csv>` (`series data-ref="col"`) |
 | Diagnostic policy (`allow`/`deny`/`warn` codes, CI gating, config files, CLI flags)                                                              | `references/diagnostics.md` + `zenith schema diagnostics`                    |
 | Local/system fonts, portability, deterministic rendering, `font.local` advisory                                                                  | `references/diagnostics.md` · `zenith fonts`                                 |
 | Reporting a Zenith bug or feature request (the `gh` feedback loop)                                                                               | `references/reporting-issues.md`                                             |
