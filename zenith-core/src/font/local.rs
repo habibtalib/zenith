@@ -54,7 +54,7 @@ pub struct LocalFontEntry {
 /// exist or cannot be read are silently skipped (no error). Files whose
 /// extension is `ttf`, `otf`, or `ttc` (case-insensitive) are collected, sorted
 /// by path for determinism, and parsed. For a font collection, faces are probed
-/// from index 0 upward until parsing fails or [`MAX_COLLECTION_FACES`] is
+/// from index 0 upward until parsing fails or `MAX_COLLECTION_FACES` is
 /// reached. Faces with no readable family name are skipped.
 ///
 /// The returned `Vec` is sorted by `(family, weight, style, path, index)`, so it

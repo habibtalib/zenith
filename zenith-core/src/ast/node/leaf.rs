@@ -752,7 +752,7 @@ pub struct ChartSeries {
     /// Per-series value-label color override; falls back to the chart
     /// `value_color` then the default on-fill contrasting color.
     pub label_color: Option<PropertyValue>,
-    /// Optional binding to a whole series from a [`DataContext`] field.
+    /// Optional binding to a whole series from a [`DataContext`](crate::data::DataContext) field.
     /// `None` means the values are inline in [`ChartSeries::values`].
     pub data_ref: Option<String>,
     /// Ordered numeric data points for this series.

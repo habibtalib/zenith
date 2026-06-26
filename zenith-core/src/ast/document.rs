@@ -50,7 +50,7 @@ pub struct Page {
     /// Margins are v0 METADATA + VALIDATION ONLY: they describe the intended
     /// live area and drive the `margin.violation` advisory, but they do NOT
     /// auto-reposition arbitrary page nodes (that is the job of master pages /
-    /// flow frames). See [`super::super::validate`]'s margin check.
+    /// flow frames). See [`crate::validate()`]'s margin check.
     pub margin_inner: Option<Dimension>,
     /// Book live-area margin (fore-edge side). The mirror of [`Page::margin_inner`]:
     /// with `mirror_margins=true` it sits on the RIGHT for a recto page and on
@@ -172,7 +172,7 @@ pub struct DocumentBody {
 
 /// A reusable component definition: a named child-node subtree declared once
 /// (in the document-level `components` block) and instanced into multiple places
-/// via [`Node::Instance`](super::node::Node::Instance).
+/// via [`Node::Instance`].
 ///
 /// Declared as `component id="logo.block" { <any child nodes> }`. The component's
 /// child node ids are LOCAL to the component: they are validated for uniqueness
@@ -312,7 +312,7 @@ pub struct Document {
     pub tokens: TokenBlock,
     pub styles: StyleBlock,
     /// Reusable component definitions; empty when the `components` block is
-    /// absent. Instanced via [`Node::Instance`](super::node::Node::Instance).
+    /// absent. Instanced via [`Node::Instance`].
     pub components: Vec<ComponentDef>,
     /// Reusable master-page definitions; empty when the `masters` block is
     /// absent. Projected onto pages via [`Page::master`].
@@ -349,7 +349,7 @@ pub struct Document {
     /// block; empty (the default) when the block is absent. The policy adjusts
     /// how specific diagnostic codes are *reported* during validation (allow /
     /// deny / warn, with Error severity immutable). It is consulted ONLY in
-    /// [`crate::validate`] — the scene compiler and render path never read it, so
+    /// [`crate::validate()`] — the scene compiler and render path never read it, so
     /// it can never change rendered output. An empty policy is an identity pass,
     /// so a document with no `diagnostics` block validates and round-trips
     /// byte-identically to before this field existed.

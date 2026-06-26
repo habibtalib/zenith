@@ -2,7 +2,7 @@
 //!
 //! This catalog is hand-maintained and drift-guarded (mirroring [`crate::schema`]'s
 //! node-kind tables). It drives BOTH:
-//! - the diagnostic-policy validation in [`crate::validate`] (which codes are
+//! - the diagnostic-policy validation in [`crate::validate()`] (which codes are
 //!   *governable* by a `diagnostics { … }` block, and which are always Errors), and
 //! - the `zenith schema diagnostics` surface (re-exposed through [`crate::schema`]).
 //!

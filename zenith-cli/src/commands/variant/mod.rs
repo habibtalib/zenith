@@ -1,7 +1,7 @@
 //! Variant generation: pure engine and CLI command wiring.
 //!
-//! - [`engine`] — the pure in-memory variant expansion engine.
-//! - [`run`]    — the CLI entry point: file I/O, rendering, manifest, output.
+//! - `engine` — the pure in-memory variant expansion engine.
+//! - `run`    — the CLI entry point: file I/O, rendering, manifest, output.
 //!
 //! Module root is wiring only: re-exports + submodule declarations.
 

@@ -6,11 +6,11 @@
 //! # Module layout
 //!
 //! - [`adapter`] — injectable trait boundaries (filesystem, clock, RNG)
-//! - [`bundle`] — deterministic DEFLATE bundle/unbundle for portable transfer
+//! - [`mod@bundle`] — deterministic DEFLATE bundle/unbundle for portable transfer
 //! - [`datadir`] — platform data-directory resolution
 //! - [`docid`] — ULID document-identity minting
 //! - [`error`] — [`SessionError`] (the single error type for this crate)
-//! - [`gc`] — object garbage collection ([`gc`])
+//! - [`mod@gc`] — object garbage collection ([`gc()`])
 //! - [`global`] — global cross-document LRU storage cap ([`enforce_global_cap`])
 //! - [`identity`] — document-identity reconciliation ([`reconcile`])
 //! - [`layout`] — [`StorePaths`] pure path builders

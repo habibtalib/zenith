@@ -36,7 +36,7 @@ use crate::parse::transform::{transform_brand_contract, transform_diagnostic_pol
 ///
 /// The bytes are decoded and parsed as KDL using the same UTF-8-then-KDL path
 /// as the document parser. The first top-level `diagnostics` node is delegated
-/// to the shared [`transform_diagnostic_policy`] transform; other top-level
+/// to the shared `transform_diagnostic_policy` transform; other top-level
 /// nodes are ignored. A missing `diagnostics` node returns
 /// [`DiagnosticPolicy::default`].
 ///
@@ -78,7 +78,7 @@ pub fn parse_diagnostic_policy(source: &[u8]) -> Result<DiagnosticPolicy, ParseE
 ///
 /// The bytes are decoded and parsed as KDL using the same UTF-8-then-KDL path
 /// as the document parser. The first top-level `brand` node is delegated to
-/// the shared [`transform_brand_contract`] transform; other top-level nodes
+/// the shared `transform_brand_contract` transform; other top-level nodes
 /// are ignored. A missing `brand` node returns [`BrandContract::default`].
 ///
 /// # Errors

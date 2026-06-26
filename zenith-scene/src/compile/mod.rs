@@ -8,11 +8,11 @@
 //!
 //! [`compile`] renders page 0; [`compile_page`] renders a chosen page by index.
 //!
-//! The compiler is split across submodules: [`leaf`] (rect/ellipse/line/
-//! polygon/polyline), [`text`] (text + code shaping), [`container`] (group +
-//! frame), [`image`], [`paint`] (color/gradient/shadow resolvers), and
-//! [`util`] (small geometry/diagnostic helpers). This module keeps the public
-//! entry points, the per-subtree [`RenderCtx`], and the [`compile_node`]
+//! The compiler is split across submodules: `leaf` (rect/ellipse/line/
+//! polygon/polyline), `text` (text + code shaping), `container` (group +
+//! frame), `image`, `paint` (color/gradient/shadow resolvers), and
+//! `util` (small geometry/diagnostic helpers). This module keeps the public
+//! entry points, the per-subtree `RenderCtx`, and the `compile_node`
 //! dispatcher that routes each node kind to its submodule.
 
 mod anchor;

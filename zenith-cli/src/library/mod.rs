@@ -13,16 +13,16 @@
 //! `@zenith/flowchart#decision`.
 //!
 //! PRESET packs are embedded in the binary via [`include_str!`] (see
-//! [`registry::EMBEDDED_PACKS`]); PROJECT packs live in
+//! [`EMBEDDED_PACKS`]); PROJECT packs live in
 //! `<project_dir>/libraries/*.zen` and are scanned at runtime. Resolution order
 //! is project packs first, then embedded presets (a project pack shadows an
 //! embedded pack of the same id).
 //!
 //! This module contains pure pack-loading/registry logic only; the CLI command
 //! that consumes it lives in [`crate::commands::library`]. The submodules group
-//! by concern: [`registry`] (pack model + parse + resolve), [`add`] (shared
+//! by concern: `registry` (pack model + parse + resolve), `add` (shared
 //! materialization machinery), and one module per `materialize*` flavor
-//! ([`component`], [`token`], [`action`]).
+//! (`component`, `token`, `action`).
 
 mod action;
 mod add;

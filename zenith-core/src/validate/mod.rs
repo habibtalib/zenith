@@ -1,7 +1,7 @@
 //! Document-level semantic validation pass for Zenith.
 //!
 //! This module wires together the validation submodule and re-exports the
-//! public API surface. All logic lives in [`check`].
+//! public API surface. All logic lives in `check`.
 //!
 //! # Public API
 //!

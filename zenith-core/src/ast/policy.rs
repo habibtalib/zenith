@@ -13,13 +13,13 @@
 //! ```
 //!
 //! The policy affects ONLY which diagnostics are surfaced by validation — it is
-//! consulted in [`crate::validate`] and nowhere else. The scene compiler and the
+//! consulted in [`crate::validate()`] and nowhere else. The scene compiler and the
 //! render path never see it, so a policy can never change rendered output. A
 //! document with no `diagnostics` block parses to an empty [`DiagnosticPolicy`],
 //! which is an identity pass (no entries → no effect), so the default-off path is
 //! byte-identical to before this feature existed.
 //!
-//! Bright lines (see [`crate::validate`] for the application logic):
+//! Bright lines (see [`crate::validate()`] for the application logic):
 //! - Policy applies to **Warning**- and **Advisory**-severity diagnostics only.
 //!   **Error** severity is IMMUTABLE: an `allow` never drops an Error and a
 //!   `warn` never weakens an Error.

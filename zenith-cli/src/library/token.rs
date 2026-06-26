@@ -82,7 +82,7 @@ pub(crate) fn collect_filter_dep_ids(
 /// [`TokenAddOutcome`] describing what was added.
 ///
 /// This is the PURE core of a `library add` for a TOKEN item: it mutates the
-/// parsed `target` [`Document`] in place and performs NO filesystem or process
+/// parsed `target` [`Document`](zenith_core::Document) in place and performs NO filesystem or process
 /// I/O. Unlike [`super::materialize`], it inserts NO instance and requires NO
 /// page. Steps:
 ///
@@ -90,10 +90,10 @@ pub(crate) fn collect_filter_dep_ids(
 ///    preset); load its full [`zenith_core::Document`].
 /// 2. Find the FILTER token whose id == `item`.
 /// 3. Collect the filter token's transitive color-token deps
-///    ([`collect_filter_dep_ids`]).
+///    (`collect_filter_dep_ids`).
 /// 4. Ensure the target's tokens block has a format (adopt the pack's when empty).
 /// 5. Copy the dep tokens THEN the filter token into the target (dedup by id +
-///    conflict warnings, via the shared [`copy_tokens`]).
+///    conflict warnings, via the shared `copy_tokens`).
 /// 6. Record a `libraries` entry for `pkg_id` (if absent).
 /// 7. Record a unique `provenance` record whose `node` is the filter-token id —
 ///    skipped if an identical `(node, library, item)` provenance already exists.

@@ -2,7 +2,7 @@
 //!
 //! Reads the family name, weight, and style from a raw TTF/OTF byte slice
 //! without loading a full shaping engine. Used at project-load time to
-//! register asset-declared fonts in the [`BytesFontProvider`].
+//! register asset-declared fonts in [`BytesFontProvider`](zenith_core::BytesFontProvider).
 
 use rustybuzz::ttf_parser;
 use rustybuzz::ttf_parser::name_id;

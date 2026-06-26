@@ -3,10 +3,10 @@
 //! `zenith workspace unbundle`, and `zenith workspace finalize`.
 //!
 //! Submodules:
-//! - [`scratch`] — `zenith workspace scratch new/list/show`
-//! - [`candidate`] — `zenith workspace candidate` (set lifecycle status)
+//! - `scratch` — `zenith workspace scratch new/list/show`
+//! - `candidate` — `zenith workspace candidate` (set lifecycle status)
 //! - [`promote`] — `zenith workspace promote` (merge a selected candidate into a page)
-//! - [`bundle`] — `zenith workspace bundle/unbundle`
+//! - `bundle` — `zenith workspace bundle/unbundle`
 //! - [`finalize`] — `zenith workspace finalize` (cleanup-policy compaction)
 
 pub(crate) mod bundle;

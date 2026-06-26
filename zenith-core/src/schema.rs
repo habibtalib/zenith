@@ -895,7 +895,7 @@ pub fn diagnostics_verbs() -> &'static [&'static str] {
 /// severity and a one-line summary.
 ///
 /// Single source of truth: re-exposed from [`crate::diag_catalog`]. The same
-/// table drives the diagnostic-policy validator in [`crate::validate`], so the
+/// table drives the diagnostic-policy validator in [`crate::validate()`], so the
 /// `zenith schema diagnostics` surface and the policy checker can never diverge.
 pub fn diagnostic_codes() -> &'static [DiagnosticCodeInfo] {
     DIAGNOSTIC_CODES

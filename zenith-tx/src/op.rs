@@ -803,7 +803,7 @@ pub enum Op {
     },
     /// Create a new recipe entry in the document's `recipes` block.
     ///
-    /// Appends a new [`RecipeDef`] with the given scalar fields and empty
+    /// Appends a new [`RecipeDef`](zenith_core::RecipeDef) with the given scalar fields and empty
     /// `params`, `palette`, `expanded`, and `unknown_props`; `source_span` is
     /// `None`. Eagerly rejected with `tx.duplicate_id` if a recipe with `id`
     /// already exists.

@@ -4,15 +4,15 @@
 //! `.expect()` appears anywhere in this module tree.
 //!
 //! Wiring only: submodules carry the logic, grouped by node cohesion.
-//! - [`helpers`]: shared span/value-extraction helpers.
-//! - [`document`]: the top-level [`transform`] entry plus the document-level
+//! - `helpers`: shared span/value-extraction helpers.
+//! - `document`: the top-level `transform` entry plus the document-level
 //!   structural blocks (project/assets/libraries/.../pages).
-//! - [`tokens`]: the `tokens { … }` and `styles { … }` blocks.
-//! - [`node`]: the per-node-kind dispatch edge ([`node::transform_node`]).
-//! - [`page`]: `page { … }` block transform and `PAGE_KNOWN_PROPS`.
-//! - [`pattern`]: `pattern` node transform.
-//! - [`chart`]: `chart` node transform.
-//! - [`leaf`]/[`container`]/[`special`]: the renderable node transforms.
+//! - `tokens`: the `tokens { … }` and `styles { … }` blocks.
+//! - `node`: the per-node-kind dispatch edge (`node::transform_node`).
+//! - `page`: `page { … }` block transform and `PAGE_KNOWN_PROPS`.
+//! - `pattern`: `pattern` node transform.
+//! - `chart`: `chart` node transform.
+//! - `leaf`/`container`/`special`: the renderable node transforms.
 
 mod block_style;
 mod chart;

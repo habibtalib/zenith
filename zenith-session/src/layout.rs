@@ -23,7 +23,7 @@ use std::path::PathBuf;
 
 /// Path-builder for the zenith local store rooted at a data directory.
 ///
-/// All methods are pure: they compute a [`PathBuf`] via [`Path::join`] and
+/// All methods are pure: they compute a [`PathBuf`] via `Path::join` and
 /// return it without touching the filesystem.
 pub struct StorePaths {
     root: PathBuf,

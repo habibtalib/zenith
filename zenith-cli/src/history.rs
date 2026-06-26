@@ -169,7 +169,8 @@ pub fn record_edit_in(
 
 // ── Navigation types ──────────────────────────────────────────────────────────
 
-/// One line in a history listing (maps 1-to-1 to a Tier-2 [`HistoryRecord`]).
+/// One line in a history listing (maps 1-to-1 to a Tier-2
+/// [`HistoryRecord`](zenith_session::HistoryRecord)).
 #[derive(Debug, Clone, PartialEq)]
 pub struct HistoryLine {
     /// Stable record id.
@@ -235,7 +236,7 @@ fn doc_id_at(doc_path: &Path) -> Result<String, String> {
     read_doc_with_id(doc_path).map(|(_, id)| id)
 }
 
-/// Public thin wrapper around [`doc_id_at`] for use by sibling command modules.
+/// Public thin wrapper around `doc_id_at` for use by sibling command modules.
 ///
 /// Returns a human-readable error if the file cannot be read, cannot be
 /// parsed, or has no `doc-id` attribute yet (meaning it has never been
@@ -264,7 +265,7 @@ pub struct EnsuredDocId {
 ///
 /// Use this variant in tests where you want a tempdir-rooted store. The
 /// production call site (`scratch_new`) resolves its own [`StorePaths`] via
-/// [`open_store`][crate::commands::workspace::open_store].
+/// `open_store`.
 pub fn ensure_doc_id_in(paths: &StorePaths, doc_path: &Path) -> Result<EnsuredDocId, String> {
     let bytes = std::fs::read(doc_path)
         .map_err(|e| format!("cannot read '{}': {e}", doc_path.display()))?;

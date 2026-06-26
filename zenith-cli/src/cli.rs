@@ -7,11 +7,11 @@
 //! so that all existing `crate::cli::*` paths continue to resolve unchanged.
 //!
 //! Submodules:
-//! - [`library`] — `LibraryArgs`, `LibrarySub`, and library item arg types.
-//! - [`plugin`] — `PluginArgs`, `PluginSub`, `ScopeArg`, `AgentFlags`, and install/uninstall args.
-//! - [`render`] — `RenderArgs`.
-//! - [`schema`] — `SchemaArgs`, `SchemaSub`.
-//! - [`workspace`] — `WorkspaceArgs`, `WorkspaceSub`, scratch, candidate, and promote arg types.
+//! - `library` — `LibraryArgs`, `LibrarySub`, and library item arg types.
+//! - `plugin` — `PluginArgs`, `PluginSub`, `ScopeArg`, `AgentFlags`, and install/uninstall args.
+//! - `render` — `RenderArgs`.
+//! - `schema` — `SchemaArgs`, `SchemaSub`.
+//! - `workspace` — `WorkspaceArgs`, `WorkspaceSub`, scratch, candidate, and promote arg types.
 
 mod library;
 mod plugin;
@@ -113,8 +113,8 @@ pub enum Command {
     /// Mail-merge a `.zen` template with a CSV data file, writing one PNG per row.
     ///
     /// Mail-merge a .zen template with a CSV, writing one PNG per row. Mark variable
-    /// nodes with role="data.<column>" (text nodes substitute their text; image nodes substitute
-    /// their asset path) where <column> matches a CSV header. Use this for localized posts,
+    /// nodes with `role="data.<column>"` (text nodes substitute their text; image nodes substitute
+    /// their asset path) where `<column>` matches a CSV header. Use this for localized posts,
     /// personalized graphics, certificates, badges, and campaign variants. For a SINGLE
     /// data-bound render (first object/row, via `(data)"field.path"` references) use
     /// `zenith render --data` instead.
@@ -519,7 +519,7 @@ pub struct InspectArgs {
 #[command(after_help = "EXAMPLE:\n  \
 zenith merge card.zen people.csv --out-dir out/ --name-by name --manifest run.json")]
 pub struct MergeArgs {
-    /// Template `.zen` document with role="data.<column>" text nodes.
+    /// Template `.zen` document with `role="data.<column>"` text nodes.
     pub doc: PathBuf,
 
     /// CSV data file; header row names the columns.

@@ -57,7 +57,7 @@ pub struct ActionAddOutcome {
 ///      warning).
 ///    - Add a `libraries` import for `pkg_id` (dedup by id; conflict warning
 ///      on mismatch, using the pack's version — mirror `materialize_token`).
-///    - Generate a unique provenance id (via [`unique_id`]/[`collect_all_ids`])
+///    - Generate a unique provenance id (via `unique_id`/`collect_all_ids`)
 ///      and push a [`ProvenanceDef`] whose `node` is the action id.
 /// 6. Format the result document and return the full outcome.
 ///
