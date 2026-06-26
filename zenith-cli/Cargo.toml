@@ -12,6 +12,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 publish.workspace = true
+readme.workspace = true
 description = "The Zenith command-line interface (the `zenith` binary) for the design-document toolchain."
 
 # The package publishes as `zenith-tool`, but the library target keeps the

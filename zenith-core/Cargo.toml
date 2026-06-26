@@ -9,6 +9,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 publish.workspace = true
+readme.workspace = true
 description = "Zenith core: KDL parser adapter, semantic AST, canonical formatter, tokens, validation, and diagnostics."
 
 [dependencies]

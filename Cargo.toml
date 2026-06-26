@@ -18,6 +18,7 @@ license = "Apache-2.0"
 repository = "https://github.com/zenitheditor/zenith"
 homepage = "https://github.com/zenitheditor/zenith"
 description = "Zenith — a deterministic, agent-native design-document format and engine."
+readme = "README.md"
 keywords = ["design", "deterministic", "kdl", "rendering", "agent"]
 categories = ["rendering", "command-line-utilities", "visualization"]
 publish = true

@@ -9,6 +9,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 publish.workspace = true
+readme.workspace = true
 description = "Zenith backend-neutral scene IR and compilation (geometry, text wrap, anchors, opacity, clip)."
 
 [dependencies]

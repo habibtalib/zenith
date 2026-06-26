@@ -9,6 +9,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 publish.workspace = true
+readme.workspace = true
 description = "Zenith text shaping and font metrics (rustybuzz + ttf-parser)."
 
 [dependencies]
