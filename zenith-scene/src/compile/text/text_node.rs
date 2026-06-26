@@ -19,7 +19,9 @@ use super::super::paint::{
     resolve_property_mask, resolve_property_shadow,
 };
 use super::super::style_prop;
-use super::super::util::{resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag};
+use super::super::util::{
+    resolve_geometry_px, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
+};
 use super::chain_member::render_chain_member;
 use super::ctx::{ChainMemberPlace, ShapeEnv, TabLeaderArgs, TextCompileEnv};
 use super::measure::{
@@ -97,8 +99,8 @@ fn compile_text_autofit(
 ) -> f64 {
     // Require both box dimensions to measure fit; otherwise fall back to a
     // single sized compile with overflow untouched (documented; no crash).
-    let box_w = text.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
-    let box_h = text.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+    let box_w = resolve_geometry_px(text.w.as_ref(), env.resolved);
+    let box_h = resolve_geometry_px(text.h.as_ref(), env.resolved);
     let (Some(_bw), Some(_bh)) = (box_w, box_h) else {
         return compile_text_sized(text, env, commands, diagnostics, ctx);
     };
@@ -193,7 +195,7 @@ pub(in crate::compile) fn compile_text_sized(
     // Resolve x — use authored value when present, anchor derivation when absent.
     let text_x_raw = match &text.x {
         Some(x_dim) => {
-            let Some(v) = dim_to_px(x_dim.value, &x_dim.unit) else {
+            let Some(v) = resolve_geometry_px(Some(x_dim), resolved) else {
                 diagnostics.push(unsupported_unit_diag(
                     "text node",
                     &text.id,
@@ -225,7 +227,7 @@ pub(in crate::compile) fn compile_text_sized(
     // Resolve y — same pattern.
     let text_y_raw = match &text.y {
         Some(y_dim) => {
-            let Some(v) = dim_to_px(y_dim.value, &y_dim.unit) else {
+            let Some(v) = resolve_geometry_px(Some(y_dim), resolved) else {
                 diagnostics.push(unsupported_unit_diag(
                     "text node",
                     &text.id,
@@ -392,8 +394,8 @@ pub(in crate::compile) fn compile_text_sized(
     // a chain source is a documented no-op for chain continuations (the
     // distribution already positions each member's lines).
     if matches!(text.v_align.as_deref(), Some("middle") | Some("bottom")) {
-        if let Some(box_h) = text.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)) {
-            if let Some(box_w) = text.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)) {
+        if let Some(box_h) = resolve_geometry_px(text.h.as_ref(), resolved) {
+            if let Some(box_w) = resolve_geometry_px(text.w.as_ref(), resolved) {
                 let wrapped_h = measure_text_wrapped_height(
                     text,
                     box_w,
@@ -709,9 +711,9 @@ pub(in crate::compile) fn compile_text_sized(
     // ── Alignment offset ─────────────────────────────────────────────
     // Resolve the node's box width to pixels (same dim_to_px path as x/y).
     // If w is absent or uses an unsupported unit, alignment is a no-op.
-    let box_w_opt: Option<f64> = text.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+    let box_w_opt: Option<f64> = resolve_geometry_px(text.w.as_ref(), resolved);
     // Resolve the node's box height for rotation center and fit-check.
-    let box_h_opt: Option<f64> = text.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+    let box_h_opt: Option<f64> = resolve_geometry_px(text.h.as_ref(), resolved);
 
     // ── overflow="fit" pre-measurement ───────────────────────────────
     // Extract line_height from the first successfully shaped span (shared

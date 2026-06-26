@@ -28,7 +28,6 @@ use std::collections::BTreeMap;
 
 use zenith_core::{
     Diagnostic, FontProvider, FootnoteNode, Node, Page, ResolvedToken, Style, TextNode, TextSpan,
-    dim_to_px,
 };
 use zenith_layout::RustybuzzEngine;
 
@@ -41,7 +40,7 @@ use super::field::FieldCtx;
 use super::paint::resolve_property_color;
 use super::style_prop;
 use super::text::{TextCompileEnv, compile_text, empty_md_blocks};
-use super::util::{px, resolve_property_dimension_px};
+use super::util::{px_prop, resolve_geometry_px, resolve_property_dimension_px};
 
 /// The gap (px) between stacked footnotes in the zone.
 const FOOTNOTE_GAP: f64 = 6.0;
@@ -108,9 +107,9 @@ fn synth_footnote_text(fnote: &FootnoteNode, marker: &str, x: f64, y: f64, w: f6
         id: fnote.id.clone(),
         name: fnote.name.clone(),
         role: fnote.role.clone(),
-        x: Some(px(x)),
-        y: Some(px(y)),
-        w: Some(px(w)),
+        x: Some(px_prop(x)),
+        y: Some(px_prop(y)),
+        w: Some(px_prop(w)),
         h: None,
         align: Some("start".to_owned()),
         v_align: None,
@@ -326,7 +325,7 @@ pub(in crate::compile) fn compile_footnote_zone(
         if matches!(child, Node::Footnote(_)) {
             continue;
         }
-        if let Some((_bx, by, _bw, bh, id)) = node_bottom_box(child)
+        if let Some((_bx, by, _bw, bh, id)) = node_bottom_box(child, resolved)
             && by + bh > zone_top
         {
             diagnostics.push(Diagnostic::advisory(
@@ -400,7 +399,10 @@ fn footnote_font_size(
 /// box, or `None` for kinds without one. Used only for the overlap advisory, so
 /// geometry-less kinds (line/polygon/polyline/group/instance/field/footnote/
 /// unknown) yield `None` (no check).
-fn node_bottom_box(node: &Node) -> Option<(f64, f64, f64, f64, String)> {
+fn node_bottom_box(
+    node: &Node,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> Option<(f64, f64, f64, f64, String)> {
     let (x, y, w, h, id) = match node {
         Node::Rect(n) => (&n.x, &n.y, &n.w, &n.h, &n.id),
         Node::Ellipse(n) => (&n.x, &n.y, &n.w, &n.h, &n.id),
@@ -423,15 +425,11 @@ fn node_bottom_box(node: &Node) -> Option<(f64, f64, f64, f64, String)> {
         | Node::Chart(_)
         | Node::Unknown(_) => return None,
     };
-    let xd = x.as_ref()?;
-    let yd = y.as_ref()?;
-    let wd = w.as_ref()?;
-    let hd = h.as_ref()?;
     Some((
-        dim_to_px(xd.value, &xd.unit)?,
-        dim_to_px(yd.value, &yd.unit)?,
-        dim_to_px(wd.value, &wd.unit)?,
-        dim_to_px(hd.value, &hd.unit)?,
+        resolve_geometry_px(x.as_ref(), resolved)?,
+        resolve_geometry_px(y.as_ref(), resolved)?,
+        resolve_geometry_px(w.as_ref(), resolved)?,
+        resolve_geometry_px(h.as_ref(), resolved)?,
         id.clone(),
     ))
 }

@@ -22,10 +22,10 @@ pub struct ShapeNode {
     pub id: String,
     pub name: Option<String>,
     pub role: Option<String>,
-    pub x: Option<Dimension>,
-    pub y: Option<Dimension>,
-    pub w: Option<Dimension>,
-    pub h: Option<Dimension>,
+    pub x: Option<PropertyValue>,
+    pub y: Option<PropertyValue>,
+    pub w: Option<PropertyValue>,
+    pub h: Option<PropertyValue>,
     /// Shape kind string (`process`/`decision`/`terminator`/`ellipse`).
     /// Validated, not enum-typed, so unknown values survive for forward-compat.
     /// Absent or unrecognized is treated as `"process"` at compile time.
@@ -270,10 +270,10 @@ pub struct FieldNode {
     /// When `true`, a numeric field renders nothing on document page 1 (the
     /// title page). Used to suppress the folio on the first page.
     pub suppress_first: Option<bool>,
-    pub x: Option<Dimension>,
-    pub y: Option<Dimension>,
-    pub w: Option<Dimension>,
-    pub h: Option<Dimension>,
+    pub x: Option<PropertyValue>,
+    pub y: Option<PropertyValue>,
+    pub w: Option<PropertyValue>,
+    pub h: Option<PropertyValue>,
     pub style: Option<String>,
     pub fill: Option<PropertyValue>,
     pub font_family: Option<PropertyValue>,
@@ -373,10 +373,10 @@ pub struct TocNode {
     /// Folio numbering style for the page numbers
     /// (`"decimal"` / `"lower-roman"` / `"upper-roman"`).
     pub folio_style: Option<String>,
-    pub x: Option<Dimension>,
-    pub y: Option<Dimension>,
-    pub w: Option<Dimension>,
-    pub h: Option<Dimension>,
+    pub x: Option<PropertyValue>,
+    pub y: Option<PropertyValue>,
+    pub w: Option<PropertyValue>,
+    pub h: Option<PropertyValue>,
     pub style: Option<String>,
     pub fill: Option<PropertyValue>,
     pub font_family: Option<PropertyValue>,

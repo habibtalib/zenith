@@ -353,13 +353,16 @@ fn walk_images(nodes: &[Node], doc: &Document, project_dir: &Path, out: &mut Vec
 fn check_image(img: &ImageNode, doc: &Document, project_dir: &Path, out: &mut Vec<Diagnostic>) {
     // Resolve box dimensions to pixels — skip if either axis uses a non-pixel
     // unit (pct, deg, unknown) to avoid false positives.
+    // Geometry is now `(px)N` literal OR `(token)"id"` ref; this render-layer
+    // advisory has no token table, so it only checks raw-dimension boxes and
+    // skips token-ref geometry (same skip as a non-pixel unit).
     let w_dim = match img.w.as_ref() {
-        Some(d) => d,
-        None => return,
+        Some(zenith_core::PropertyValue::Dimension(d)) => d,
+        _ => return,
     };
     let h_dim = match img.h.as_ref() {
-        Some(d) => d,
-        None => return,
+        Some(zenith_core::PropertyValue::Dimension(d)) => d,
+        _ => return,
     };
     let w = match dim_to_px(w_dim.value, &w_dim.unit) {
         Some(px) => px,

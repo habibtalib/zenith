@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use zenith_core::{FieldNode, Page, TextNode, TextSpan};
 
-use crate::compile::util::px;
+use crate::compile::util::px_prop;
 
 use super::folio::format_folio;
 
@@ -152,10 +152,22 @@ pub(in crate::compile) fn resolve_field_to_text(
 
     // Geometry: prefer the field's own x/w, falling back to the live area.
     let live = ctx.live_area;
-    let x = field.x.clone().or_else(|| live.map(|(lx, _, _, _)| px(lx)));
-    let y = field.y.clone().or_else(|| live.map(|(_, ly, _, _)| px(ly)));
-    let w = field.w.clone().or_else(|| live.map(|(_, _, lw, _)| px(lw)));
-    let h = field.h.clone().or_else(|| live.map(|(_, _, _, lh)| px(lh)));
+    let x = field
+        .x
+        .clone()
+        .or_else(|| live.map(|(lx, _, _, _)| px_prop(lx)));
+    let y = field
+        .y
+        .clone()
+        .or_else(|| live.map(|(_, ly, _, _)| px_prop(ly)));
+    let w = field
+        .w
+        .clone()
+        .or_else(|| live.map(|(_, _, lw, _)| px_prop(lw)));
+    let h = field
+        .h
+        .clone()
+        .or_else(|| live.map(|(_, _, _, lh)| px_prop(lh)));
 
     Some(TextNode {
         id: field.id.clone(),

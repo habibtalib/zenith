@@ -9,6 +9,7 @@ use zenith_core::{Diagnostic, FontProvider, Node, ResolvedToken, Style, TableCol
 use super::super::text::{
     MeasureEnv, measure_text_natural, measure_text_wrapped_height, resolve_text_families,
 };
+use super::super::util::resolve_geometry_px;
 use super::place::{PlacedCell, child_declared_box, child_declared_y};
 
 /// Lower bound (px) a shrunk AUTO column is clamped to, so proportional shrink
@@ -244,7 +245,7 @@ fn cell_natural_width(
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
-            | Node::Unknown(_)) => child_declared_box(other).0.unwrap_or(0.0),
+            | Node::Unknown(_)) => child_declared_box(other, env.resolved).0.unwrap_or(0.0),
         };
         widest = widest.max(w);
     }
@@ -284,14 +285,8 @@ fn cell_content_height(
                 let nat_h =
                     measure_text_wrapped_height(&eff, content_w, families, env, diagnostics)
                         .unwrap_or(0.0);
-                let y0 =
-                    t.y.as_ref()
-                        .and_then(|d| dim_to_px(d.value, &d.unit))
-                        .unwrap_or(0.0);
-                let h_decl =
-                    t.h.as_ref()
-                        .and_then(|d| dim_to_px(d.value, &d.unit))
-                        .unwrap_or(nat_h);
+                let y0 = resolve_geometry_px(t.y.as_ref(), env.resolved).unwrap_or(0.0);
+                let h_decl = resolve_geometry_px(t.h.as_ref(), env.resolved).unwrap_or(nat_h);
                 y0 + h_decl
             }
             other @ (Node::Rect(_)
@@ -313,8 +308,8 @@ fn cell_content_height(
             | Node::Pattern(_)
             | Node::Chart(_)
             | Node::Unknown(_)) => {
-                let y0 = child_declared_y(other).unwrap_or(0.0);
-                let h_decl = child_declared_box(other).1.unwrap_or(0.0);
+                let y0 = child_declared_y(other, env.resolved).unwrap_or(0.0);
+                let h_decl = child_declared_box(other, env.resolved).1.unwrap_or(0.0);
                 y0 + h_decl
             }
         };

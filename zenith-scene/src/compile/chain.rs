@@ -48,7 +48,6 @@ use std::collections::BTreeMap;
 
 use zenith_core::{
     Diagnostic, FontProvider, FontStyle, Node, PropertyValue, ResolvedToken, Style, TextNode,
-    dim_to_px,
 };
 use zenith_layout::{RustybuzzEngine, TextDirection};
 
@@ -63,7 +62,7 @@ use super::text::{
     pack_lines, resolve_family_with_fallback, resolve_font_family_name, resolve_font_weight,
     resolve_vertical_align, shape_source_blocks, shape_words,
 };
-use super::util::resolve_property_dimension_px;
+use super::util::{resolve_geometry_px, resolve_property_dimension_px};
 
 /// The lines a single chain member must render, already shaped + packed to that
 /// member's box width, plus the shared font metrics for baseline stacking.
@@ -91,19 +90,18 @@ struct Member {
 }
 
 /// Resolve a text node's explicit box to pixels, or `None` if any of
-/// `x`/`y`/`w`/`h` is absent or uses an unsupported unit.
-fn member_box(text: &TextNode) -> Option<(f64, f64, f64, f64)> {
-    let (xd, yd, wd, hd) = (
-        text.x.as_ref()?,
-        text.y.as_ref()?,
-        text.w.as_ref()?,
-        text.h.as_ref()?,
-    );
+/// `x`/`y`/`w`/`h` is absent, a non-dimension, an unresolved token, or uses an
+/// unsupported unit. Raw `(px)` dims are byte-identical to the prior read;
+/// dimension token refs resolve via the token table.
+fn member_box(
+    text: &TextNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> Option<(f64, f64, f64, f64)> {
     Some((
-        dim_to_px(xd.value, &xd.unit)?,
-        dim_to_px(yd.value, &yd.unit)?,
-        dim_to_px(wd.value, &wd.unit)?,
-        dim_to_px(hd.value, &hd.unit)?,
+        resolve_geometry_px(text.x.as_ref(), resolved)?,
+        resolve_geometry_px(text.y.as_ref(), resolved)?,
+        resolve_geometry_px(text.w.as_ref(), resolved)?,
+        resolve_geometry_px(text.h.as_ref(), resolved)?,
     ))
 }
 
@@ -113,6 +111,7 @@ fn member_box(text: &TextNode) -> Option<(f64, f64, f64, f64)> {
 fn collect_chains<'a>(
     nodes: &'a [Node],
     page_block_styles: &'a [zenith_core::BlockStyle],
+    resolved: &BTreeMap<String, ResolvedToken>,
     members: &mut BTreeMap<String, Vec<Member>>,
     source: &mut BTreeMap<String, &'a TextNode>,
     source_page_styles: &mut BTreeMap<String, &'a [zenith_core::BlockStyle]>,
@@ -130,7 +129,7 @@ fn collect_chains<'a>(
                         source.insert(chain_id.clone(), t);
                         source_page_styles.insert(chain_id.clone(), page_block_styles);
                     }
-                    if let Some((_x, _y, w, h)) = member_box(t) {
+                    if let Some((_x, _y, w, h)) = member_box(t, resolved) {
                         members.entry(chain_id.clone()).or_default().push(Member {
                             id: t.id.clone(),
                             w,
@@ -142,6 +141,7 @@ fn collect_chains<'a>(
             Node::Frame(f) => collect_chains(
                 &f.children,
                 page_block_styles,
+                resolved,
                 members,
                 source,
                 source_page_styles,
@@ -149,6 +149,7 @@ fn collect_chains<'a>(
             Node::Group(g) => collect_chains(
                 &g.children,
                 page_block_styles,
+                resolved,
                 members,
                 source,
                 source_page_styles,
@@ -159,6 +160,7 @@ fn collect_chains<'a>(
                         collect_chains(
                             &cell.children,
                             page_block_styles,
+                            resolved,
                             members,
                             source,
                             source_page_styles,
@@ -360,6 +362,7 @@ pub(super) fn resolve_chains_document<'a>(
         collect_chains(
             &page.children,
             &page.block_styles,
+            resolved,
             &mut members,
             &mut source,
             &mut source_page_styles,

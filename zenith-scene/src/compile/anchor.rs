@@ -51,9 +51,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use zenith_core::{
-    Anchor, AnchorEdge, Dimension, Node, Page, SafeZone, anchor_xy, dim_to_px, parse_anchor,
-    parse_anchor_edge,
+    Anchor, AnchorEdge, Dimension, Node, Page, PropertyValue, ResolvedToken, SafeZone, anchor_xy,
+    dim_to_px, parse_anchor, parse_anchor_edge,
 };
+
+use super::util::resolve_geometry_px;
 
 /// Pre-derived anchor coordinates keyed by node id.
 ///
@@ -65,12 +67,15 @@ use zenith_core::{
 /// the intended device position.
 pub(crate) type AnchorMap = BTreeMap<String, (f64, f64)>;
 
-/// Walk-wide immutable pre-pass environment (page dims + zone table).
+/// Walk-wide immutable pre-pass environment (page dims + zone table + token
+/// table). The token table resolves geometry token refs (`(token)"dim.h"`) on
+/// box nodes during anchor derivation.
 #[derive(Clone, Copy)]
 struct PrePassEnv<'a> {
     page_w: f64,
     page_h: f64,
     safe_zones: &'a [SafeZone],
+    resolved: &'a BTreeMap<String, ResolvedToken>,
 }
 
 /// Per-recursion container context for parent-relative derivation.
@@ -103,11 +108,17 @@ impl ParentCtx {
 /// their enclosing container's box. Only nodes with a recognized anchor,
 /// present `w`/`h`, and px-convertible `w`/`h` produce entries; all others are
 /// absent (byte-identical to before for any node not using anchor-parent).
-pub(crate) fn build_anchor_map(page: &Page, page_w: f64, page_h: f64) -> AnchorMap {
+pub(crate) fn build_anchor_map(
+    page: &Page,
+    page_w: f64,
+    page_h: f64,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> AnchorMap {
     let env = PrePassEnv {
         page_w,
         page_h,
         safe_zones: &page.safe_zones,
+        resolved,
     };
     let mut map = AnchorMap::new();
     // The page-children form one sibling scope; process them in sibling-
@@ -222,10 +233,10 @@ struct AnchorFields<'a> {
     anchor_parent: Option<bool>,
     anchor_edge: Option<&'a str>,
     anchor_gap: Option<&'a Dimension>,
-    x: Option<&'a Dimension>,
-    y: Option<&'a Dimension>,
-    w: Option<&'a Dimension>,
-    h: Option<&'a Dimension>,
+    x: Option<&'a PropertyValue>,
+    y: Option<&'a PropertyValue>,
+    w: Option<&'a PropertyValue>,
+    h: Option<&'a PropertyValue>,
 }
 
 /// Extract the anchor-bearing fields of a node, or `None` for kinds that never
@@ -415,18 +426,22 @@ fn anchor_fields(node: &Node) -> Option<AnchorFields<'_>> {
     Some(f)
 }
 
-/// Resolve the px box `(x, y, w, h)` of a node from its four geometry dims,
-/// returning `None` when any of the four is absent or non-px.
+/// Resolve the px box `(x, y, w, h)` of a node from its four geometry
+/// properties, returning `None` when any of the four is absent, a non-dimension,
+/// an unresolved token, or carries a non-px unit. Raw `(px)` dims are
+/// byte-identical to the prior `dim_to_px` read; dimension token refs resolve
+/// via the token table.
 fn px_box(
-    x: Option<&Dimension>,
-    y: Option<&Dimension>,
-    w: Option<&Dimension>,
-    h: Option<&Dimension>,
+    x: Option<&PropertyValue>,
+    y: Option<&PropertyValue>,
+    w: Option<&PropertyValue>,
+    h: Option<&PropertyValue>,
+    resolved: &BTreeMap<String, ResolvedToken>,
 ) -> Option<(f64, f64, f64, f64)> {
-    let x = x.and_then(|d| dim_to_px(d.value, &d.unit))?;
-    let y = y.and_then(|d| dim_to_px(d.value, &d.unit))?;
-    let w = w.and_then(|d| dim_to_px(d.value, &d.unit))?;
-    let h = h.and_then(|d| dim_to_px(d.value, &d.unit))?;
+    let x = resolve_geometry_px(x, resolved)?;
+    let y = resolve_geometry_px(y, resolved)?;
+    let w = resolve_geometry_px(w, resolved)?;
+    let h = resolve_geometry_px(h, resolved)?;
     Some((x, y, w, h))
 }
 
@@ -457,6 +472,7 @@ fn collect_anchor(
                 frame.y.as_ref(),
                 frame.w.as_ref(),
                 frame.h.as_ref(),
+                env.resolved,
             );
             let child_ctx = ParentCtx {
                 parent_box: frame_box,
@@ -476,27 +492,16 @@ fn collect_anchor(
         Node::Group(group) => {
             // Group translates children by group_x/group_y (default 0 if absent
             // or non-px). The child's compile context acc becomes acc + group_x.
-            let group_x = group
-                .x
-                .as_ref()
-                .and_then(|d| dim_to_px(d.value, &d.unit))
-                .unwrap_or(0.0);
-            let group_y = group
-                .y
-                .as_ref()
-                .and_then(|d| dim_to_px(d.value, &d.unit))
-                .unwrap_or(0.0);
+            let group_x = resolve_geometry_px(group.x.as_ref(), env.resolved).unwrap_or(0.0);
+            let group_y = resolve_geometry_px(group.y.as_ref(), env.resolved).unwrap_or(0.0);
             let child_dx = ctx.acc_dx + group_x;
             let child_dy = ctx.acc_dy + group_y;
             // The group reference box origin is its device origin (child_dx,
             // child_dy); width/height come from the declared w/h. When either w
             // or h is absent/non-px the box is unknown → no parent-relative entry
             // for the group's children (validator flags it).
-            let group_box = group
-                .w
-                .as_ref()
-                .and_then(|d| dim_to_px(d.value, &d.unit))
-                .zip(group.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)))
+            let group_box = resolve_geometry_px(group.w.as_ref(), env.resolved)
+                .zip(resolve_geometry_px(group.h.as_ref(), env.resolved))
                 .map(|(gw, gh)| (child_dx, child_dy, gw, gh));
             let child_ctx = ParentCtx {
                 parent_box: group_box,
@@ -618,13 +623,11 @@ fn derive_entry(
         None => None,
     };
 
-    // Both w and h must be present and px-convertible for derivation.
-    let (Some(w_dim), Some(h_dim)) = (w_dim, h_dim) else {
-        return;
-    };
+    // Both w and h must be present and px-convertible for derivation. Raw `(px)`
+    // dims and dimension token refs both resolve via the token table.
     let (Some(node_w), Some(node_h)) = (
-        dim_to_px(w_dim.value, &w_dim.unit),
-        dim_to_px(h_dim.value, &h_dim.unit),
+        resolve_geometry_px(w_dim, env.resolved),
+        resolve_geometry_px(h_dim, env.resolved),
     ) else {
         return;
     };
@@ -680,22 +683,16 @@ fn derive_entry(
         };
         // The sibling's size must be authored and px-convertible.
         let (Some(sib_w), Some(sib_h)) = (
-            sib.w.and_then(|d| dim_to_px(d.value, &d.unit)),
-            sib.h.and_then(|d| dim_to_px(d.value, &d.unit)),
+            resolve_geometry_px(sib.w, env.resolved),
+            resolve_geometry_px(sib.h, env.resolved),
         ) else {
             return;
         };
         // The sibling's origin: explicit-wins-per-axis (authored x/y), else its
         // own anchor-map entry, else unresolved (no entry for this node).
         let entry = map.get(sib_id).copied();
-        let sib_x = sib
-            .x
-            .and_then(|d| dim_to_px(d.value, &d.unit))
-            .or(entry.map(|e| e.0));
-        let sib_y = sib
-            .y
-            .and_then(|d| dim_to_px(d.value, &d.unit))
-            .or(entry.map(|e| e.1));
+        let sib_x = resolve_geometry_px(sib.x, env.resolved).or(entry.map(|e| e.0));
+        let sib_y = resolve_geometry_px(sib.y, env.resolved).or(entry.map(|e| e.1));
         let (Some(sib_x), Some(sib_y)) = (sib_x, sib_y) else {
             return;
         };

@@ -7,8 +7,8 @@ use crate::ast::value::dim_to_px;
 use crate::diagnostics::Diagnostic;
 
 use super::shared::{
-    AnchorParentCtx, AnchorProps, check_anchor, check_optional_dim, check_spans, check_style_ref,
-    is_valid_blend_mode,
+    AnchorParentCtx, AnchorProps, TokenEnv, check_anchor, check_dimension_geom, check_optional_dim,
+    check_spans, check_style_ref, is_valid_blend_mode,
 };
 use super::suggest::check_unknown_props;
 use crate::validate::check::nodes::WalkCtx;
@@ -72,38 +72,48 @@ pub(in crate::validate::check) fn check_text(
     let xy_required = geom_required && !anchor_active;
 
     // Required geometry.
-    check_optional_dim(
-        &t.id,
-        "x",
-        t.x.as_ref(),
-        xy_required,
-        t.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &t.id,
-        "y",
-        t.y.as_ref(),
-        xy_required,
-        t.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &t.id,
-        "w",
-        t.w.as_ref(),
-        geom_required,
-        t.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &t.id,
-        "h",
-        t.h.as_ref(),
-        geom_required,
-        t.source_span,
-        diagnostics,
-    );
+    {
+        let mut tokens = TokenEnv {
+            referenced: referenced_token_ids,
+            resolved: resolved_tokens,
+        };
+        check_optional_dim(
+            &t.id,
+            "x",
+            t.x.as_ref(),
+            xy_required,
+            t.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &t.id,
+            "y",
+            t.y.as_ref(),
+            xy_required,
+            t.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &t.id,
+            "w",
+            t.w.as_ref(),
+            geom_required,
+            t.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &t.id,
+            "h",
+            t.h.as_ref(),
+            geom_required,
+            t.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+    }
 
     // Visual properties.
     check_visual_prop(
@@ -348,38 +358,48 @@ pub(in crate::validate::check) fn check_image(
     let xy_required = geom_required && !anchor_active;
 
     // Required geometry: x, y, w, h must all be present (mirror rect).
-    check_optional_dim(
-        &img.id,
-        "x",
-        img.x.as_ref(),
-        xy_required,
-        img.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &img.id,
-        "y",
-        img.y.as_ref(),
-        xy_required,
-        img.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &img.id,
-        "w",
-        img.w.as_ref(),
-        geom_required,
-        img.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &img.id,
-        "h",
-        img.h.as_ref(),
-        geom_required,
-        img.source_span,
-        diagnostics,
-    );
+    {
+        let mut tokens = TokenEnv {
+            referenced: referenced_token_ids,
+            resolved: resolved_tokens,
+        };
+        check_optional_dim(
+            &img.id,
+            "x",
+            img.x.as_ref(),
+            xy_required,
+            img.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &img.id,
+            "y",
+            img.y.as_ref(),
+            xy_required,
+            img.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &img.id,
+            "w",
+            img.w.as_ref(),
+            geom_required,
+            img.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &img.id,
+            "h",
+            img.h.as_ref(),
+            geom_required,
+            img.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+    }
 
     // src-rect: all-four-or-none rule.
     let src_present_count = [
@@ -429,7 +449,8 @@ pub(in crate::validate::check) fn check_image(
     }
 
     // Unit validation for each src-* field (required=false: partial is already caught above).
-    check_optional_dim(
+    // src-* crop coords are raw dimensions (no token-ref support).
+    check_dimension_geom(
         &img.id,
         "src-x",
         img.src_x.as_ref(),
@@ -437,7 +458,7 @@ pub(in crate::validate::check) fn check_image(
         img.source_span,
         diagnostics,
     );
-    check_optional_dim(
+    check_dimension_geom(
         &img.id,
         "src-y",
         img.src_y.as_ref(),
@@ -445,7 +466,7 @@ pub(in crate::validate::check) fn check_image(
         img.source_span,
         diagnostics,
     );
-    check_optional_dim(
+    check_dimension_geom(
         &img.id,
         "src-w",
         img.src_w.as_ref(),
@@ -453,7 +474,7 @@ pub(in crate::validate::check) fn check_image(
         img.source_span,
         diagnostics,
     );
-    check_optional_dim(
+    check_dimension_geom(
         &img.id,
         "src-h",
         img.src_h.as_ref(),

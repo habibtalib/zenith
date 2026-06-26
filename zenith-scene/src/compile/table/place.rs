@@ -1,9 +1,11 @@
 //! Shared cell placement: the deterministic HTML-table occupancy walk plus the
 //! geometry/declared-box helpers reused by the sizing, collapse, and emit passes.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use zenith_core::{TableRow, dim_to_px};
+use zenith_core::{ResolvedToken, TableRow};
+
+use super::super::util::resolve_geometry_px;
 
 /// One placed cell after the HTML-table occupancy walk: its top-left grid
 /// position plus resolved column/row spans. Shared by the width, height, and
@@ -74,10 +76,12 @@ pub(super) struct CellRect {
 /// The declared `(w, h)` of a cell child in pixels, when the kind carries a
 /// box and the dimensions resolve. Used to compute alignment slack. Kinds
 /// without a resolvable box yield `(None, None)`.
-pub(super) fn child_declared_box(node: &zenith_core::Node) -> (Option<f64>, Option<f64>) {
+pub(super) fn child_declared_box(
+    node: &zenith_core::Node,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> (Option<f64>, Option<f64>) {
     use zenith_core::Node;
-    let px =
-        |d: &Option<zenith_core::Dimension>| d.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+    let px = |d: &Option<zenith_core::PropertyValue>| resolve_geometry_px(d.as_ref(), resolved);
     match node {
         Node::Rect(n) => (px(&n.w), px(&n.h)),
         Node::Ellipse(n) => (px(&n.w), px(&n.h)),
@@ -106,10 +110,12 @@ pub(super) fn child_declared_box(node: &zenith_core::Node) -> (Option<f64>, Opti
 /// field and it resolves. Used alongside [`child_declared_box`] to compute the
 /// bottom extent of a child within the cell content box. Kinds without a `y`
 /// field yield `None`.
-pub(super) fn child_declared_y(node: &zenith_core::Node) -> Option<f64> {
+pub(super) fn child_declared_y(
+    node: &zenith_core::Node,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> Option<f64> {
     use zenith_core::Node;
-    let px =
-        |d: &Option<zenith_core::Dimension>| d.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+    let px = |d: &Option<zenith_core::PropertyValue>| resolve_geometry_px(d.as_ref(), resolved);
     match node {
         Node::Rect(n) => px(&n.y),
         Node::Ellipse(n) => px(&n.y),

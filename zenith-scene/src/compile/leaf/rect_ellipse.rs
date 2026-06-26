@@ -15,8 +15,8 @@ use super::super::paint::{
 };
 use super::super::style_prop;
 use super::super::util::{
-    blend_mode_ir, missing_geometry_diag, resolve_anchored_axis, resolve_property_dimension_px,
-    rotation_degrees, unsupported_unit_diag,
+    AxisTarget, blend_mode_ir, missing_geometry_diag, resolve_anchored_axis, resolve_geometry_px,
+    resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
 };
 use super::common::resolve_dash_params;
 
@@ -54,7 +54,7 @@ pub(in crate::compile) fn compile_rect(
         diagnostics.push(missing_geometry_diag("rect", &rect.id, rect.source_span));
         return;
     };
-    let Some(w) = dim_to_px(w_dim.value, &w_dim.unit) else {
+    let Some(w) = resolve_geometry_px(Some(w_dim), resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "rect",
             &rect.id,
@@ -63,7 +63,7 @@ pub(in crate::compile) fn compile_rect(
         ));
         return;
     };
-    let Some(h) = dim_to_px(h_dim.value, &h_dim.unit) else {
+    let Some(h) = resolve_geometry_px(Some(h_dim), resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "rect",
             &rect.id,
@@ -77,10 +77,13 @@ pub(in crate::compile) fn compile_rect(
     let anchor_xy = anchors.get(&rect.id).copied();
 
     let Some(x_raw) = resolve_anchored_axis(
-        "rect",
-        &rect.id,
-        "x",
+        AxisTarget {
+            kind: "rect",
+            node_id: &rect.id,
+            axis: "x",
+        },
         rect.x.as_ref(),
+        resolved,
         anchor_xy.map(|(ax, _)| ax),
         rect.source_span,
         diagnostics,
@@ -88,10 +91,13 @@ pub(in crate::compile) fn compile_rect(
         return;
     };
     let Some(y_raw) = resolve_anchored_axis(
-        "rect",
-        &rect.id,
-        "y",
+        AxisTarget {
+            kind: "rect",
+            node_id: &rect.id,
+            axis: "y",
+        },
         rect.y.as_ref(),
+        resolved,
         anchor_xy.map(|(_, ay)| ay),
         rect.source_span,
         diagnostics,
@@ -504,7 +510,7 @@ pub(in crate::compile) fn compile_ellipse(
         ));
         return;
     };
-    let Some(w) = dim_to_px(w_dim.value, &w_dim.unit) else {
+    let Some(w) = resolve_geometry_px(Some(w_dim), resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "ellipse",
             &ellipse.id,
@@ -513,7 +519,7 @@ pub(in crate::compile) fn compile_ellipse(
         ));
         return;
     };
-    let Some(h) = dim_to_px(h_dim.value, &h_dim.unit) else {
+    let Some(h) = resolve_geometry_px(Some(h_dim), resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "ellipse",
             &ellipse.id,
@@ -527,10 +533,13 @@ pub(in crate::compile) fn compile_ellipse(
     let anchor_xy = anchors.get(&ellipse.id).copied();
 
     let Some(x_raw) = resolve_anchored_axis(
-        "ellipse",
-        &ellipse.id,
-        "x",
+        AxisTarget {
+            kind: "ellipse",
+            node_id: &ellipse.id,
+            axis: "x",
+        },
         ellipse.x.as_ref(),
+        resolved,
         anchor_xy.map(|(ax, _)| ax),
         ellipse.source_span,
         diagnostics,
@@ -538,10 +547,13 @@ pub(in crate::compile) fn compile_ellipse(
         return;
     };
     let Some(y_raw) = resolve_anchored_axis(
-        "ellipse",
-        &ellipse.id,
-        "y",
+        AxisTarget {
+            kind: "ellipse",
+            node_id: &ellipse.id,
+            axis: "y",
+        },
         ellipse.y.as_ref(),
+        resolved,
         anchor_xy.map(|(_, ay)| ay),
         ellipse.source_span,
         diagnostics,

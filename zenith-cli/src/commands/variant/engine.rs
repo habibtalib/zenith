@@ -499,22 +499,22 @@ mod tests {
 
         // All four geometry overrides must be applied.
         assert_eq!(
-            rect.x.as_ref().map(|d| d.value),
+            rect.x.as_ref().and_then(pv_value),
             Some(100.0),
             "x must be overridden to 100"
         );
         assert_eq!(
-            rect.y.as_ref().map(|d| d.value),
+            rect.y.as_ref().and_then(pv_value),
             Some(266.0),
             "y must be overridden to 266"
         );
         assert_eq!(
-            rect.w.as_ref().map(|d| d.value),
+            rect.w.as_ref().and_then(pv_value),
             Some(880.0),
             "w must be overridden to 880"
         );
         assert_eq!(
-            rect.h.as_ref().map(|d| d.value),
+            rect.h.as_ref().and_then(pv_value),
             Some(340.0),
             "h must be overridden to 340"
         );
@@ -539,22 +539,22 @@ mod tests {
 
         // Only y was overridden; x/w/h must keep their original values.
         assert_eq!(
-            rect.x.as_ref().map(|d| d.value),
+            rect.x.as_ref().and_then(pv_value),
             Some(10.0),
             "x must remain 10 (unset in override)"
         );
         assert_eq!(
-            rect.y.as_ref().map(|d| d.value),
+            rect.y.as_ref().and_then(pv_value),
             Some(50.0),
             "y must be overridden to 50"
         );
         assert_eq!(
-            rect.w.as_ref().map(|d| d.value),
+            rect.w.as_ref().and_then(pv_value),
             Some(300.0),
             "w must remain 300 (unset in override)"
         );
         assert_eq!(
-            rect.h.as_ref().map(|d| d.value),
+            rect.h.as_ref().and_then(pv_value),
             Some(150.0),
             "h must remain 150 (unset in override)"
         );
@@ -644,6 +644,15 @@ mod tests {
             }
         }
         None
+    }
+
+    /// Extract the px value of a geometry property that is a raw dimension
+    /// (geometry is now `Option<PropertyValue>`; token refs read back as `None`).
+    fn pv_value(pv: &zenith_core::PropertyValue) -> Option<f64> {
+        match pv {
+            zenith_core::PropertyValue::Dimension(d) => Some(d.value),
+            _ => None,
+        }
     }
 
     fn find_rect_node_by_id<'a>(doc: &'a Document, id: &str) -> Option<&'a zenith_core::RectNode> {

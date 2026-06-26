@@ -6,8 +6,8 @@ use crate::ast::node::ChartNode;
 use crate::diagnostics::Diagnostic;
 
 use super::shared::{
-    AnchorParentCtx, AnchorProps, VisualProps, check_anchor, check_optional_dim, check_style_ref,
-    check_visual_props,
+    AnchorParentCtx, AnchorProps, TokenEnv, VisualProps, check_anchor, check_optional_dim,
+    check_style_ref, check_visual_props,
 };
 use super::suggest::check_unknown_props;
 use crate::validate::check::nodes::WalkCtx;
@@ -57,38 +57,48 @@ pub(in crate::validate::check) fn check_chart(
     );
     let xy_required = geom_required && !anchor_active;
 
-    check_optional_dim(
-        &c.id,
-        "x",
-        c.x.as_ref(),
-        xy_required,
-        c.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &c.id,
-        "y",
-        c.y.as_ref(),
-        xy_required,
-        c.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &c.id,
-        "w",
-        c.w.as_ref(),
-        geom_required,
-        c.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &c.id,
-        "h",
-        c.h.as_ref(),
-        geom_required,
-        c.source_span,
-        diagnostics,
-    );
+    {
+        let mut tokens = TokenEnv {
+            referenced: referenced_token_ids,
+            resolved: resolved_tokens,
+        };
+        check_optional_dim(
+            &c.id,
+            "x",
+            c.x.as_ref(),
+            xy_required,
+            c.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &c.id,
+            "y",
+            c.y.as_ref(),
+            xy_required,
+            c.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &c.id,
+            "w",
+            c.w.as_ref(),
+            geom_required,
+            c.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &c.id,
+            "h",
+            c.h.as_ref(),
+            geom_required,
+            c.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+    }
 
     // Visual properties — token refs collected for token-usage checks, and the
     // shared per-corner-radius / stroke-dash guards. This mirrors the complete

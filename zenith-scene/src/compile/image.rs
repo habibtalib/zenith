@@ -13,7 +13,8 @@ use super::paint::{
     resolve_property_shadow,
 };
 use super::util::{
-    blend_mode_ir, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
+    blend_mode_ir, resolve_geometry_px, resolve_property_dimension_px, rotation_degrees,
+    unsupported_unit_diag,
 };
 
 /// Compile an `image` leaf node.
@@ -51,7 +52,7 @@ pub(super) fn compile_image(
         ));
         return;
     };
-    let Some(w) = dim_to_px(w_dim.value, &w_dim.unit) else {
+    let Some(w) = resolve_geometry_px(Some(w_dim), resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "image",
             &image.id,
@@ -60,7 +61,7 @@ pub(super) fn compile_image(
         ));
         return;
     };
-    let Some(h) = dim_to_px(h_dim.value, &h_dim.unit) else {
+    let Some(h) = resolve_geometry_px(Some(h_dim), resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "image",
             &image.id,
@@ -75,7 +76,7 @@ pub(super) fn compile_image(
 
     let x_raw = match &image.x {
         Some(x_dim) => {
-            let Some(v) = dim_to_px(x_dim.value, &x_dim.unit) else {
+            let Some(v) = resolve_geometry_px(Some(x_dim), resolved) else {
                 diagnostics.push(unsupported_unit_diag(
                     "image",
                     &image.id,
@@ -105,7 +106,7 @@ pub(super) fn compile_image(
     };
     let y_raw = match &image.y {
         Some(y_dim) => {
-            let Some(v) = dim_to_px(y_dim.value, &y_dim.unit) else {
+            let Some(v) = resolve_geometry_px(Some(y_dim), resolved) else {
                 diagnostics.push(unsupported_unit_diag(
                     "image",
                     &image.id,

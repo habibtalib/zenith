@@ -6,8 +6,17 @@
 
 mod common;
 use common::*;
-use zenith_core::Node;
+use zenith_core::{Node, PropertyValue};
 use zenith_tx::{Op, Permissions, Transaction, TxStatus, run_transaction};
+
+/// Extract the `px` value from a geometry `PropertyValue::Dimension`, or `None`
+/// for any other variant (e.g. a token ref).
+fn pv_value(pv: &PropertyValue) -> Option<f64> {
+    match pv {
+        PropertyValue::Dimension(d) => Some(d.value),
+        _ => None,
+    }
+}
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -95,22 +104,22 @@ fn detach_pattern_grid_accepted() {
 
     // Group bounds equal the pattern's bounds.
     assert_eq!(
-        group.x.as_ref().map(|d| d.value),
+        group.x.as_ref().and_then(pv_value),
         Some(0.0),
         "group x must equal pattern bounds x"
     );
     assert_eq!(
-        group.y.as_ref().map(|d| d.value),
+        group.y.as_ref().and_then(pv_value),
         Some(0.0),
         "group y must equal pattern bounds y"
     );
     assert_eq!(
-        group.w.as_ref().map(|d| d.value),
+        group.w.as_ref().and_then(pv_value),
         Some(100.0),
         "group w must equal pattern bounds w"
     );
     assert_eq!(
-        group.h.as_ref().map(|d| d.value),
+        group.h.as_ref().and_then(pv_value),
         Some(100.0),
         "group h must equal pattern bounds h"
     );
@@ -129,8 +138,8 @@ fn detach_pattern_grid_accepted() {
         .map(|child| match child {
             Node::Ellipse(e) => (
                 e.id.clone(),
-                e.x.as_ref().map(|d| d.value).unwrap_or(f64::NAN),
-                e.y.as_ref().map(|d| d.value).unwrap_or(f64::NAN),
+                e.x.as_ref().and_then(pv_value).unwrap_or(f64::NAN),
+                e.y.as_ref().and_then(pv_value).unwrap_or(f64::NAN),
             ),
             other => panic!("expected ellipse clone, got {other:?}"),
         })

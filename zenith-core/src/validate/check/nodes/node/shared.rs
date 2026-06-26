@@ -61,45 +61,45 @@ pub(in crate::validate::check) fn node_bbox(
 ) -> Option<(f64, f64, f64, f64)> {
     match node {
         Node::Rect(n) => {
-            let x = resolve_axis(n.x.as_ref()?, page_w)?;
-            let y = resolve_axis(n.y.as_ref()?, page_h)?;
-            let w = resolve_axis(n.w.as_ref()?, page_w)?;
-            let h = resolve_axis(n.h.as_ref()?, page_h)?;
+            let x = resolve_axis(pv_to_dim(n.x.as_ref())?, page_w)?;
+            let y = resolve_axis(pv_to_dim(n.y.as_ref())?, page_h)?;
+            let w = resolve_axis(pv_to_dim(n.w.as_ref())?, page_w)?;
+            let h = resolve_axis(pv_to_dim(n.h.as_ref())?, page_h)?;
             Some((x, y, w, h))
         }
         Node::Ellipse(n) => {
-            let x = resolve_axis(n.x.as_ref()?, page_w)?;
-            let y = resolve_axis(n.y.as_ref()?, page_h)?;
-            let w = resolve_axis(n.w.as_ref()?, page_w)?;
-            let h = resolve_axis(n.h.as_ref()?, page_h)?;
+            let x = resolve_axis(pv_to_dim(n.x.as_ref())?, page_w)?;
+            let y = resolve_axis(pv_to_dim(n.y.as_ref())?, page_h)?;
+            let w = resolve_axis(pv_to_dim(n.w.as_ref())?, page_w)?;
+            let h = resolve_axis(pv_to_dim(n.h.as_ref())?, page_h)?;
             Some((x, y, w, h))
         }
         Node::Image(n) => {
-            let x = resolve_axis(n.x.as_ref()?, page_w)?;
-            let y = resolve_axis(n.y.as_ref()?, page_h)?;
-            let w = resolve_axis(n.w.as_ref()?, page_w)?;
-            let h = resolve_axis(n.h.as_ref()?, page_h)?;
+            let x = resolve_axis(pv_to_dim(n.x.as_ref())?, page_w)?;
+            let y = resolve_axis(pv_to_dim(n.y.as_ref())?, page_h)?;
+            let w = resolve_axis(pv_to_dim(n.w.as_ref())?, page_w)?;
+            let h = resolve_axis(pv_to_dim(n.h.as_ref())?, page_h)?;
             Some((x, y, w, h))
         }
         Node::Frame(n) => {
-            let x = resolve_axis(n.x.as_ref()?, page_w)?;
-            let y = resolve_axis(n.y.as_ref()?, page_h)?;
-            let w = resolve_axis(n.w.as_ref()?, page_w)?;
-            let h = resolve_axis(n.h.as_ref()?, page_h)?;
+            let x = resolve_axis(pv_to_dim(n.x.as_ref())?, page_w)?;
+            let y = resolve_axis(pv_to_dim(n.y.as_ref())?, page_h)?;
+            let w = resolve_axis(pv_to_dim(n.w.as_ref())?, page_w)?;
+            let h = resolve_axis(pv_to_dim(n.h.as_ref())?, page_h)?;
             Some((x, y, w, h))
         }
         Node::Text(n) => {
-            let x = resolve_axis(n.x.as_ref()?, page_w)?;
-            let y = resolve_axis(n.y.as_ref()?, page_h)?;
-            let w = resolve_axis(n.w.as_ref()?, page_w)?;
-            let h = resolve_axis(n.h.as_ref()?, page_h)?;
+            let x = resolve_axis(pv_to_dim(n.x.as_ref())?, page_w)?;
+            let y = resolve_axis(pv_to_dim(n.y.as_ref())?, page_h)?;
+            let w = resolve_axis(pv_to_dim(n.w.as_ref())?, page_w)?;
+            let h = resolve_axis(pv_to_dim(n.h.as_ref())?, page_h)?;
             Some((x, y, w, h))
         }
         Node::Code(n) => {
-            let x = resolve_axis(n.x.as_ref()?, page_w)?;
-            let y = resolve_axis(n.y.as_ref()?, page_h)?;
-            let w = resolve_axis(n.w.as_ref()?, page_w)?;
-            let h = resolve_axis(n.h.as_ref()?, page_h)?;
+            let x = resolve_axis(pv_to_dim(n.x.as_ref())?, page_w)?;
+            let y = resolve_axis(pv_to_dim(n.y.as_ref())?, page_h)?;
+            let w = resolve_axis(pv_to_dim(n.w.as_ref())?, page_w)?;
+            let h = resolve_axis(pv_to_dim(n.h.as_ref())?, page_h)?;
             Some((x, y, w, h))
         }
         Node::Line(n) => {
@@ -122,31 +122,31 @@ pub(in crate::validate::check) fn node_bbox(
         // omitted), so there is no authored bbox to check against the page here.
         // A toc likewise defaults to the live area; no authored bbox check.
         Node::Table(n) => {
-            let x = resolve_axis(n.x.as_ref()?, page_w)?;
-            let y = resolve_axis(n.y.as_ref()?, page_h)?;
-            let w = resolve_axis(n.w.as_ref()?, page_w)?;
-            let h = resolve_axis(n.h.as_ref()?, page_h)?;
+            let x = resolve_axis(pv_to_dim(n.x.as_ref())?, page_w)?;
+            let y = resolve_axis(pv_to_dim(n.y.as_ref())?, page_h)?;
+            let w = resolve_axis(pv_to_dim(n.w.as_ref())?, page_w)?;
+            let h = resolve_axis(pv_to_dim(n.h.as_ref())?, page_h)?;
             Some((x, y, w, h))
         }
         Node::Shape(n) => {
-            let x = resolve_axis(n.x.as_ref()?, page_w)?;
-            let y = resolve_axis(n.y.as_ref()?, page_h)?;
-            let w = resolve_axis(n.w.as_ref()?, page_w)?;
-            let h = resolve_axis(n.h.as_ref()?, page_h)?;
+            let x = resolve_axis(pv_to_dim(n.x.as_ref())?, page_w)?;
+            let y = resolve_axis(pv_to_dim(n.y.as_ref())?, page_h)?;
+            let w = resolve_axis(pv_to_dim(n.w.as_ref())?, page_w)?;
+            let h = resolve_axis(pv_to_dim(n.h.as_ref())?, page_h)?;
             Some((x, y, w, h))
         }
         Node::Pattern(n) => {
-            let x = resolve_axis(n.x.as_ref()?, page_w)?;
-            let y = resolve_axis(n.y.as_ref()?, page_h)?;
-            let w = resolve_axis(n.w.as_ref()?, page_w)?;
-            let h = resolve_axis(n.h.as_ref()?, page_h)?;
+            let x = resolve_axis(pv_to_dim(n.x.as_ref())?, page_w)?;
+            let y = resolve_axis(pv_to_dim(n.y.as_ref())?, page_h)?;
+            let w = resolve_axis(pv_to_dim(n.w.as_ref())?, page_w)?;
+            let h = resolve_axis(pv_to_dim(n.h.as_ref())?, page_h)?;
             Some((x, y, w, h))
         }
         Node::Chart(n) => {
-            let x = resolve_axis(n.x.as_ref()?, page_w)?;
-            let y = resolve_axis(n.y.as_ref()?, page_h)?;
-            let w = resolve_axis(n.w.as_ref()?, page_w)?;
-            let h = resolve_axis(n.h.as_ref()?, page_h)?;
+            let x = resolve_axis(pv_to_dim(n.x.as_ref())?, page_w)?;
+            let y = resolve_axis(pv_to_dim(n.y.as_ref())?, page_h)?;
+            let w = resolve_axis(pv_to_dim(n.w.as_ref())?, page_w)?;
+            let h = resolve_axis(pv_to_dim(n.h.as_ref())?, page_h)?;
             Some((x, y, w, h))
         }
         // A connector has no authored bbox: its endpoints are DERIVED from the
@@ -639,16 +639,124 @@ pub(in crate::validate::check) fn check_sibling_anchors(
     }
 }
 
+/// Borrowed token-validation context passed to geometry helpers.
+///
+/// Bundles the two token-related arguments that `check_optional_dim` and its
+/// callees need so the function stays within the 7-argument clippy limit without
+/// an `#[allow]`.
+pub(super) struct TokenEnv<'a> {
+    pub(super) referenced: &'a mut BTreeSet<String>,
+    pub(super) resolved: &'a BTreeMap<String, ResolvedToken>,
+}
+
 /// - absent AND `required` (e.g. a non-flow-positioned leaf) → `node.missing_geometry` (Error).
 /// - absent AND NOT `required` (e.g. a direct child of a `layout="flow"`
 ///   frame, whose position/size is supplied by the flow algorithm) → no
 ///   diagnostic.
 /// - present but `Unit::Unknown` → `node.invalid_geometry` (Error) regardless
 ///   of `required`.
+///
+/// A geometry property accepts EITHER a raw dimension literal (`(px)N`) OR a
+/// `(token)"id"` dimension token ref (exactly like `font-size`). The dispatch:
+/// - absent + required → `node.missing_geometry`.
+/// - `Dimension` with `Unit::Unknown` → `node.invalid_geometry`; a known unit is ok.
+/// - `TokenRef(id)` → PRESENT and geometrically valid; existence + dimension-type
+///   validation and reference registration are delegated to [`check_visual_prop`]
+///   with [`VisualExpect::Dimension`] (which, on a token ref, never emits
+///   `token.raw_visual_literal` — raw px geometry is intentionally allowed).
+/// - `Literal` / `DataRef` → `node.invalid_geometry` (geometry can't be a bare
+///   string or data ref).
 pub(super) fn check_optional_dim(
     node_id: &str,
     prop: &str,
-    dim: Option<&crate::ast::value::Dimension>,
+    value: Option<&PropertyValue>,
+    required: bool,
+    span: Option<crate::ast::Span>,
+    tokens: &mut TokenEnv<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match value {
+        None if required => {
+            diagnostics.push(Diagnostic::error(
+                "node.missing_geometry",
+                format!(
+                    "node '{}': required geometry property '{}' is missing",
+                    node_id, prop
+                ),
+                span,
+                Some(node_id.to_owned()),
+            ));
+        }
+        None => {
+            // Flow-positioned child: geometry is supplied by the parent.
+        }
+        Some(PropertyValue::Dimension(d)) if matches!(d.unit, Unit::Unknown(_)) => {
+            diagnostics.push(Diagnostic::error(
+                "node.invalid_geometry",
+                format!(
+                    "node '{}': geometry property '{}' has an unrecognized unit; \
+                     allowed units are px, pt, pct, deg",
+                    node_id, prop
+                ),
+                span,
+                Some(node_id.to_owned()),
+            ));
+        }
+        Some(PropertyValue::Dimension(_)) => {
+            // valid raw dimension literal.
+        }
+        Some(pv @ PropertyValue::TokenRef(_)) => {
+            // Present + valid for the geometry check. Existence, dimension-type
+            // compatibility, and reference registration are handled by the shared
+            // visual-prop machinery (a token ref never trips raw_visual_literal).
+            check_visual_prop(
+                node_id,
+                prop,
+                Some(pv),
+                VisualExpect::Dimension,
+                &mut *tokens.referenced,
+                tokens.resolved,
+                diagnostics,
+            );
+        }
+        Some(PropertyValue::Literal(_) | PropertyValue::DataRef(_)) => {
+            diagnostics.push(Diagnostic::error(
+                "node.invalid_geometry",
+                format!(
+                    "node '{}': geometry property '{}' must be a dimension literal \
+                     (e.g. (px)100) or a dimension token ref; a bare string or \
+                     data ref is not allowed",
+                    node_id, prop
+                ),
+                span,
+                Some(node_id.to_owned()),
+            ));
+        }
+    }
+}
+
+/// Narrow an optional geometry [`PropertyValue`] to a raw [`Dimension`].
+///
+/// Returns `Some(&Dimension)` only for a `PropertyValue::Dimension`; a token ref
+/// (or any non-dimension variant) yields `None`, so geometry expressed as a
+/// `(token)` ref is treated as "not resolvable at validate time" by the
+/// off-canvas / bbox checks (tokens resolve in a later pass).
+pub(in crate::validate::check) fn pv_to_dim(pv: Option<&PropertyValue>) -> Option<&Dimension> {
+    match pv? {
+        PropertyValue::Dimension(d) => Some(d),
+        PropertyValue::TokenRef(_) | PropertyValue::Literal(_) | PropertyValue::DataRef(_) => None,
+    }
+}
+
+/// Validate a RAW [`Dimension`] geometry property (no token-ref support).
+///
+/// Used for geometry axes that are still typed `Option<Dimension>` and do NOT
+/// accept a `(token)` ref — e.g. the `line` endpoints `x1`/`y1`/`x2`/`y2`. Same
+/// missing/invalid-unit diagnostics as the dimension arm of [`check_optional_dim`].
+pub(super) fn check_dimension_geom(
+    node_id: &str,
+    prop: &str,
+    dim: Option<&Dimension>,
     required: bool,
     span: Option<crate::ast::Span>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -665,9 +773,7 @@ pub(super) fn check_optional_dim(
                 Some(node_id.to_owned()),
             ));
         }
-        None => {
-            // Flow-positioned child: geometry is supplied by the parent.
-        }
+        None => {}
         Some(d) if matches!(d.unit, Unit::Unknown(_)) => {
             diagnostics.push(Diagnostic::error(
                 "node.invalid_geometry",
@@ -680,9 +786,7 @@ pub(super) fn check_optional_dim(
                 Some(node_id.to_owned()),
             ));
         }
-        Some(_) => {
-            // valid
-        }
+        Some(_) => {}
     }
 }
 

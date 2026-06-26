@@ -248,7 +248,7 @@ mod tests {
     use zenith_core::{Node, Page, TextNode, TextSpan, TocNode};
 
     use super::resolve_toc_to_text;
-    use crate::compile::util::px;
+    use crate::compile::util::{px, px_prop};
 
     fn make_span(text: &str) -> TextSpan {
         TextSpan {
@@ -279,10 +279,10 @@ mod tests {
             anchor_parent: None,
             name: None,
             role: Some(role.to_owned()),
-            x: Some(px(0.0)),
-            y: Some(px(0.0)),
-            w: Some(px(100.0)),
-            h: Some(px(20.0)),
+            x: Some(px_prop(0.0)),
+            y: Some(px_prop(0.0)),
+            w: Some(px_prop(100.0)),
+            h: Some(px_prop(20.0)),
             align: None,
             v_align: None,
             direction: None,
@@ -364,10 +364,10 @@ mod tests {
             match_style: match_style.map(str::to_owned),
             leader: None,
             folio_style: None,
-            x: Some(px(50.0)),
-            y: Some(px(100.0)),
-            w: Some(px(400.0)),
-            h: Some(px(300.0)),
+            x: Some(px_prop(50.0)),
+            y: Some(px_prop(100.0)),
+            w: Some(px_prop(400.0)),
+            h: Some(px_prop(300.0)),
             style: None,
             fill: None,
             font_family: None,

@@ -6,7 +6,8 @@ use zenith_core::{Diagnostic, FrameNode, Node, dim_to_px};
 use crate::ir::SceneCommand;
 
 use super::super::util::{
-    blend_mode_ir, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
+    blend_mode_ir, resolve_geometry_px, resolve_property_dimension_px, rotation_degrees,
+    unsupported_unit_diag,
 };
 use super::super::{NodeCtx, RenderCtx, compile_node, style_prop};
 use super::flow::{node_declared_h, node_declared_w, node_skipped_in_flow, with_flow_box};
@@ -54,7 +55,7 @@ pub(in crate::compile) fn compile_frame(
         return;
     };
 
-    let Some(frame_x) = dim_to_px(x_dim.value, &x_dim.unit) else {
+    let Some(frame_x) = resolve_geometry_px(Some(x_dim), cx.resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "frame",
             &frame.id,
@@ -63,7 +64,7 @@ pub(in crate::compile) fn compile_frame(
         ));
         return;
     };
-    let Some(frame_y) = dim_to_px(y_dim.value, &y_dim.unit) else {
+    let Some(frame_y) = resolve_geometry_px(Some(y_dim), cx.resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "frame",
             &frame.id,
@@ -72,7 +73,7 @@ pub(in crate::compile) fn compile_frame(
         ));
         return;
     };
-    let Some(frame_w) = dim_to_px(w_dim.value, &w_dim.unit) else {
+    let Some(frame_w) = resolve_geometry_px(Some(w_dim), cx.resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "frame",
             &frame.id,
@@ -81,7 +82,7 @@ pub(in crate::compile) fn compile_frame(
         ));
         return;
     };
-    let Some(frame_h) = dim_to_px(h_dim.value, &h_dim.unit) else {
+    let Some(frame_h) = resolve_geometry_px(Some(h_dim), cx.resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "frame",
             &frame.id,
@@ -277,12 +278,12 @@ fn compile_frame_flow(
     for (i, child) in laid_out.iter().enumerate() {
         // Cross-axis = start; child width = own declared `w` or the content
         // width. (A text child's own `align` still centers WITHIN its width.)
-        let child_w = node_declared_w(child).unwrap_or(content_w);
+        let child_w = node_declared_w(child, cx.resolved).unwrap_or(content_w);
 
         // Vertical extent: own declared `h` when present, else the MEASURED
         // intrinsic height returned by compiling the child (text/code wrapped
         // height; 0.0 for leaves with no declared height).
-        let declared_h = node_declared_h(child);
+        let declared_h = node_declared_h(child, cx.resolved);
 
         // Inject the absolute box onto a clone; compile with the SAME ctx
         // (dx/dy unchanged — injected coords are absolute page coords).

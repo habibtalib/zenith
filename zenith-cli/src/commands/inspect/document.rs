@@ -8,7 +8,9 @@
 //! [`NodeEntry`] values that serialise to JSON and render to human-readable
 //! format.
 
-use zenith_core::{Dimension, FrameNode, GroupNode, KdlAdapter, KdlSource, Node, Page, Unit};
+use zenith_core::{
+    Dimension, FrameNode, GroupNode, KdlAdapter, KdlSource, Node, Page, PropertyValue, Unit,
+};
 
 use crate::commands::serialize_pretty;
 use crate::json_types::RecipeInspectJson;
@@ -397,9 +399,19 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Instance(n) => NodeEntry {
             id: n.id.clone(),
             kind: "instance".into(),
-            // An instance carries only an x/y origin (no w/h box); report those
-            // two via the bbox geometry slots with w/h left None.
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), None, None),
+            // An instance carries only an x/y origin (no w/h box); its x/y stay
+            // raw `Dimension` (not token-ref geometry), so report them directly.
+            geometry: Some(NodeGeometry {
+                x: opt_dim_to_f64(n.x.as_ref()),
+                y: opt_dim_to_f64(n.y.as_ref()),
+                w: None,
+                h: None,
+                x1: None,
+                y1: None,
+                x2: None,
+                y2: None,
+                point_count: None,
+            }),
             visible: n.visible,
             locked: n.locked,
             children: vec![],
@@ -604,17 +616,27 @@ fn opt_dim_to_f64(d: Option<&Dimension>) -> Option<f64> {
     d.map(dim_to_f64)
 }
 
+/// A geometry property is now `(px)N` literal OR `(token)"id"` dimension ref.
+/// Inspect reports the literal px value; a token ref (and any non-dimension form)
+/// has no resolvable value without the token table, so it shows as `None`.
+fn opt_pv_to_f64(pv: Option<&PropertyValue>) -> Option<f64> {
+    match pv? {
+        PropertyValue::Dimension(d) => Some(dim_to_f64(d)),
+        PropertyValue::TokenRef(_) | PropertyValue::Literal(_) | PropertyValue::DataRef(_) => None,
+    }
+}
+
 fn bbox_geom(
-    x: Option<&Dimension>,
-    y: Option<&Dimension>,
-    w: Option<&Dimension>,
-    h: Option<&Dimension>,
+    x: Option<&PropertyValue>,
+    y: Option<&PropertyValue>,
+    w: Option<&PropertyValue>,
+    h: Option<&PropertyValue>,
 ) -> Option<NodeGeometry> {
     Some(NodeGeometry {
-        x: opt_dim_to_f64(x),
-        y: opt_dim_to_f64(y),
-        w: opt_dim_to_f64(w),
-        h: opt_dim_to_f64(h),
+        x: opt_pv_to_f64(x),
+        y: opt_pv_to_f64(y),
+        w: opt_pv_to_f64(w),
+        h: opt_pv_to_f64(h),
         x1: None,
         y1: None,
         x2: None,

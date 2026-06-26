@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::{ChartNode, Diagnostic, FontStyle, ResolvedToken, dim_to_px};
+use zenith_core::{ChartNode, Diagnostic, FontStyle, ResolvedToken};
 use zenith_layout::{ShapeRequest, TextDirection, TextLayoutEngine};
 
 use crate::ir::{Color, SceneCommand};
@@ -20,7 +20,10 @@ use super::super::NodeCtx;
 use super::super::RenderCtx;
 use super::super::paint::resolve_property_color;
 use super::super::text::run_to_scene_glyphs;
-use super::super::util::{missing_geometry_diag, resolve_anchored_axis, unsupported_unit_diag};
+use super::super::util::{
+    AxisTarget, missing_geometry_diag, resolve_anchored_axis, resolve_geometry_px,
+    unsupported_unit_diag,
+};
 use super::axis::{AxisColors, emit_axis_lines, emit_gridlines_and_labels};
 use super::bar::{BarMode, CatLabels, emit_bars, emit_category_labels, stacked_max};
 use super::frame::{PlotArea, plot_area};
@@ -96,7 +99,7 @@ pub(in crate::compile) fn compile_chart(
         diagnostics.push(missing_geometry_diag("chart", &chart.id, chart.source_span));
         return 0.0;
     };
-    let Some(w) = dim_to_px(w_dim.value, &w_dim.unit) else {
+    let Some(w) = resolve_geometry_px(Some(w_dim), cx.resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "chart",
             &chart.id,
@@ -105,7 +108,7 @@ pub(in crate::compile) fn compile_chart(
         ));
         return 0.0;
     };
-    let Some(h) = dim_to_px(h_dim.value, &h_dim.unit) else {
+    let Some(h) = resolve_geometry_px(Some(h_dim), cx.resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "chart",
             &chart.id,
@@ -118,10 +121,13 @@ pub(in crate::compile) fn compile_chart(
     let anchor_xy = cx.anchors.get(&chart.id).copied();
 
     let Some(x_raw) = resolve_anchored_axis(
-        "chart",
-        &chart.id,
-        "x",
+        AxisTarget {
+            kind: "chart",
+            node_id: &chart.id,
+            axis: "x",
+        },
         chart.x.as_ref(),
+        cx.resolved,
         anchor_xy.map(|(ax, _)| ax),
         chart.source_span,
         diagnostics,
@@ -129,10 +135,13 @@ pub(in crate::compile) fn compile_chart(
         return 0.0;
     };
     let Some(y_raw) = resolve_anchored_axis(
-        "chart",
-        &chart.id,
-        "y",
+        AxisTarget {
+            kind: "chart",
+            node_id: &chart.id,
+            axis: "y",
+        },
         chart.y.as_ref(),
+        cx.resolved,
         anchor_xy.map(|(_, ay)| ay),
         chart.source_span,
         diagnostics,

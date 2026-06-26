@@ -10,7 +10,8 @@ use crate::ast::node::{ConnectorNode, ShapeNode, UnknownNode};
 use crate::diagnostics::Diagnostic;
 
 use super::shared::{
-    AnchorParentCtx, AnchorProps, check_anchor, check_optional_dim, check_spans, check_style_ref,
+    AnchorParentCtx, AnchorProps, TokenEnv, check_anchor, check_optional_dim, check_spans,
+    check_style_ref,
 };
 use super::suggest::check_unknown_props;
 use crate::validate::check::nodes::WalkCtx;
@@ -67,38 +68,48 @@ pub(in crate::validate::check) fn check_shape(
     let xy_required = geom_required && !anchor_active;
 
     // Required geometry: x, y, w, h must all be present.
-    check_optional_dim(
-        &s.id,
-        "x",
-        s.x.as_ref(),
-        xy_required,
-        s.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &s.id,
-        "y",
-        s.y.as_ref(),
-        xy_required,
-        s.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &s.id,
-        "w",
-        s.w.as_ref(),
-        geom_required,
-        s.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &s.id,
-        "h",
-        s.h.as_ref(),
-        geom_required,
-        s.source_span,
-        diagnostics,
-    );
+    {
+        let mut tokens = TokenEnv {
+            referenced: referenced_token_ids,
+            resolved: resolved_tokens,
+        };
+        check_optional_dim(
+            &s.id,
+            "x",
+            s.x.as_ref(),
+            xy_required,
+            s.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &s.id,
+            "y",
+            s.y.as_ref(),
+            xy_required,
+            s.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &s.id,
+            "w",
+            s.w.as_ref(),
+            geom_required,
+            s.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &s.id,
+            "h",
+            s.h.as_ref(),
+            geom_required,
+            s.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+    }
 
     // Visual properties — all token-required.
     check_visual_prop(

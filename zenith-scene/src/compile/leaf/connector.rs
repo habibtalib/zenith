@@ -18,7 +18,7 @@ use super::super::text::{
     MeasureEnv, TextCompileEnv, compile_text, empty_md_blocks, measure_text_wrapped_height,
     resolve_text_families,
 };
-use super::super::util::{px, resolve_property_dimension_px, rotation_degrees};
+use super::super::util::{px_prop, resolve_property_dimension_px, rotation_degrees};
 use super::poly::flat_points_centroid_center;
 use super::routing;
 
@@ -393,10 +393,10 @@ fn emit_connector_label(
         id: format!("{}/label", connector.id),
         name: None,
         role: None,
-        x: Some(px(lx)),
-        y: Some(px(ly)),
-        w: Some(px(LABEL_W)),
-        h: Some(px(LABEL_H)),
+        x: Some(px_prop(lx)),
+        y: Some(px_prop(ly)),
+        w: Some(px_prop(LABEL_W)),
+        h: Some(px_prop(LABEL_H)),
         align: Some("center".to_owned()),
         v_align: None,
         direction: None,
@@ -461,7 +461,7 @@ fn emit_connector_label(
     )
     .unwrap_or(0.0);
     let v_offset = ((LABEL_H - wrapped_h) / 2.0).max(0.0);
-    synth.y = Some(px(ly + v_offset));
+    synth.y = Some(px_prop(ly + v_offset));
 
     // The midpoint (mx, my) is already in page-absolute coordinates (the flat
     // points were built from page-absolute anchor points). Zero the ctx

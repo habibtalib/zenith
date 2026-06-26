@@ -13,7 +13,7 @@ use super::super::paint::{
     NodeEffect, emit_node_with_effects, resolve_property_filter, resolve_property_mask,
     resolve_property_shadow,
 };
-use super::super::util::{blend_mode_ir, rotation_degrees};
+use super::super::util::{blend_mode_ir, resolve_geometry_px, rotation_degrees};
 use super::baseline::{baseline_grid_snap_failed_diag, snap_to_baseline_grid};
 use super::ctx::{ChainMemberPlace, EmitStyle};
 use super::emit::emit_lines;
@@ -42,11 +42,11 @@ pub(in crate::compile) fn render_chain_member(
     } = place;
 
     // Box width is required to position lines; height/align are optional.
-    let box_w = match text.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)) {
+    let box_w = match resolve_geometry_px(text.w.as_ref(), resolved) {
         Some(w) => w,
         None => return 0.0,
     };
-    let box_h_opt: Option<f64> = text.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+    let box_h_opt: Option<f64> = resolve_geometry_px(text.h.as_ref(), resolved);
     let align = text.align.as_deref().unwrap_or("start");
     let deco_thickness = (font_size as f64 / 14.0).max(1.0);
 

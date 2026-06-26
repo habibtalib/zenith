@@ -79,37 +79,54 @@ pub(super) fn missing_geometry_diag(kind: &str, node_id: &str, span: Option<Span
     )
 }
 
+/// Identity fields for a geometry axis resolution: the node kind, its id, and
+/// the axis name (`"x"` or `"y"`). Bundled to keep [`resolve_anchored_axis`]
+/// under the 7-argument Clippy limit.
+#[derive(Clone, Copy)]
+pub(super) struct AxisTarget<'a> {
+    pub(super) kind: &'a str,
+    pub(super) node_id: &'a str,
+    pub(super) axis: &'a str,
+}
+
 /// Resolve a single position axis (`x` or `y`) to pixels, honoring a
 /// page-relative anchor fallback.
 ///
-/// - `dim = Some` (an explicitly-authored value): converts to px; on an
-///   unsupported unit, pushes `scene.unsupported_unit` and returns `None`.
+/// - `dim = Some` (an explicitly-authored value): a raw dimension or a
+///   dimension token ref resolves to px via [`resolve_geometry_px`]; when it
+///   cannot resolve (unsupported unit, or a token that isn't a dimension /
+///   doesn't resolve), pushes `scene.unsupported_unit` and returns `None`.
 /// - `dim = None`: uses `anchor_val` when present (anchor-derived); otherwise
 ///   pushes `scene.missing_geometry` and returns `None`.
 ///
 /// A `None` return always means a diagnostic was pushed and the caller must
-/// skip the node. An explicit value always wins over the anchor.
+/// skip the node. An explicit value always wins over the anchor. The raw-`px`
+/// path is byte-identical to the prior `Dimension`-only behavior.
 pub(super) fn resolve_anchored_axis(
-    kind: &str,
-    node_id: &str,
-    axis: &str,
-    dim: Option<&Dimension>,
+    target: AxisTarget<'_>,
+    dim: Option<&PropertyValue>,
+    resolved: &BTreeMap<String, ResolvedToken>,
     anchor_val: Option<f64>,
     span: Option<Span>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<f64> {
     match dim {
-        Some(d) => match dim_to_px(d.value, &d.unit) {
+        Some(prop) => match resolve_geometry_px(Some(prop), resolved) {
             Some(v) => Some(v),
             None => {
-                diagnostics.push(unsupported_unit_diag(kind, node_id, axis, span));
+                diagnostics.push(unsupported_unit_diag(
+                    target.kind,
+                    target.node_id,
+                    target.axis,
+                    span,
+                ));
                 None
             }
         },
         None => match anchor_val {
             Some(v) => Some(v),
             None => {
-                diagnostics.push(missing_geometry_diag(kind, node_id, span));
+                diagnostics.push(missing_geometry_diag(target.kind, target.node_id, span));
                 None
             }
         },
@@ -125,6 +142,17 @@ pub(super) fn px(v: f64) -> Dimension {
         value: v,
         unit: Unit::Px,
     }
+}
+
+/// Build a `(px)`-unit geometry [`PropertyValue`] from a raw pixel value.
+///
+/// Used to synthesize the `x`/`y`/`w`/`h` of constructed nodes (footnote text,
+/// shape labels, connector labels, TOC rows) now that geometry fields are typed
+/// `Option<PropertyValue>`. The produced value is `PropertyValue::Dimension`, so
+/// it resolves through [`resolve_geometry_px`] to exactly `v` — byte-identical to
+/// the prior raw-`Dimension` synthesis.
+pub(super) fn px_prop(v: f64) -> PropertyValue {
+    PropertyValue::Dimension(px(v))
 }
 
 /// Resolve an optional dimension-valued property to pixels.
@@ -158,5 +186,39 @@ pub(super) fn resolve_property_dimension_px(
         // bringing literal visual dimensions to parity with token-backed ones.
         Some(PropertyValue::Dimension(dim)) => dim_to_px(dim.value, &dim.unit).unwrap_or(default),
         Some(PropertyValue::Literal(_)) | Some(PropertyValue::DataRef(_)) | None => default,
+    }
+}
+
+/// Resolve an optional geometry property (`x`/`y`/`w`/`h`) to pixels.
+///
+/// Geometry fields on box nodes are typed `Option<PropertyValue>`: a raw
+/// dimension (`(px)120`) resolves directly, and a dimension token ref
+/// (`(token)"dim.h"`) resolves through the token table to px. Any other shape —
+/// an absent value, a literal, a data ref, an unresolved/non-dimension token, or
+/// an unsupported unit — yields `None`, matching the prior "missing or non-px
+/// dimension" behavior exactly. The raw-`Dimension` path is byte-identical to
+/// the old `dim_to_px(d.value, &d.unit)` read.
+pub(super) fn resolve_geometry_px(
+    prop: Option<&PropertyValue>,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> Option<f64> {
+    match prop? {
+        PropertyValue::TokenRef(id) => match resolved.get(id.as_str()) {
+            Some(rt) => match &rt.value {
+                ResolvedValue::Dimension(d) => dim_to_px(d.value, &d.unit),
+                ResolvedValue::Color(_)
+                | ResolvedValue::CmykColor { .. }
+                | ResolvedValue::Number(_)
+                | ResolvedValue::FontFamily(_)
+                | ResolvedValue::FontWeight(_)
+                | ResolvedValue::Gradient(_)
+                | ResolvedValue::Shadow(_)
+                | ResolvedValue::Filter(_)
+                | ResolvedValue::Mask(_) => None,
+            },
+            None => None,
+        },
+        PropertyValue::Dimension(d) => dim_to_px(d.value, &d.unit),
+        PropertyValue::Literal(_) | PropertyValue::DataRef(_) => None,
     }
 }

@@ -45,13 +45,12 @@ use std::collections::BTreeMap;
 
 use zenith_core::{
     Diagnostic, FontProvider, Node, ResolvedToken, Style, TableColumn, TableNode, TableRow,
-    dim_to_px,
 };
 use zenith_layout::RustybuzzEngine;
 
 use super::table::{GridDims, compute_table_layout, place_cells};
 use super::text::MeasureEnv;
-use super::util::resolve_property_dimension_px;
+use super::util::{resolve_geometry_px, resolve_property_dimension_px};
 
 /// The rows + columns a single flow member must render: the source's header rows
 /// cloned in front of this member's assigned body-row slice, plus the source's
@@ -77,22 +76,18 @@ struct Member<'a> {
     pad: f64,
 }
 
-/// Resolve a table node's explicit box + gap/pad to pixels, or `None` if any of
-/// `x`/`y`/`w`/`h` is absent or uses an unsupported unit.
-fn member_box(table: &TableNode) -> Option<(f64, f64)> {
+/// Resolve a table node's explicit box to pixels, or `None` if any of
+/// `x`/`y`/`w`/`h` is absent, a non-dimension, an unresolved token, or uses an
+/// unsupported unit. Raw `(px)` dims are byte-identical to the prior read;
+/// dimension token refs resolve via the token table.
+fn member_box(table: &TableNode, resolved: &BTreeMap<String, ResolvedToken>) -> Option<(f64, f64)> {
     // Full geometry must resolve to be a valid member box (mirrors the chain
     // pre-pass), even though only w/h drive the fit decision.
-    let (xd, yd, wd, hd) = (
-        table.x.as_ref()?,
-        table.y.as_ref()?,
-        table.w.as_ref()?,
-        table.h.as_ref()?,
-    );
-    dim_to_px(xd.value, &xd.unit)?;
-    dim_to_px(yd.value, &yd.unit)?;
+    resolve_geometry_px(table.x.as_ref(), resolved)?;
+    resolve_geometry_px(table.y.as_ref(), resolved)?;
     Some((
-        dim_to_px(wd.value, &wd.unit)?,
-        dim_to_px(hd.value, &hd.unit)?,
+        resolve_geometry_px(table.w.as_ref(), resolved)?,
+        resolve_geometry_px(table.h.as_ref(), resolved)?,
     ))
 }
 
@@ -108,7 +103,7 @@ fn collect_flows<'a>(
         match node {
             Node::Table(t) => {
                 if let Some(flow_id) = &t.flows
-                    && let Some((w, h)) = member_box(t)
+                    && let Some((w, h)) = member_box(t, resolved)
                 {
                     let gap = resolve_property_dimension_px(t.gap.as_ref(), resolved, 0.0).max(0.0);
                     let pad = resolve_property_dimension_px(t.cell_padding.as_ref(), resolved, 0.0)

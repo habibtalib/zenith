@@ -69,8 +69,11 @@ pub(in crate::compile) fn compile_instance(
         id: instance.id.clone(),
         name: instance.name.clone(),
         role: instance.role.clone(),
-        x: instance.x.clone(),
-        y: instance.y.clone(),
+        // InstanceNode `x`/`y` stay `Dimension`; the synthetic group's geometry
+        // is `Option<PropertyValue>`, so wrap each authored origin as a literal
+        // dimension property (resolves to the same px via `resolve_geometry_px`).
+        x: instance.x.clone().map(PropertyValue::Dimension),
+        y: instance.y.clone().map(PropertyValue::Dimension),
         w: None,
         h: None,
         opacity: instance.opacity,

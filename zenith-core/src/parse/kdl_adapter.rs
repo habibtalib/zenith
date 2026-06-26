@@ -147,6 +147,15 @@ mod tests {
     use super::*;
     use crate::ast::{Node, PropertyValue, TokenLiteral, TokenType, TokenValue, Unit};
 
+    /// Read the magnitude of a geometry `PropertyValue` that is a raw dimension
+    /// literal (the geometry axes accept either a `(px)N` literal or a token ref).
+    fn geom_value(pv: Option<&PropertyValue>) -> Option<f64> {
+        match pv {
+            Some(PropertyValue::Dimension(d)) => Some(d.value),
+            _ => None,
+        }
+    }
+
     /// A minimal but realistic `.zen` document exercising the full v0 parse
     /// surface: project, tokens (color + fontFamily + dimension + second color),
     /// empty styles, document → page → rect + text.
@@ -229,8 +238,8 @@ mod tests {
         match &page.children[0] {
             Node::Rect(r) => {
                 assert_eq!(r.id, "bg.rect");
-                assert_eq!(r.x.as_ref().map(|d| d.value), Some(0.0));
-                assert_eq!(r.w.as_ref().map(|d| d.value), Some(640.0));
+                assert_eq!(geom_value(r.x.as_ref()), Some(0.0));
+                assert_eq!(geom_value(r.w.as_ref()), Some(640.0));
                 match &r.fill {
                     Some(PropertyValue::TokenRef(tok)) => assert_eq!(tok, "color.bg"),
                     other => panic!("expected token ref fill, got {other:?}"),
@@ -785,10 +794,10 @@ mod tests {
                 assert_eq!(t.match_style, None);
                 assert_eq!(t.leader.as_deref(), Some("."));
                 assert_eq!(t.folio_style.as_deref(), Some("decimal"));
-                assert_eq!(t.x.as_ref().map(|d| d.value), Some(50.0));
-                assert_eq!(t.y.as_ref().map(|d| d.value), Some(100.0));
-                assert_eq!(t.w.as_ref().map(|d| d.value), Some(400.0));
-                assert_eq!(t.h.as_ref().map(|d| d.value), Some(300.0));
+                assert_eq!(geom_value(t.x.as_ref()), Some(50.0));
+                assert_eq!(geom_value(t.y.as_ref()), Some(100.0));
+                assert_eq!(geom_value(t.w.as_ref()), Some(400.0));
+                assert_eq!(geom_value(t.h.as_ref()), Some(300.0));
                 assert_eq!(t.style.as_deref(), Some("body"));
             }
             other => panic!("expected Toc, got {other:?}"),

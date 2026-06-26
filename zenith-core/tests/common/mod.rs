@@ -70,6 +70,12 @@ pub fn token_ref(id: &str) -> PropertyValue {
     PropertyValue::TokenRef(id.to_owned())
 }
 
+/// A raw `(px)v` dimension wrapped as a geometry `PropertyValue`, for the
+/// `x`/`y`/`w`/`h` fields that now accept a dimension literal OR a token ref.
+pub fn pxv(v: f64) -> PropertyValue {
+    PropertyValue::Dimension(px(v))
+}
+
 pub fn minimal_rect(id: &str, fill: Option<PropertyValue>) -> Node {
     Node::Rect(Box::new(RectNode {
         shadow: None,
@@ -78,10 +84,10 @@ pub fn minimal_rect(id: &str, fill: Option<PropertyValue>) -> Node {
         id: id.to_owned(),
         name: None,
         role: None,
-        x: Some(px(0.0)),
-        y: Some(px(0.0)),
-        w: Some(px(100.0)),
-        h: Some(px(100.0)),
+        x: Some(pxv(0.0)),
+        y: Some(pxv(0.0)),
+        w: Some(pxv(100.0)),
+        h: Some(pxv(100.0)),
         radius: None,
         radius_tl: None,
         radius_tr: None,
@@ -127,10 +133,10 @@ pub fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
         id: id.to_owned(),
         name: None,
         role: None,
-        x: Some(px(0.0)),
-        y: Some(px(0.0)),
-        w: Some(px(200.0)),
-        h: Some(px(40.0)),
+        x: Some(pxv(0.0)),
+        y: Some(pxv(0.0)),
+        w: Some(pxv(200.0)),
+        h: Some(pxv(40.0)),
         align: None,
         v_align: None,
         direction: None,
@@ -293,10 +299,10 @@ pub fn rect_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
         id: id.to_owned(),
         name: None,
         role: None,
-        x: Some(px(x)),
-        y: Some(px(y)),
-        w: Some(px(w)),
-        h: Some(px(h)),
+        x: Some(pxv(x)),
+        y: Some(pxv(y)),
+        w: Some(pxv(w)),
+        h: Some(pxv(h)),
         radius: None,
         radius_tl: None,
         radius_tr: None,

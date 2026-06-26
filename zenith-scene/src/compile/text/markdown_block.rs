@@ -41,7 +41,7 @@ use zenith_core::{
 use crate::ir::{Color, Paint, SceneCommand};
 
 use super::super::RenderCtx;
-use super::super::util::resolve_property_dimension_px;
+use super::super::util::{resolve_geometry_px, resolve_property_dimension_px};
 use super::ctx::{TextCompileEnv, empty_md_blocks};
 use super::measure::font_size_px;
 use super::shape::CODE_MONO_FAMILY;
@@ -312,8 +312,8 @@ fn synth_base(text: &TextNode, style: &ResolvedBlockStyle, x: f64, y: f64) -> Te
     n.v_align = Some("top".to_owned());
     n.h = None;
     // x/y geometry slot for this block. Callers must set w.
-    n.x = Some(px_dim(x));
-    n.y = Some(px_dim(y));
+    n.x = Some(PropertyValue::Dimension(px_dim(x)));
+    n.y = Some(PropertyValue::Dimension(px_dim(y)));
     n.w = None;
     // Reset hanging-indent machinery; callers set bullet geometry per block.
     n.bullet = None;
@@ -364,11 +364,8 @@ pub(in crate::compile) fn compile_markdown_blocks(
 
     // Resolve the box origin/width once (anchor derivation when x/y absent).
     let anchor_xy = env.anchors.get(&text.id).copied();
-    let Some(box_x) = text
-        .x
-        .as_ref()
-        .and_then(|d| dim_to_px(d.value, &d.unit))
-        .or(anchor_xy.map(|(ax, _)| ax))
+    let Some(box_x) =
+        resolve_geometry_px(text.x.as_ref(), env.resolved).or(anchor_xy.map(|(ax, _)| ax))
     else {
         diagnostics.push(Diagnostic::advisory(
             "scene.missing_geometry",
@@ -381,11 +378,8 @@ pub(in crate::compile) fn compile_markdown_blocks(
         ));
         return 0.0;
     };
-    let Some(box_y) = text
-        .y
-        .as_ref()
-        .and_then(|d| dim_to_px(d.value, &d.unit))
-        .or(anchor_xy.map(|(_, ay)| ay))
+    let Some(box_y) =
+        resolve_geometry_px(text.y.as_ref(), env.resolved).or(anchor_xy.map(|(_, ay)| ay))
     else {
         diagnostics.push(Diagnostic::advisory(
             "scene.missing_geometry",
@@ -400,7 +394,7 @@ pub(in crate::compile) fn compile_markdown_blocks(
     };
     // Box width: declared, else 0 (a width-less markdown box is unusual but the
     // synth path handles a no-width node by single-lining, mirroring plain text).
-    let box_w = text.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+    let box_w = resolve_geometry_px(text.w.as_ref(), env.resolved);
 
     // The synth compiles must NOT see the block side-channel (would recurse), so
     // run them against an env whose md_blocks is empty.
@@ -429,7 +423,7 @@ pub(in crate::compile) fn compile_markdown_blocks(
                 };
                 let slot_w = box_w.map(|w| (w - indent).max(0.0));
                 let mut synth = synth_base(text, &style, box_x + indent, block_top);
-                synth.w = slot_w.map(px_dim);
+                synth.w = slot_w.map(|v| PropertyValue::Dimension(px_dim(v)));
                 synth.spans = spans.clone();
                 apply_italic(&mut synth.spans, style.italic);
                 compile_text_sized(&synth, synth_env, commands, diagnostics, ctx)
@@ -443,7 +437,7 @@ pub(in crate::compile) fn compile_markdown_blocks(
                 let indent = (*depth as f64) * LIST_INDENT_PX;
                 let slot_w = box_w.map(|w| (w - indent).max(0.0));
                 let mut synth = synth_base(text, &style, box_x + indent, block_top);
-                synth.w = slot_w.map(px_dim);
+                synth.w = slot_w.map(|v| PropertyValue::Dimension(px_dim(v)));
                 // Reuse the node's bullet machinery: the marker is drawn in the
                 // gutter and continuation lines auto-align to the text column.
                 let marker = match kind {
@@ -460,7 +454,7 @@ pub(in crate::compile) fn compile_markdown_blocks(
                 // (no inline parsing). Emit a background rect behind it first.
                 let mut synth = synth_base(text, &style, box_x, block_top);
                 synth.font_family = Some(PropertyValue::Literal(CODE_MONO_FAMILY.to_owned()));
-                synth.w = box_w.map(px_dim);
+                synth.w = box_w.map(|v| PropertyValue::Dimension(px_dim(v)));
                 synth.spans = vec![literal_span(content.clone())];
 
                 // Compile glyphs into a scratch buffer first so the background
@@ -511,7 +505,7 @@ pub(in crate::compile) fn compile_markdown_blocks(
     // continuation box. This fires regardless of the node's `overflow` value
     // (including `overflow="visible"`) — the markdown path always warns on
     // excess height. When `h` is absent there is no box constraint to check.
-    if let Some(box_h) = text.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)) {
+    if let Some(box_h) = resolve_geometry_px(text.h.as_ref(), env.resolved) {
         const EPSILON: f64 = 0.5;
         if total_height > box_h + EPSILON {
             let delta = total_height - box_h;

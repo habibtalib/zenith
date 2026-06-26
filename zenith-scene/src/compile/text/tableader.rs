@@ -2,7 +2,7 @@
 //! left segment (flushed to the box left edge) and a right segment (right-aligned
 //! to the box right edge), with the gap between filled by a repeated leader glyph.
 
-use zenith_core::{Diagnostic, FontProvider, FontStyle, TextNode, dim_to_px};
+use zenith_core::{Diagnostic, FontProvider, FontStyle, TextNode};
 use zenith_layout::{
     RustybuzzEngine, ShapeRequest, TextDirection, TextLayoutEngine, ZenithGlyphRun,
 };
@@ -10,7 +10,7 @@ use zenith_layout::{
 use crate::ir::{Color, SceneCommand};
 
 use super::super::paint::resolve_property_color;
-use super::super::util::rotation_degrees;
+use super::super::util::{resolve_geometry_px, rotation_degrees};
 use super::ctx::TabLeaderArgs;
 use super::shape::{resolve_font_weight, run_to_scene_glyphs};
 
@@ -173,7 +173,7 @@ pub(in crate::compile) fn compile_tab_leader(
     // Box width is required to right-align the page number. Without it, a TOC
     // row cannot be laid out (no box edge to flush to) — surface an advisory and
     // render nothing rather than guessing a width.
-    let Some(box_w) = text.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)) else {
+    let Some(box_w) = resolve_geometry_px(text.w.as_ref(), resolved) else {
         diagnostics.push(Diagnostic::advisory(
             "scene.missing_geometry",
             format!(
@@ -223,7 +223,7 @@ pub(in crate::compile) fn compile_tab_leader(
 
     // Rotation bracket: only when both w and h are present (safe pivot center),
     // mirroring the main text path so rotated TOC pages behave consistently.
-    let box_h_opt: Option<f64> = text.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+    let box_h_opt: Option<f64> = resolve_geometry_px(text.h.as_ref(), resolved);
     let rot = rotation_degrees(text.rotate.as_ref());
     let text_rot = rot
         .zip(Some(box_w))

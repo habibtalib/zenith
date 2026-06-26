@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use zenith_core::{
     Diagnostic, FontProvider, Node, PropertyValue, ResolvedToken, Style, TableColumn, TableNode,
-    TableRow, dim_to_px,
+    TableRow,
 };
 use zenith_layout::RustybuzzEngine;
 
@@ -17,7 +17,7 @@ use super::super::field::FieldCtx;
 use super::super::paint::resolve_property_color;
 use super::super::table_flow::TableFlowAssignments;
 use super::super::text::{MeasureEnv, empty_md_blocks, measure_text_wrapped_height};
-use super::super::util::resolve_property_dimension_px;
+use super::super::util::{resolve_geometry_px, resolve_property_dimension_px};
 use super::super::{ComponentMap, NodeCtx, RenderCtx, compile_node};
 
 use super::collapse::{EdgeKey, EdgeStyle, accumulate_cell_edges, resolve_border_width};
@@ -134,10 +134,10 @@ pub(in crate::compile) fn compile_table(
         return;
     };
     let (Some(table_x), Some(table_y), Some(table_w), Some(table_h)) = (
-        dim_to_px(x_dim.value, &x_dim.unit),
-        dim_to_px(y_dim.value, &y_dim.unit),
-        dim_to_px(w_dim.value, &w_dim.unit),
-        dim_to_px(h_dim.value, &h_dim.unit),
+        resolve_geometry_px(Some(x_dim), cx.resolved),
+        resolve_geometry_px(Some(y_dim), cx.resolved),
+        resolve_geometry_px(Some(w_dim), cx.resolved),
+        resolve_geometry_px(Some(h_dim), cx.resolved),
     ) else {
         diagnostics.push(Diagnostic::advisory(
             "scene.missing_geometry",
@@ -468,7 +468,9 @@ fn emit_cell_children(
         if let Node::Text(t) = child {
             // ── Text: the CELL provides the box (auto-wrap + h/v align) ──
             // Effective wrap width: author `w` else the content width.
-            let wrap_w = child_declared_box(child).0.unwrap_or(content_w);
+            let wrap_w = child_declared_box(child, cx.resolved)
+                .0
+                .unwrap_or(content_w);
             // Effective text align: author `align` else the cell/table h-align
             // mapped to a text align value.
             let h_align_text = match h_align {
@@ -509,13 +511,13 @@ fn emit_cell_children(
             // the author already set one).
             let mut cloned = styled.into_owned();
             if cloned.w.is_none() {
-                cloned.w = Some(super::super::util::px(wrap_w));
+                cloned.w = Some(super::super::util::px_prop(wrap_w));
             }
             if cloned.x.is_none() {
-                cloned.x = Some(super::super::util::px(0.0));
+                cloned.x = Some(super::super::util::px_prop(0.0));
             }
             if cloned.y.is_none() {
-                cloned.y = Some(super::super::util::px(0.0));
+                cloned.y = Some(super::super::util::px_prop(0.0));
             }
             if cloned.align.is_none() {
                 cloned.align = Some(eff_align.to_string());
@@ -542,7 +544,7 @@ fn emit_cell_children(
         }
 
         // ── Non-text: declared-box align-slack into the content box ──────
-        let (cw, ch) = child_declared_box(child);
+        let (cw, ch) = child_declared_box(child, cx.resolved);
         let dx_align = match h_align {
             "center" => ((content_w - cw.unwrap_or(content_w)) / 2.0).max(0.0),
             "end" => (content_w - cw.unwrap_or(content_w)).max(0.0),

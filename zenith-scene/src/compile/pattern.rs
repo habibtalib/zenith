@@ -16,7 +16,11 @@
 //! offsets are computed by `zenith_core::pattern_positions`, which is the single
 //! source of truth shared with any other backend (e.g. the detach transaction op).
 
-use zenith_core::{Diagnostic, PatternLayout, PatternNode, Severity, dim_to_px, pattern_positions};
+use std::collections::BTreeMap;
+
+use zenith_core::{
+    Diagnostic, PatternLayout, PatternNode, ResolvedToken, Severity, dim_to_px, pattern_positions,
+};
 
 use crate::ir::{Paint, SceneCommand};
 
@@ -25,7 +29,9 @@ use super::RenderCtx;
 use super::anchor::AnchorMap;
 use super::compile_node;
 use super::paint::{apply_gradient_opacity, resolve_property_color, resolve_property_gradient};
-use super::util::{resolve_anchored_axis, resolve_property_dimension_px};
+use super::util::{
+    AxisTarget, resolve_anchored_axis, resolve_geometry_px, resolve_property_dimension_px,
+};
 
 /// Compile a `pattern` node by expanding its motif across the resolved bounds.
 ///
@@ -48,7 +54,7 @@ pub(in crate::compile) fn compile_pattern(
     // local here. Validation already emitted diagnostics for bad geometry; when
     // anything fails to resolve to a usable box we render nothing and do NOT
     // re-emit (avoid duplicate diagnostics).
-    let Some((bx, by, bw, bh)) = resolve_bounds(pattern, cx.anchors) else {
+    let Some((bx, by, bw, bh)) = resolve_bounds(pattern, cx.anchors, cx.resolved) else {
         return 0.0;
     };
 
@@ -250,11 +256,13 @@ fn emit_background(
 /// absent (honoring the anchor map like a leaf node). Returns `None` (render
 /// nothing) when the box is unusable. No diagnostics are emitted — validation
 /// already covered these cases.
-fn resolve_bounds(pattern: &PatternNode, anchors: &AnchorMap) -> Option<(f64, f64, f64, f64)> {
-    let w_dim = pattern.w.as_ref()?;
-    let h_dim = pattern.h.as_ref()?;
-    let bw = dim_to_px(w_dim.value, &w_dim.unit)?;
-    let bh = dim_to_px(h_dim.value, &h_dim.unit)?;
+fn resolve_bounds(
+    pattern: &PatternNode,
+    anchors: &AnchorMap,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> Option<(f64, f64, f64, f64)> {
+    let bw = resolve_geometry_px(pattern.w.as_ref(), resolved)?;
+    let bh = resolve_geometry_px(pattern.h.as_ref(), resolved)?;
     if bw <= 0.0 || bh <= 0.0 {
         return None;
     }
@@ -266,20 +274,26 @@ fn resolve_bounds(pattern: &PatternNode, anchors: &AnchorMap) -> Option<(f64, f6
     let anchor_xy = anchors.get(&pattern.id).copied();
     let mut sink: Vec<Diagnostic> = Vec::new();
     let bx = resolve_anchored_axis(
-        "pattern",
-        &pattern.id,
-        "x",
+        AxisTarget {
+            kind: "pattern",
+            node_id: &pattern.id,
+            axis: "x",
+        },
         pattern.x.as_ref(),
+        resolved,
         anchor_xy.map(|(ax, _)| ax),
         pattern.source_span,
         &mut sink,
     )
     .unwrap_or(0.0);
     let by = resolve_anchored_axis(
-        "pattern",
-        &pattern.id,
-        "y",
+        AxisTarget {
+            kind: "pattern",
+            node_id: &pattern.id,
+            axis: "y",
+        },
         pattern.y.as_ref(),
+        resolved,
         anchor_xy.map(|(_, ay)| ay),
         pattern.source_span,
         &mut sink,

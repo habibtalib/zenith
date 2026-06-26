@@ -518,7 +518,7 @@ fn attribute_type_generic(name: &str, fallback: &'static str) -> &'static str {
         "style" => "string",
 
         // ── Geometry (px literals) ────────────────────────────────────────
-        "x" | "y" | "w" | "h" => "px literal",
+        "x" | "y" | "w" | "h" => "px literal or token ref: dimension",
         "x1" | "y1" | "x2" | "y2" => "px literal",
         "rx" | "ry" => "px literal",
         "rotate" => "px literal",

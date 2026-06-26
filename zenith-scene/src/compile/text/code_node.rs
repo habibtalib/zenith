@@ -2,7 +2,7 @@
 //! line-number gutter and optional per-token syntax highlighting.
 
 use zenith_core::{
-    CodeNode, Diagnostic, FontStyle, TokenKind, builtin_color, dim_to_px, is_supported, scan,
+    CodeNode, Diagnostic, FontStyle, TokenKind, builtin_color, is_supported, scan,
     token_id_for_kind,
 };
 use zenith_layout::{ShapeRequest, TextDirection, TextLayoutEngine};
@@ -13,7 +13,7 @@ use crate::ir::{Color, SceneCommand};
 use super::super::RenderCtx;
 use super::super::paint::resolve_property_color;
 use super::super::style_prop;
-use super::super::util::{rotation_degrees, unsupported_unit_diag};
+use super::super::util::{resolve_geometry_px, rotation_degrees, unsupported_unit_diag};
 use super::ctx::TextCompileEnv;
 use super::shape::{
     resolve_family_with_fallback, resolve_font_family_name, resolve_font_weight,
@@ -67,8 +67,8 @@ pub(in crate::compile) fn compile_code(
 
     // Width/height are OPTIONAL; they bound the clip rectangle when
     // present. A bad unit yields None (no clip), not a hard skip.
-    let code_w: Option<f64> = code.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
-    let code_h: Option<f64> = code.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+    let code_w: Option<f64> = resolve_geometry_px(code.w.as_ref(), resolved);
+    let code_h: Option<f64> = resolve_geometry_px(code.h.as_ref(), resolved);
 
     // Anchor-derived (x, y): look up the pre-pass map when x or y is absent.
     // The pre-pass requires w/h to be px, so anchor derivation only activates
@@ -78,7 +78,7 @@ pub(in crate::compile) fn compile_code(
     // Resolve x — use authored value when present, anchor derivation when absent.
     let code_x_raw = match &code.x {
         Some(x_dim) => {
-            let Some(v) = dim_to_px(x_dim.value, &x_dim.unit) else {
+            let Some(v) = resolve_geometry_px(Some(x_dim), resolved) else {
                 diagnostics.push(unsupported_unit_diag(
                     "code node",
                     &code.id,
@@ -110,7 +110,7 @@ pub(in crate::compile) fn compile_code(
     // Resolve y — same pattern.
     let code_y_raw = match &code.y {
         Some(y_dim) => {
-            let Some(v) = dim_to_px(y_dim.value, &y_dim.unit) else {
+            let Some(v) = resolve_geometry_px(Some(y_dim), resolved) else {
                 diagnostics.push(unsupported_unit_diag(
                     "code node",
                     &code.id,

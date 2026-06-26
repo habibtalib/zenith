@@ -69,6 +69,81 @@ page id="page.t1" w=(px)640 h=(px)360 {
     );
 }
 
+// ── Token-ref geometry resolves to the same px as raw geometry ────────
+
+/// A rect whose `x`/`y`/`w`/`h` are dimension token refs must compile to the
+/// exact same `FillRect` geometry as the raw-`(px)` equivalent. This proves the
+/// new `(token)"dim.*"` geometry path resolves through the token table and that
+/// raw-`(px)` geometry stays byte-identical.
+#[test]
+fn token_ref_geometry_matches_raw_px_geometry() {
+    let token_src = r##"zenith version=1 {
+  project id="proj.tg" name="TG"
+  tokens format="zenith-token-v1" {
+token id="color.fill" type="color" value="#abcdef"
+token id="dim.x" type="dimension" value=(px)40
+token id="dim.y" type="dimension" value=(px)30
+token id="dim.w" type="dimension" value=(px)200
+token id="dim.h" type="dimension" value=(px)120
+  }
+  styles {}
+  document id="doc.tg" title="TG" {
+page id="page.tg" w=(px)640 h=(px)360 {
+  rect id="rect.tg" x=(token)"dim.x" y=(token)"dim.y" w=(token)"dim.w" h=(token)"dim.h" fill=(token)"color.fill"
+}
+  }
+}
+"##;
+
+    let raw_src = r##"zenith version=1 {
+  project id="proj.tg" name="TG"
+  tokens format="zenith-token-v1" {
+token id="color.fill" type="color" value="#abcdef"
+  }
+  styles {}
+  document id="doc.tg" title="TG" {
+page id="page.tg" w=(px)640 h=(px)360 {
+  rect id="rect.tg" x=(px)40 y=(px)30 w=(px)200 h=(px)120 fill=(token)"color.fill"
+}
+  }
+}
+"##;
+
+    let token_doc = parse(token_src);
+    let raw_doc = parse(raw_src);
+    let token_result = compile(&token_doc, &default_provider());
+    let raw_result = compile(&raw_doc, &default_provider());
+
+    assert!(
+        token_result.diagnostics.is_empty(),
+        "unexpected diagnostics (token geometry): {:?}",
+        token_result.diagnostics
+    );
+    assert!(
+        raw_result.diagnostics.is_empty(),
+        "unexpected diagnostics (raw geometry): {:?}",
+        raw_result.diagnostics
+    );
+
+    // The token-ref rect resolves to the declared px box.
+    match &token_result.scene.commands[1] {
+        SceneCommand::FillRect { x, y, w, h, .. } => {
+            assert_eq!(*x, 40.0);
+            assert_eq!(*y, 30.0);
+            assert_eq!(*w, 200.0);
+            assert_eq!(*h, 120.0);
+        }
+        other => panic!("expected FillRect, got {other:?}"),
+    }
+
+    // Byte-identity: token-ref geometry yields the exact same command stream as
+    // the raw-(px) equivalent.
+    assert_eq!(
+        token_result.scene.commands, raw_result.scene.commands,
+        "token-ref geometry must produce an identical scene to raw-(px) geometry"
+    );
+}
+
 // ── Two rects → two FillRects in source order ─────────────────────────
 
 #[test]

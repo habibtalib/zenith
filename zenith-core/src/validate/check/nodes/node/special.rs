@@ -8,7 +8,7 @@ use crate::ast::node::{FieldNode, FootnoteNode, InstanceNode, PolygonNode, Polyl
 use crate::diagnostics::Diagnostic;
 
 use super::shared::{
-    AnchorParentCtx, AnchorProps, check_anchor, check_optional_dim, check_spans, check_style_ref,
+    AnchorParentCtx, AnchorProps, check_anchor, check_dimension_geom, check_spans, check_style_ref,
 };
 use super::suggest::check_unknown_props;
 use crate::validate::check::nodes::WalkCtx;
@@ -42,7 +42,7 @@ pub(in crate::validate::check) fn check_polygon(
     for (idx, pt) in poly.points.iter().enumerate() {
         let x_label = format!("point[{idx}].x");
         let y_label = format!("point[{idx}].y");
-        check_optional_dim(
+        check_dimension_geom(
             &poly.id,
             &x_label,
             pt.x.as_ref(),
@@ -50,7 +50,7 @@ pub(in crate::validate::check) fn check_polygon(
             poly.source_span,
             diagnostics,
         );
-        check_optional_dim(
+        check_dimension_geom(
             &poly.id,
             &y_label,
             pt.y.as_ref(),
@@ -172,7 +172,7 @@ pub(in crate::validate::check) fn check_polyline(
     for (idx, pt) in poly.points.iter().enumerate() {
         let x_label = format!("point[{idx}].x");
         let y_label = format!("point[{idx}].y");
-        check_optional_dim(
+        check_dimension_geom(
             &poly.id,
             &x_label,
             pt.x.as_ref(),
@@ -180,7 +180,7 @@ pub(in crate::validate::check) fn check_polyline(
             poly.source_span,
             diagnostics,
         );
-        check_optional_dim(
+        check_dimension_geom(
             &poly.id,
             &y_label,
             pt.y.as_ref(),

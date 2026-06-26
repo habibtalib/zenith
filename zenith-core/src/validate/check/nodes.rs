@@ -13,7 +13,7 @@ use crate::ast::node::Node;
 use crate::diagnostics::Diagnostic;
 use crate::tokens::ResolvedToken;
 
-use node::shared::{node_rotate_deg, resolve_axis};
+use node::shared::{node_rotate_deg, pv_to_dim, resolve_axis};
 
 mod node;
 
@@ -315,7 +315,15 @@ pub(super) fn walk_node(
         }
 
         Node::Frame(f) => {
-            node::check_frame(f, ctx, seen_ids, geom_required, parent_ctx, diagnostics);
+            node::check_frame(
+                f,
+                ctx,
+                seen_ids,
+                referenced_token_ids,
+                geom_required,
+                parent_ctx,
+                diagnostics,
+            );
 
             // Recurse into children, passing the SAME seen_ids so that
             // nested ids participate in the global uniqueness check. Direct
@@ -327,14 +335,12 @@ pub(super) fn walk_node(
             // overflow against it. If any of x/y/w/h is missing or has a bad
             // unit, pass None so no spurious overflow advisory is produced.
             let frame_box = match pos.page_px_bounds {
-                Some((page_w, page_h)) => {
-                    f.x.as_ref()
-                        .and_then(|d| resolve_axis(d, page_w))
-                        .zip(f.y.as_ref().and_then(|d| resolve_axis(d, page_h)))
-                        .zip(f.w.as_ref().and_then(|d| resolve_axis(d, page_w)))
-                        .zip(f.h.as_ref().and_then(|d| resolve_axis(d, page_h)))
-                        .map(|(((x, y), w), h)| (x, y, w, h))
-                }
+                Some((page_w, page_h)) => pv_to_dim(f.x.as_ref())
+                    .and_then(|d| resolve_axis(d, page_w))
+                    .zip(pv_to_dim(f.y.as_ref()).and_then(|d| resolve_axis(d, page_h)))
+                    .zip(pv_to_dim(f.w.as_ref()).and_then(|d| resolve_axis(d, page_w)))
+                    .zip(pv_to_dim(f.h.as_ref()).and_then(|d| resolve_axis(d, page_h)))
+                    .map(|(((x, y), w), h)| (x, y, w, h)),
                 None => None,
             };
 
@@ -363,7 +369,14 @@ pub(super) fn walk_node(
         }
 
         Node::Group(g) => {
-            node::check_group(g, ctx, seen_ids, parent_ctx, diagnostics);
+            node::check_group(
+                g,
+                ctx,
+                seen_ids,
+                referenced_token_ids,
+                parent_ctx,
+                diagnostics,
+            );
 
             // A group is an anchor-parent container; its reference box is
             // usable only when it declares both `w` and `h`.

@@ -52,10 +52,10 @@ fn pattern_parse_format_round_trip_with_motif() {
     assert_eq!(pat.fill, Some(token_ref("color.dot")));
     assert_eq!(
         pat.w,
-        Some(Dimension {
+        Some(PropertyValue::Dimension(Dimension {
             value: 800.0,
             unit: Unit::Px
-        })
+        }))
     );
 
     // The motif is parsed as the right Node kind with its own fields.
@@ -64,10 +64,10 @@ fn pattern_parse_format_round_trip_with_motif() {
             assert_eq!(e.id, "e.dot");
             assert_eq!(
                 e.w,
-                Some(Dimension {
+                Some(PropertyValue::Dimension(Dimension {
                     value: 8.0,
                     unit: Unit::Px
-                })
+                }))
             );
             assert_eq!(e.fill, Some(token_ref("color.dot")));
         }

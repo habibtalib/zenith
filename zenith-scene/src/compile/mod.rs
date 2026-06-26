@@ -423,7 +423,7 @@ pub fn compile_page(
     // Walk page top-level children once, building a map from node id to the
     // derived (x, y) for nodes that carry a recognized `anchor` attribute and
     // have px-resolvable w/h. Built once; threaded read-only into compile_node.
-    let anchors = build_anchor_map(page, page_w, page_h);
+    let anchors = build_anchor_map(page, page_w, page_h, resolved);
 
     // ── Step 6: threaded-text chain pre-pass (DOCUMENT-WIDE) ─────────────
     // Resolve every text chain ONCE across ALL pages (deterministic
@@ -491,7 +491,7 @@ pub fn compile_page(
     // (frames are clip-only). Drives text-runaround exclusion lookup. Empty when
     // no node carries a complete rect (byte-identical to before for any text node
     // without `text-exclusion`).
-    let node_boxes = build_node_boxes(page);
+    let node_boxes = build_node_boxes(page, resolved);
 
     // ── Step 7d: compute section assignments (document-wide, one-shot) ───
     // Precompute once (outside any inner loop — this is the single page compile

@@ -44,17 +44,17 @@ fn chart_parse_format_round_trip_with_series() {
     assert_eq!(chart.legend, Some(true));
     assert_eq!(
         chart.x,
-        Some(Dimension {
+        Some(PropertyValue::Dimension(Dimension {
             value: 50.0,
             unit: Unit::Px
-        })
+        }))
     );
     assert_eq!(
         chart.w,
-        Some(Dimension {
+        Some(PropertyValue::Dimension(Dimension {
             value: 600.0,
             unit: Unit::Px
-        })
+        }))
     );
     assert_eq!(chart.series.len(), 2);
     assert_eq!(chart.series[0].label, Some("Q1".to_owned()));

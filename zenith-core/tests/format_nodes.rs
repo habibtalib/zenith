@@ -106,11 +106,18 @@ fn image_parses_fields() {
     };
     assert_eq!(img.id, "img.logo");
     assert_eq!(img.asset, "asset.logo");
-    assert_eq!(img.x.as_ref().map(|d| d.value), Some(80.0));
-    assert_eq!(img.y.as_ref().map(|d| d.value), Some(60.0));
-    assert_eq!(img.w.as_ref().map(|d| d.value), Some(160.0));
-    assert_eq!(img.h.as_ref().map(|d| d.value), Some(48.0));
-    assert!(matches!(img.x.as_ref().map(|d| &d.unit), Some(Unit::Px)));
+    let geom_value = |pv: Option<&PropertyValue>| match pv {
+        Some(PropertyValue::Dimension(d)) => Some(d.value),
+        _ => None,
+    };
+    assert_eq!(geom_value(img.x.as_ref()), Some(80.0));
+    assert_eq!(geom_value(img.y.as_ref()), Some(60.0));
+    assert_eq!(geom_value(img.w.as_ref()), Some(160.0));
+    assert_eq!(geom_value(img.h.as_ref()), Some(48.0));
+    assert!(matches!(
+        img.x.as_ref(),
+        Some(PropertyValue::Dimension(d)) if d.unit == Unit::Px
+    ));
     assert_eq!(img.fit.as_deref(), Some("contain"));
     assert_eq!(img.object_position_x, Some(ObjectPosition::Center));
     assert_eq!(img.object_position_y, Some(ObjectPosition::Pct(25.0)));

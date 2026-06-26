@@ -24,13 +24,13 @@ pub struct FrameNode {
     pub name: Option<String>,
     pub role: Option<String>,
     /// Required: clip-rectangle left edge in page coordinates.
-    pub x: Option<Dimension>,
+    pub x: Option<PropertyValue>,
     /// Required: clip-rectangle top edge in page coordinates.
-    pub y: Option<Dimension>,
+    pub y: Option<PropertyValue>,
     /// Required: clip-rectangle width.
-    pub w: Option<Dimension>,
+    pub w: Option<PropertyValue>,
     /// Required: clip-rectangle height.
-    pub h: Option<Dimension>,
+    pub h: Option<PropertyValue>,
     /// Layout algorithm hint ("absolute"/"flow"/"grid"). `"flow"` activates a
     /// vertical-stack flow layout (uniform `padding` inset + `gap` between
     /// children, resolved from the frame's style); `"grid"` tiles children
@@ -121,13 +121,13 @@ pub struct GroupNode {
     pub name: Option<String>,
     pub role: Option<String>,
     /// Advisory x-translation offset applied to the subtree (default 0).
-    pub x: Option<Dimension>,
+    pub x: Option<PropertyValue>,
     /// Advisory y-translation offset applied to the subtree (default 0).
-    pub y: Option<Dimension>,
+    pub y: Option<PropertyValue>,
     /// Advisory bounding width — NOT used to scale children.
-    pub w: Option<Dimension>,
+    pub w: Option<PropertyValue>,
     /// Advisory bounding height — NOT used to scale children.
-    pub h: Option<Dimension>,
+    pub h: Option<PropertyValue>,
     /// Opacity that cascades (multiplies) into all descendant node alphas.
     pub opacity: Option<f64>,
     /// When `Some(false)` the entire subtree is excluded from the render.
@@ -252,13 +252,13 @@ pub struct TableNode {
     pub name: Option<String>,
     pub role: Option<String>,
     /// Required: table box left edge in page coordinates.
-    pub x: Option<Dimension>,
+    pub x: Option<PropertyValue>,
     /// Required: table box top edge in page coordinates.
-    pub y: Option<Dimension>,
+    pub y: Option<PropertyValue>,
     /// Required: table box width.
-    pub w: Option<Dimension>,
+    pub w: Option<PropertyValue>,
     /// Required: table box height.
-    pub h: Option<Dimension>,
+    pub h: Option<PropertyValue>,
     /// Column declarations, order = left→right.
     pub columns: Vec<TableColumn>,
     /// Row declarations, order = top→bottom.

@@ -252,8 +252,17 @@ pub(in crate::engine) fn apply_ungroup(
             if let Some(node) = find_node_shared(&page.children, group_id) {
                 let info = match node {
                     Node::Group(g) => {
-                        let has_offset = g.x.as_ref().map(|d| d.value != 0.0).unwrap_or(false)
-                            || g.y.as_ref().map(|d| d.value != 0.0).unwrap_or(false);
+                        // A geometry offset is "non-zero" for a literal dimension
+                        // whose value is non-zero, or for any token ref (its value
+                        // isn't resolvable here, so treat it as a meaningful offset).
+                        let nonzero = |pv: Option<&zenith_core::PropertyValue>| match pv {
+                            Some(zenith_core::PropertyValue::Dimension(d)) => d.value != 0.0,
+                            Some(zenith_core::PropertyValue::TokenRef(_)) => true,
+                            Some(zenith_core::PropertyValue::Literal(_))
+                            | Some(zenith_core::PropertyValue::DataRef(_))
+                            | None => false,
+                        };
+                        let has_offset = nonzero(g.x.as_ref()) || nonzero(g.y.as_ref());
                         Ok(GroupInfo {
                             page_index: pi,
                             has_nonzero_offset: has_offset,

@@ -2,11 +2,13 @@
 //! rotation / blend / blur brackets, plus the bounding-box helpers that
 //! determine a group's rotation pivot.
 
-use zenith_core::{Diagnostic, GroupNode, Node, Point, dim_to_px};
+use std::collections::BTreeMap;
+
+use zenith_core::{Diagnostic, GroupNode, Node, Point, ResolvedToken, dim_to_px};
 
 use crate::ir::SceneCommand;
 
-use super::super::util::{blend_mode_ir, rotation_degrees};
+use super::super::util::{blend_mode_ir, resolve_geometry_px, rotation_degrees};
 use super::super::{NodeCtx, RenderCtx, compile_node};
 
 // NOTE: compile_group → compile_node → compile_group recursion has no depth
@@ -37,16 +39,8 @@ pub(in crate::compile) fn compile_group(
     };
 
     // Resolve group x/y to pixels; absent or unsupported-unit → 0.0 (no diagnostic).
-    let group_x_px = group
-        .x
-        .as_ref()
-        .and_then(|d| dim_to_px(d.value, &d.unit))
-        .unwrap_or(0.0);
-    let group_y_px = group
-        .y
-        .as_ref()
-        .and_then(|d| dim_to_px(d.value, &d.unit))
-        .unwrap_or(0.0);
+    let group_x_px = resolve_geometry_px(group.x.as_ref(), cx.resolved).unwrap_or(0.0);
+    let group_y_px = resolve_geometry_px(group.y.as_ref(), cx.resolved).unwrap_or(0.0);
 
     let child_dx = ctx.dx + group_x_px;
     let child_dy = ctx.dy + group_y_px;
@@ -60,16 +54,8 @@ pub(in crate::compile) fn compile_group(
     let group_rot = rotation_degrees(group.rotate.as_ref());
     let rot_center: Option<(f64, f64)> = if group_rot.is_some() {
         // Try declared box first.
-        let declared = group
-            .w
-            .as_ref()
-            .and_then(|wd| dim_to_px(wd.value, &wd.unit))
-            .zip(
-                group
-                    .h
-                    .as_ref()
-                    .and_then(|hd| dim_to_px(hd.value, &hd.unit)),
-            )
+        let declared = resolve_geometry_px(group.w.as_ref(), cx.resolved)
+            .zip(resolve_geometry_px(group.h.as_ref(), cx.resolved))
             .map(|(gw, gh)| (child_dx + gw / 2.0, child_dy + gh / 2.0));
         if declared.is_some() {
             declared
@@ -78,7 +64,7 @@ pub(in crate::compile) fn compile_group(
             // v0 limitation: if the group is empty or contains only
             // geometry-less nodes no center is computable → rotation is
             // silently skipped.
-            group_children_center(&group.children, child_dx, child_dy)
+            group_children_center(&group.children, child_dx, child_dy, cx.resolved)
         }
     } else {
         None
@@ -184,7 +170,12 @@ fn points_bbox(pts: &[Point]) -> Option<(f64, f64, f64, f64)> {
 ///
 /// Returns `None` when no child yields a computable bbox (e.g. an empty group
 /// or one containing only unknown/geometry-less nodes).
-fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Option<(f64, f64)> {
+fn group_children_center(
+    children: &[Node],
+    base_dx: f64,
+    base_dy: f64,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> Option<(f64, f64)> {
     // Accumulate min/max in device space.
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
@@ -210,10 +201,10 @@ fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Optio
                     continue;
                 };
                 let (Some(x), Some(y), Some(w), Some(h)) = (
-                    dim_to_px(xd.value, &xd.unit),
-                    dim_to_px(yd.value, &yd.unit),
-                    dim_to_px(wd.value, &wd.unit),
-                    dim_to_px(hd.value, &hd.unit),
+                    resolve_geometry_px(Some(xd), resolved),
+                    resolve_geometry_px(Some(yd), resolved),
+                    resolve_geometry_px(Some(wd), resolved),
+                    resolve_geometry_px(Some(hd), resolved),
                 ) else {
                     continue;
                 };
@@ -224,10 +215,10 @@ fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Optio
                     continue;
                 };
                 let (Some(x), Some(y), Some(w), Some(h)) = (
-                    dim_to_px(xd.value, &xd.unit),
-                    dim_to_px(yd.value, &yd.unit),
-                    dim_to_px(wd.value, &wd.unit),
-                    dim_to_px(hd.value, &hd.unit),
+                    resolve_geometry_px(Some(xd), resolved),
+                    resolve_geometry_px(Some(yd), resolved),
+                    resolve_geometry_px(Some(wd), resolved),
+                    resolve_geometry_px(Some(hd), resolved),
                 ) else {
                     continue;
                 };
@@ -238,10 +229,10 @@ fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Optio
                     continue;
                 };
                 let (Some(x), Some(y), Some(w), Some(h)) = (
-                    dim_to_px(xd.value, &xd.unit),
-                    dim_to_px(yd.value, &yd.unit),
-                    dim_to_px(wd.value, &wd.unit),
-                    dim_to_px(hd.value, &hd.unit),
+                    resolve_geometry_px(Some(xd), resolved),
+                    resolve_geometry_px(Some(yd), resolved),
+                    resolve_geometry_px(Some(wd), resolved),
+                    resolve_geometry_px(Some(hd), resolved),
                 ) else {
                     continue;
                 };
@@ -252,10 +243,10 @@ fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Optio
                     continue;
                 };
                 let (Some(x), Some(y), Some(w), Some(h)) = (
-                    dim_to_px(xd.value, &xd.unit),
-                    dim_to_px(yd.value, &yd.unit),
-                    dim_to_px(wd.value, &wd.unit),
-                    dim_to_px(hd.value, &hd.unit),
+                    resolve_geometry_px(Some(xd), resolved),
+                    resolve_geometry_px(Some(yd), resolved),
+                    resolve_geometry_px(Some(wd), resolved),
+                    resolve_geometry_px(Some(hd), resolved),
                 ) else {
                     continue;
                 };
@@ -266,10 +257,10 @@ fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Optio
                     continue;
                 };
                 let (Some(x), Some(y), Some(w), Some(h)) = (
-                    dim_to_px(xd.value, &xd.unit),
-                    dim_to_px(yd.value, &yd.unit),
-                    dim_to_px(wd.value, &wd.unit),
-                    dim_to_px(hd.value, &hd.unit),
+                    resolve_geometry_px(Some(xd), resolved),
+                    resolve_geometry_px(Some(yd), resolved),
+                    resolve_geometry_px(Some(wd), resolved),
+                    resolve_geometry_px(Some(hd), resolved),
                 ) else {
                     continue;
                 };
@@ -280,10 +271,10 @@ fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Optio
                     continue;
                 };
                 let (Some(x), Some(y), Some(w), Some(h)) = (
-                    dim_to_px(xd.value, &xd.unit),
-                    dim_to_px(yd.value, &yd.unit),
-                    dim_to_px(wd.value, &wd.unit),
-                    dim_to_px(hd.value, &hd.unit),
+                    resolve_geometry_px(Some(xd), resolved),
+                    resolve_geometry_px(Some(yd), resolved),
+                    resolve_geometry_px(Some(wd), resolved),
+                    resolve_geometry_px(Some(hd), resolved),
                 ) else {
                     continue;
                 };
@@ -325,10 +316,10 @@ fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Optio
                     continue;
                 };
                 let (Some(x), Some(y), Some(w), Some(h)) = (
-                    dim_to_px(xd.value, &xd.unit),
-                    dim_to_px(yd.value, &yd.unit),
-                    dim_to_px(wd.value, &wd.unit),
-                    dim_to_px(hd.value, &hd.unit),
+                    resolve_geometry_px(Some(xd), resolved),
+                    resolve_geometry_px(Some(yd), resolved),
+                    resolve_geometry_px(Some(wd), resolved),
+                    resolve_geometry_px(Some(hd), resolved),
                 ) else {
                     continue;
                 };
@@ -339,10 +330,10 @@ fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Optio
                     continue;
                 };
                 let (Some(x), Some(y), Some(w), Some(h)) = (
-                    dim_to_px(xd.value, &xd.unit),
-                    dim_to_px(yd.value, &yd.unit),
-                    dim_to_px(wd.value, &wd.unit),
-                    dim_to_px(hd.value, &hd.unit),
+                    resolve_geometry_px(Some(xd), resolved),
+                    resolve_geometry_px(Some(yd), resolved),
+                    resolve_geometry_px(Some(wd), resolved),
+                    resolve_geometry_px(Some(hd), resolved),
                 ) else {
                     continue;
                 };
@@ -353,10 +344,10 @@ fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Optio
                     continue;
                 };
                 let (Some(x), Some(y), Some(w), Some(h)) = (
-                    dim_to_px(xd.value, &xd.unit),
-                    dim_to_px(yd.value, &yd.unit),
-                    dim_to_px(wd.value, &wd.unit),
-                    dim_to_px(hd.value, &hd.unit),
+                    resolve_geometry_px(Some(xd), resolved),
+                    resolve_geometry_px(Some(yd), resolved),
+                    resolve_geometry_px(Some(wd), resolved),
+                    resolve_geometry_px(Some(hd), resolved),
                 ) else {
                     continue;
                 };

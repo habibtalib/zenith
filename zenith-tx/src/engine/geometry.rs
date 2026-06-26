@@ -1,7 +1,7 @@
 //! Geometry op application: `set_geometry` and `align_nodes`, plus the bbox
 //! geometry accessors they share.
 
-use zenith_core::{Diagnostic, Dimension, Document, Node, Unit, dim_to_px};
+use zenith_core::{Diagnostic, Dimension, Document, Node, PropertyValue, Unit, dim_to_px};
 
 use super::structure::parse_dimension_str;
 use super::{
@@ -26,10 +26,10 @@ fn parse_px_dimension(s: &str) -> Option<f64> {
 
 /// Mutable references to a node's four bbox geometry slots `(x, y, w, h)`.
 type GeometryMut<'a> = (
-    &'a mut Option<Dimension>,
-    &'a mut Option<Dimension>,
-    &'a mut Option<Dimension>,
-    &'a mut Option<Dimension>,
+    &'a mut Option<PropertyValue>,
+    &'a mut Option<PropertyValue>,
+    &'a mut Option<PropertyValue>,
+    &'a mut Option<PropertyValue>,
 );
 
 /// Return mutable references to the four bbox geometry fields `(x, y, w, h)`,
@@ -190,16 +190,16 @@ pub(super) fn apply_set_geometry(
                     }
                     Some((nx, ny, nw, nh)) => {
                         if let Some(v) = x {
-                            *nx = Some(px(v));
+                            *nx = Some(PropertyValue::Dimension(px(v)));
                         }
                         if let Some(v) = y {
-                            *ny = Some(px(v));
+                            *ny = Some(PropertyValue::Dimension(px(v)));
                         }
                         if let Some(v) = w {
-                            *nw = Some(px(v));
+                            *nw = Some(PropertyValue::Dimension(px(v)));
                         }
                         if let Some(v) = h {
-                            *nh = Some(px(v));
+                            *nh = Some(PropertyValue::Dimension(px(v)));
                         }
                     }
                 }
@@ -261,8 +261,20 @@ fn read_geometry_px(node: &Node) -> Option<(f64, f64, f64, f64)> {
         | Node::Connector(_)
         | Node::Unknown(_) => return None,
     };
-    let resolve = |d: Option<&Dimension>| -> Option<f64> {
-        d.and_then(|dim| dim_to_px(dim.value, &dim.unit))
+    // Resolve a geometry slot to a px value. Only `Dimension` variants are
+    // resolvable here — `set_geometry` always writes `PropertyValue::Dimension(px)`
+    // so this is the common case. `TokenRef` geometry (an author-set token
+    // reference) is opaque to tx in v1: the token table is not available on the
+    // read path, so we return `None` and the node is treated as having
+    // unresolvable geometry (skipped or surfaced as `tx.geometry_unresolved`).
+    let resolve = |pv: Option<&PropertyValue>| -> Option<f64> {
+        match pv {
+            Some(PropertyValue::Dimension(d)) => dim_to_px(d.value, &d.unit),
+            Some(PropertyValue::TokenRef(_)) => None,
+            Some(PropertyValue::Literal(_)) => None,
+            Some(PropertyValue::DataRef(_)) => None,
+            None => None,
+        }
     };
     Some((resolve(x)?, resolve(y)?, resolve(w)?, resolve(h)?))
 }
@@ -524,10 +536,10 @@ pub(super) fn apply_align_nodes(
                 // read_geometry_px which uses the same set of node kinds.
                 if let Some((nx, ny, _, _)) = node_geometry_mut(node) {
                     if let Some(v) = new_x {
-                        *nx = Some(px(v));
+                        *nx = Some(PropertyValue::Dimension(px(v)));
                     }
                     if let Some(v) = new_y {
-                        *ny = Some(px(v));
+                        *ny = Some(PropertyValue::Dimension(px(v)));
                     }
                     record_affected(&bbox.id, affected);
                 }
@@ -667,10 +679,10 @@ pub(super) fn apply_align_to_edge(
             // above, which uses the same set of node variants.
             if let Some((nx, ny, _, _)) = node_geometry_mut(node) {
                 if let Some(v) = new_x {
-                    *nx = Some(px(v));
+                    *nx = Some(PropertyValue::Dimension(px(v)));
                 }
                 if let Some(v) = new_y {
-                    *ny = Some(px(v));
+                    *ny = Some(PropertyValue::Dimension(px(v)));
                 }
                 record_affected(node_id, affected);
             }
@@ -813,9 +825,9 @@ pub(super) fn apply_distribute_nodes(
             Some(node) => {
                 if let Some((nx, ny, _, _)) = node_geometry_mut(node) {
                     if horizontal {
-                        *nx = Some(px(*new_pos));
+                        *nx = Some(PropertyValue::Dimension(px(*new_pos)));
                     } else {
-                        *ny = Some(px(*new_pos));
+                        *ny = Some(PropertyValue::Dimension(px(*new_pos)));
                     }
                     record_affected(id, affected);
                 }

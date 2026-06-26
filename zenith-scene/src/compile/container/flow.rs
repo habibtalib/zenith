@@ -2,9 +2,12 @@
 //! predicates, declared-box readers, and the box-injection clone used to place a
 //! child at absolute coordinates.
 
-use zenith_core::{Dimension, Node, Unit, dim_to_px};
+use std::collections::BTreeMap;
+
+use zenith_core::{Dimension, Node, PropertyValue, ResolvedToken, Unit};
 
 use super::super::node_role;
+use super::super::util::resolve_geometry_px;
 
 /// Whether a child is excluded from flow layout entirely (consumes no space):
 /// `visible == Some(false)` or `role == "guide"`.
@@ -43,7 +46,10 @@ fn node_visible(node: &Node) -> Option<bool> {
 /// The declared `w` of a node in pixels, if the node kind carries a `w`/`h`
 /// box and the dimension resolves to pixels. Geometry-less kinds (line,
 /// polygon, polyline, unknown) yield `None`.
-pub(super) fn node_declared_w(node: &Node) -> Option<f64> {
+pub(super) fn node_declared_w(
+    node: &Node,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> Option<f64> {
     let w = match node {
         Node::Rect(n) => n.w.as_ref(),
         Node::Ellipse(n) => n.w.as_ref(),
@@ -66,12 +72,15 @@ pub(super) fn node_declared_w(node: &Node) -> Option<f64> {
         | Node::Connector(_)
         | Node::Unknown(_) => None,
     }?;
-    dim_to_px(w.value, &w.unit)
+    resolve_geometry_px(Some(w), resolved)
 }
 
 /// The declared `h` of a node in pixels, if the node kind carries a `w`/`h`
 /// box and the dimension resolves to pixels. Geometry-less kinds yield `None`.
-pub(super) fn node_declared_h(node: &Node) -> Option<f64> {
+pub(super) fn node_declared_h(
+    node: &Node,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> Option<f64> {
     let h = match node {
         Node::Rect(n) => n.h.as_ref(),
         Node::Ellipse(n) => n.h.as_ref(),
@@ -94,7 +103,7 @@ pub(super) fn node_declared_h(node: &Node) -> Option<f64> {
         | Node::Connector(_)
         | Node::Unknown(_) => None,
     }?;
-    dim_to_px(h.value, &h.unit)
+    resolve_geometry_px(Some(h), resolved)
 }
 
 /// Clone `node` and overwrite its `x`/`y`/`w`/`h` box with the injected
@@ -107,10 +116,10 @@ pub(super) fn node_declared_h(node: &Node) -> Option<f64> {
 /// `0.0` for those.
 pub(super) fn with_flow_box(node: &Node, x: f64, y: f64, w: f64, h: Option<f64>) -> Node {
     let px = |v: f64| {
-        Some(Dimension {
+        Some(PropertyValue::Dimension(Dimension {
             value: v,
             unit: Unit::Px,
-        })
+        }))
     };
     let h_dim = h.and_then(px);
 

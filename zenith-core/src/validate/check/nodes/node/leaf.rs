@@ -9,8 +9,8 @@ use crate::ast::value::PropertyValue;
 use crate::diagnostics::Diagnostic;
 
 use super::shared::{
-    AnchorParentCtx, AnchorProps, VisualProps, check_anchor, check_optional_dim, check_style_ref,
-    check_visual_props, is_valid_blend_mode,
+    AnchorParentCtx, AnchorProps, TokenEnv, VisualProps, check_anchor, check_dimension_geom,
+    check_optional_dim, check_style_ref, check_visual_props, is_valid_blend_mode,
 };
 use super::suggest::check_unknown_props;
 use crate::validate::check::nodes::WalkCtx;
@@ -61,38 +61,48 @@ pub(in crate::validate::check) fn check_rect(
     let xy_required = geom_required && !anchor_active;
 
     // Required geometry: x, y, w, h must all be present.
-    check_optional_dim(
-        &r.id,
-        "x",
-        r.x.as_ref(),
-        xy_required,
-        r.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &r.id,
-        "y",
-        r.y.as_ref(),
-        xy_required,
-        r.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &r.id,
-        "w",
-        r.w.as_ref(),
-        geom_required,
-        r.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &r.id,
-        "h",
-        r.h.as_ref(),
-        geom_required,
-        r.source_span,
-        diagnostics,
-    );
+    {
+        let mut tokens = TokenEnv {
+            referenced: referenced_token_ids,
+            resolved: resolved_tokens,
+        };
+        check_optional_dim(
+            &r.id,
+            "x",
+            r.x.as_ref(),
+            xy_required,
+            r.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &r.id,
+            "y",
+            r.y.as_ref(),
+            xy_required,
+            r.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &r.id,
+            "w",
+            r.w.as_ref(),
+            geom_required,
+            r.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &r.id,
+            "h",
+            r.h.as_ref(),
+            geom_required,
+            r.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+    }
 
     // Visual properties — shared with `pattern`; rect supplies the radius set.
     let props = VisualProps {
@@ -177,38 +187,48 @@ pub(in crate::validate::check) fn check_ellipse(
     let xy_required = geom_required && !anchor_active;
 
     // Required geometry: x, y, w, h must all be present.
-    check_optional_dim(
-        &e.id,
-        "x",
-        e.x.as_ref(),
-        xy_required,
-        e.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &e.id,
-        "y",
-        e.y.as_ref(),
-        xy_required,
-        e.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &e.id,
-        "w",
-        e.w.as_ref(),
-        geom_required,
-        e.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &e.id,
-        "h",
-        e.h.as_ref(),
-        geom_required,
-        e.source_span,
-        diagnostics,
-    );
+    {
+        let mut tokens = TokenEnv {
+            referenced: referenced_token_ids,
+            resolved: resolved_tokens,
+        };
+        check_optional_dim(
+            &e.id,
+            "x",
+            e.x.as_ref(),
+            xy_required,
+            e.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &e.id,
+            "y",
+            e.y.as_ref(),
+            xy_required,
+            e.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &e.id,
+            "w",
+            e.w.as_ref(),
+            geom_required,
+            e.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &e.id,
+            "h",
+            e.h.as_ref(),
+            geom_required,
+            e.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+    }
 
     // Visual properties.
     check_visual_prop(
@@ -394,10 +414,10 @@ pub(in crate::validate::check) fn check_line(
     );
 
     // Required geometry: x1, y1, x2, y2 must all be present.
-    check_optional_dim(&l.id, "x1", l.x1.as_ref(), true, l.source_span, diagnostics);
-    check_optional_dim(&l.id, "y1", l.y1.as_ref(), true, l.source_span, diagnostics);
-    check_optional_dim(&l.id, "x2", l.x2.as_ref(), true, l.source_span, diagnostics);
-    check_optional_dim(&l.id, "y2", l.y2.as_ref(), true, l.source_span, diagnostics);
+    check_dimension_geom(&l.id, "x1", l.x1.as_ref(), true, l.source_span, diagnostics);
+    check_dimension_geom(&l.id, "y1", l.y1.as_ref(), true, l.source_span, diagnostics);
+    check_dimension_geom(&l.id, "x2", l.x2.as_ref(), true, l.source_span, diagnostics);
+    check_dimension_geom(&l.id, "y2", l.y2.as_ref(), true, l.source_span, diagnostics);
 
     // Visual properties (stroke-only; no fill for line).
     // stroke is optional — only type-checked if present (a stroke-less
@@ -519,38 +539,48 @@ pub(in crate::validate::check) fn check_code(
     let xy_required = geom_required && !anchor_active;
 
     // Geometry (advisory box for v0; only unit-checked if present).
-    check_optional_dim(
-        &c.id,
-        "x",
-        c.x.as_ref(),
-        xy_required,
-        c.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &c.id,
-        "y",
-        c.y.as_ref(),
-        xy_required,
-        c.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &c.id,
-        "w",
-        c.w.as_ref(),
-        geom_required,
-        c.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &c.id,
-        "h",
-        c.h.as_ref(),
-        geom_required,
-        c.source_span,
-        diagnostics,
-    );
+    {
+        let mut tokens = TokenEnv {
+            referenced: referenced_token_ids,
+            resolved: resolved_tokens,
+        };
+        check_optional_dim(
+            &c.id,
+            "x",
+            c.x.as_ref(),
+            xy_required,
+            c.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &c.id,
+            "y",
+            c.y.as_ref(),
+            xy_required,
+            c.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &c.id,
+            "w",
+            c.w.as_ref(),
+            geom_required,
+            c.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &c.id,
+            "h",
+            c.h.as_ref(),
+            geom_required,
+            c.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+    }
 
     // Visual properties (mirror text; overflow is not enum-validated,
     // matching how text.overflow is currently handled).

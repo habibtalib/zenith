@@ -5,7 +5,9 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::Node;
+use zenith_core::{Node, PropertyValue, ResolvedToken};
+
+use super::super::util::resolve_geometry_px;
 
 /// Build the document-wide `node id → 1-based page index` map for `page-ref`
 /// resolution. Deterministic: walks pages in order, descending into
@@ -76,9 +78,10 @@ fn index_nodes(children: &[Node], page_index_1based: usize, map: &mut BTreeMap<S
 /// wins.
 pub(in crate::compile) fn build_node_boxes(
     page: &zenith_core::Page,
+    resolved: &BTreeMap<String, ResolvedToken>,
 ) -> BTreeMap<String, (f64, f64, f64, f64)> {
     let mut map: BTreeMap<String, (f64, f64, f64, f64)> = BTreeMap::new();
-    collect_node_boxes(&page.children, 0.0, 0.0, &mut map);
+    collect_node_boxes(&page.children, 0.0, 0.0, resolved, &mut map);
     map
 }
 
@@ -88,26 +91,27 @@ fn collect_node_boxes(
     children: &[Node],
     dx: f64,
     dy: f64,
+    resolved: &BTreeMap<String, ResolvedToken>,
     map: &mut BTreeMap<String, (f64, f64, f64, f64)>,
 ) {
-    use zenith_core::dim_to_px;
     for child in children {
         if let Some(id) = node_id(child)
-            && let Some((x, y, w, h)) = node_rect(child)
+            && let Some((x, y, w, h)) = node_rect(child, resolved)
         {
             map.entry(id.to_owned()).or_insert((dx + x, dy + y, w, h));
         }
         match child {
             // A frame is clip-only: its children are NOT translated by its origin.
-            Node::Frame(f) => collect_node_boxes(&f.children, dx, dy, map),
+            Node::Frame(f) => collect_node_boxes(&f.children, dx, dy, resolved, map),
             // A group translates its children by its own x/y (absent/bad-unit → 0).
             Node::Group(g) => {
-                let gx = g.x.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
-                let gy = g.y.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+                let gx = resolve_geometry_px(g.x.as_ref(), resolved);
+                let gy = resolve_geometry_px(g.y.as_ref(), resolved);
                 collect_node_boxes(
                     &g.children,
                     dx + gx.unwrap_or(0.0),
                     dy + gy.unwrap_or(0.0),
+                    resolved,
                     map,
                 );
             }
@@ -142,17 +146,19 @@ fn collect_node_boxes(
 ///
 /// Returns `None` for a node kind without a rectangular box (`line`/`polygon`/
 /// `polyline`/`footnote`/`unknown`) or one missing any of x/y/w/h.
-fn node_rect(node: &Node) -> Option<(f64, f64, f64, f64)> {
-    use zenith_core::dim_to_px;
-    let rect = |x: &Option<zenith_core::Dimension>,
-                y: &Option<zenith_core::Dimension>,
-                w: &Option<zenith_core::Dimension>,
-                h: &Option<zenith_core::Dimension>|
+fn node_rect(
+    node: &Node,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> Option<(f64, f64, f64, f64)> {
+    let rect = |x: &Option<PropertyValue>,
+                y: &Option<PropertyValue>,
+                w: &Option<PropertyValue>,
+                h: &Option<PropertyValue>|
      -> Option<(f64, f64, f64, f64)> {
-        let x = x.as_ref().and_then(|d| dim_to_px(d.value, &d.unit))?;
-        let y = y.as_ref().and_then(|d| dim_to_px(d.value, &d.unit))?;
-        let w = w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit))?;
-        let h = h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit))?;
+        let x = resolve_geometry_px(x.as_ref(), resolved)?;
+        let y = resolve_geometry_px(y.as_ref(), resolved)?;
+        let w = resolve_geometry_px(w.as_ref(), resolved)?;
+        let h = resolve_geometry_px(h.as_ref(), resolved)?;
         Some((x, y, w, h))
     };
     match node {

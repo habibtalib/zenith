@@ -11,7 +11,7 @@ use crate::ast::node::{FrameNode, GroupNode, TableNode};
 use crate::diagnostics::Diagnostic;
 
 use super::shared::{
-    AnchorParentCtx, AnchorProps, check_anchor, check_optional_dim, check_style_ref,
+    AnchorParentCtx, AnchorProps, TokenEnv, check_anchor, check_optional_dim, check_style_ref,
     is_valid_blend_mode,
 };
 use super::suggest::check_unknown_props;
@@ -23,11 +23,13 @@ pub(in crate::validate::check) fn check_frame(
     f: &FrameNode,
     ctx: WalkCtx,
     seen_ids: &mut BTreeSet<String>,
+    referenced_token_ids: &mut BTreeSet<String>,
     geom_required: bool,
     parent_ctx: AnchorParentCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let WalkCtx {
+        resolved_tokens,
         declared_style_ids,
         zone_ids,
         ..
@@ -73,38 +75,48 @@ pub(in crate::validate::check) fn check_frame(
     let xy_required = geom_required && !anchor_active;
 
     // Frames REQUIRE all four geometry dimensions (unlike groups).
-    check_optional_dim(
-        &f.id,
-        "x",
-        f.x.as_ref(),
-        xy_required,
-        f.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &f.id,
-        "y",
-        f.y.as_ref(),
-        xy_required,
-        f.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &f.id,
-        "w",
-        f.w.as_ref(),
-        geom_required,
-        f.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &f.id,
-        "h",
-        f.h.as_ref(),
-        geom_required,
-        f.source_span,
-        diagnostics,
-    );
+    {
+        let mut tokens = TokenEnv {
+            referenced: referenced_token_ids,
+            resolved: resolved_tokens,
+        };
+        check_optional_dim(
+            &f.id,
+            "x",
+            f.x.as_ref(),
+            xy_required,
+            f.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &f.id,
+            "y",
+            f.y.as_ref(),
+            xy_required,
+            f.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &f.id,
+            "w",
+            f.w.as_ref(),
+            geom_required,
+            f.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &f.id,
+            "h",
+            f.h.as_ref(),
+            geom_required,
+            f.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+    }
 
     if let Some(d) = f.blur.as_ref()
         && d.value < 0.0
@@ -140,10 +152,12 @@ pub(in crate::validate::check) fn check_group(
     g: &GroupNode,
     ctx: WalkCtx,
     seen_ids: &mut BTreeSet<String>,
+    referenced_token_ids: &mut BTreeSet<String>,
     parent_ctx: AnchorParentCtx,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let WalkCtx {
+        resolved_tokens,
         declared_style_ids,
         zone_ids,
         ..
@@ -187,6 +201,32 @@ pub(in crate::validate::check) fn check_group(
         g.source_span,
         diagnostics,
     );
+
+    // Geometry is never required for a group, but a `(token)` dimension ref must
+    // still be registered + type-checked (and a bad unit / non-dimension value
+    // diagnosed) exactly like any other geometry property.
+    {
+        let mut tokens = TokenEnv {
+            referenced: referenced_token_ids,
+            resolved: resolved_tokens,
+        };
+        for (prop, value) in [
+            ("x", g.x.as_ref()),
+            ("y", g.y.as_ref()),
+            ("w", g.w.as_ref()),
+            ("h", g.h.as_ref()),
+        ] {
+            check_optional_dim(
+                &g.id,
+                prop,
+                value,
+                false,
+                g.source_span,
+                &mut tokens,
+                diagnostics,
+            );
+        }
+    }
 
     if let Some(d) = g.blur.as_ref()
         && d.value < 0.0
@@ -266,38 +306,48 @@ pub(in crate::validate::check) fn check_table(
     let xy_required = geom_required && !anchor_active;
 
     // Required geometry: x, y, w, h must all be present (mirror frame).
-    check_optional_dim(
-        &t.id,
-        "x",
-        t.x.as_ref(),
-        xy_required,
-        t.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &t.id,
-        "y",
-        t.y.as_ref(),
-        xy_required,
-        t.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &t.id,
-        "w",
-        t.w.as_ref(),
-        geom_required,
-        t.source_span,
-        diagnostics,
-    );
-    check_optional_dim(
-        &t.id,
-        "h",
-        t.h.as_ref(),
-        geom_required,
-        t.source_span,
-        diagnostics,
-    );
+    {
+        let mut tokens = TokenEnv {
+            referenced: referenced_token_ids,
+            resolved: resolved_tokens,
+        };
+        check_optional_dim(
+            &t.id,
+            "x",
+            t.x.as_ref(),
+            xy_required,
+            t.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &t.id,
+            "y",
+            t.y.as_ref(),
+            xy_required,
+            t.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &t.id,
+            "w",
+            t.w.as_ref(),
+            geom_required,
+            t.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+        check_optional_dim(
+            &t.id,
+            "h",
+            t.h.as_ref(),
+            geom_required,
+            t.source_span,
+            &mut tokens,
+            diagnostics,
+        );
+    }
 
     // Token-typed visual props: colors and dimensions.
     for (prop_name, prop_val) in [

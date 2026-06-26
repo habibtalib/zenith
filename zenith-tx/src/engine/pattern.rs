@@ -9,18 +9,36 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, Dimension, Document, GroupNode, Node, PatternLayout, dim_to_px, pattern_positions,
+    Diagnostic, Dimension, Document, GroupNode, Node, PatternLayout, PropertyValue, dim_to_px,
+    pattern_positions,
 };
 
 use super::geometry::node_geometry_mut;
 use super::structure::node_set_id_any;
 use super::{find_node_any_mut, px, record_affected};
 
-/// Resolve an optional [`Dimension`] to a positive pixel magnitude.
+/// Resolve an optional geometry slot (`Option<PropertyValue>`) to a positive
+/// pixel magnitude.
 ///
-/// Returns `None` when the dimension is absent, does not resolve to px (e.g. a
-/// percentage or degree unit), or is not finite and `> 0`.
-fn resolve_positive_px(dim: &Option<Dimension>) -> Option<f64> {
+/// Returns `None` when the slot is absent, holds a non-`Dimension` variant
+/// (e.g. a `TokenRef` — token-ref geometry is opaque to tx in v1), does not
+/// resolve to px (e.g. a percentage or degree unit), or is not finite and `> 0`.
+fn resolve_positive_px(pv: &Option<PropertyValue>) -> Option<f64> {
+    match pv {
+        Some(PropertyValue::Dimension(d)) => dim_to_px(d.value, &d.unit),
+        Some(PropertyValue::TokenRef(_)) => None,
+        Some(PropertyValue::Literal(_)) => None,
+        Some(PropertyValue::DataRef(_)) => None,
+        None => None,
+    }
+    .filter(|&v| v.is_finite() && v > 0.0)
+}
+
+/// Resolve an optional raw [`Dimension`] to a positive pixel magnitude.
+///
+/// Used for pattern fields that remain typed as `Option<Dimension>` (e.g.
+/// `spacing`), which are not part of the geometry-slot change.
+fn resolve_positive_px_dim(dim: &Option<Dimension>) -> Option<f64> {
     dim.as_ref()
         .and_then(|d| dim_to_px(d.value, &d.unit))
         .filter(|&v| v.is_finite() && v > 0.0)
@@ -79,7 +97,7 @@ pub(super) fn apply_detach_pattern(
         return;
     };
 
-    let spacing = resolve_positive_px(&p.spacing);
+    let spacing = resolve_positive_px_dim(&p.spacing);
     let seed = p.seed.unwrap_or(0);
     let jitter = p.jitter.unwrap_or(0.0);
     let count = p.count;
@@ -113,8 +131,8 @@ pub(super) fn apply_detach_pattern(
         let mut child = (*p.motif).clone();
         node_set_id_any(&mut child, format!("{node_id}.{i}"));
         if let Some((cx, cy, _, _)) = node_geometry_mut(&mut child) {
-            *cx = Some(px(*ox));
-            *cy = Some(px(*oy));
+            *cx = Some(PropertyValue::Dimension(px(*ox)));
+            *cy = Some(PropertyValue::Dimension(px(*oy)));
         }
         children.push(child);
     }

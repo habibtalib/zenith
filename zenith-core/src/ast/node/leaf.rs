@@ -24,10 +24,10 @@ pub struct ImageNode {
     pub role: Option<String>,
     /// Required: the referenced asset id (matches an `AssetDecl.id`).
     pub asset: String,
-    pub x: Option<Dimension>,
-    pub y: Option<Dimension>,
-    pub w: Option<Dimension>,
-    pub h: Option<Dimension>,
+    pub x: Option<PropertyValue>,
+    pub y: Option<PropertyValue>,
+    pub w: Option<PropertyValue>,
+    pub h: Option<PropertyValue>,
     /// Optional source-sub-rectangle: left edge within the source image (pixels).
     /// All four src-* fields must be present together; partial presence is a hard
     /// error (`image.partial_src_rect`). Absent ⇒ the full source image is used.
@@ -101,10 +101,10 @@ pub struct RectNode {
     pub id: String,
     pub name: Option<String>,
     pub role: Option<String>,
-    pub x: Option<Dimension>,
-    pub y: Option<Dimension>,
-    pub w: Option<Dimension>,
-    pub h: Option<Dimension>,
+    pub x: Option<PropertyValue>,
+    pub y: Option<PropertyValue>,
+    pub w: Option<PropertyValue>,
+    pub h: Option<PropertyValue>,
     pub radius: Option<PropertyValue>,
     /// Per-corner radius overrides (top-left, top-right, bottom-right, bottom-left).
     /// When `Some`, the value overrides the uniform `radius` for that corner only.
@@ -242,10 +242,10 @@ pub struct EllipseNode {
     pub id: String,
     pub name: Option<String>,
     pub role: Option<String>,
-    pub x: Option<Dimension>,
-    pub y: Option<Dimension>,
-    pub w: Option<Dimension>,
-    pub h: Option<Dimension>,
+    pub x: Option<PropertyValue>,
+    pub y: Option<PropertyValue>,
+    pub w: Option<PropertyValue>,
+    pub h: Option<PropertyValue>,
     /// Explicit x-radius override (half-width of the ellipse). When absent, the
     /// ellipse is inscribed in the bounding box (w/2). Backward-compatible: None
     /// leaves all existing ellipses byte-identical.
@@ -311,10 +311,10 @@ pub struct TextNode {
     pub id: String,
     pub name: Option<String>,
     pub role: Option<String>,
-    pub x: Option<Dimension>,
-    pub y: Option<Dimension>,
-    pub w: Option<Dimension>,
-    pub h: Option<Dimension>,
+    pub x: Option<PropertyValue>,
+    pub y: Option<PropertyValue>,
+    pub w: Option<PropertyValue>,
+    pub h: Option<PropertyValue>,
     pub align: Option<String>,
     /// Vertical text-block alignment within the box (`top`/`middle`/`bottom`,
     /// default `top` = today's behavior: no y offset applied). When the box
@@ -543,10 +543,10 @@ pub struct CodeNode {
     pub id: String,
     pub name: Option<String>,
     pub role: Option<String>,
-    pub x: Option<Dimension>,
-    pub y: Option<Dimension>,
-    pub w: Option<Dimension>,
-    pub h: Option<Dimension>,
+    pub x: Option<PropertyValue>,
+    pub y: Option<PropertyValue>,
+    pub w: Option<PropertyValue>,
+    pub h: Option<PropertyValue>,
     /// "clip" (default) or "visible"; v0 does not word-wrap.
     pub overflow: Option<String>,
     /// Open string naming the source language; drives built-in syntax
@@ -643,10 +643,10 @@ pub struct PatternNode {
     pub id: String,
     pub name: Option<String>,
     pub role: Option<String>,
-    pub x: Option<Dimension>,
-    pub y: Option<Dimension>,
-    pub w: Option<Dimension>,
-    pub h: Option<Dimension>,
+    pub x: Option<PropertyValue>,
+    pub y: Option<PropertyValue>,
+    pub w: Option<PropertyValue>,
+    pub h: Option<PropertyValue>,
     pub radius: Option<PropertyValue>,
     /// Per-corner radius overrides (top-left, top-right, bottom-right, bottom-left).
     pub radius_tl: Option<PropertyValue>,
@@ -767,10 +767,10 @@ pub struct ChartNode {
     pub id: String,
     pub name: Option<String>,
     pub role: Option<String>,
-    pub x: Option<Dimension>,
-    pub y: Option<Dimension>,
-    pub w: Option<Dimension>,
-    pub h: Option<Dimension>,
+    pub x: Option<PropertyValue>,
+    pub y: Option<PropertyValue>,
+    pub w: Option<PropertyValue>,
+    pub h: Option<PropertyValue>,
     pub radius: Option<PropertyValue>,
     /// Per-corner radius overrides (top-left, top-right, bottom-right, bottom-left).
     pub radius_tl: Option<PropertyValue>,

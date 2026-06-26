@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, FontProvider, PropertyValue, ResolvedToken, ShapeNode, Style, TextNode, dim_to_px,
+    Diagnostic, FontProvider, PropertyValue, ResolvedToken, ShapeNode, Style, TextNode,
 };
 use zenith_layout::RustybuzzEngine;
 
@@ -20,8 +20,8 @@ use super::super::text::{
     resolve_text_families,
 };
 use super::super::util::{
-    missing_geometry_diag, px, resolve_anchored_axis, resolve_property_dimension_px,
-    rotation_degrees, unsupported_unit_diag,
+    AxisTarget, missing_geometry_diag, px_prop, resolve_anchored_axis, resolve_geometry_px,
+    resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
 };
 
 /// Read-only borrow + scalar context for [`compile_shape`] and its label
@@ -113,7 +113,7 @@ pub(in crate::compile) fn compile_shape(
         diagnostics.push(missing_geometry_diag("shape", &shape.id, shape.source_span));
         return;
     };
-    let Some(w) = dim_to_px(w_dim.value, &w_dim.unit) else {
+    let Some(w) = resolve_geometry_px(Some(w_dim), resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "shape",
             &shape.id,
@@ -122,7 +122,7 @@ pub(in crate::compile) fn compile_shape(
         ));
         return;
     };
-    let Some(h) = dim_to_px(h_dim.value, &h_dim.unit) else {
+    let Some(h) = resolve_geometry_px(Some(h_dim), resolved) else {
         diagnostics.push(unsupported_unit_diag(
             "shape",
             &shape.id,
@@ -136,10 +136,13 @@ pub(in crate::compile) fn compile_shape(
     let anchor_xy = env.anchors.get(&shape.id).copied();
 
     let Some(x_raw) = resolve_anchored_axis(
-        "shape",
-        &shape.id,
-        "x",
+        AxisTarget {
+            kind: "shape",
+            node_id: &shape.id,
+            axis: "x",
+        },
         shape.x.as_ref(),
+        resolved,
         anchor_xy.map(|(ax, _)| ax),
         shape.source_span,
         diagnostics,
@@ -147,10 +150,13 @@ pub(in crate::compile) fn compile_shape(
         return;
     };
     let Some(y_raw) = resolve_anchored_axis(
-        "shape",
-        &shape.id,
-        "y",
+        AxisTarget {
+            kind: "shape",
+            node_id: &shape.id,
+            axis: "y",
+        },
         shape.y.as_ref(),
+        resolved,
         anchor_xy.map(|(_, ay)| ay),
         shape.source_span,
         diagnostics,
@@ -306,10 +312,10 @@ fn emit_shape_label(
         id: format!("{}/label", shape.id),
         name: None,
         role: None,
-        x: Some(px(content_x)),
-        y: Some(px(content_y)),
-        w: Some(px(content_w)),
-        h: Some(px(content_h)),
+        x: Some(px_prop(content_x)),
+        y: Some(px_prop(content_y)),
+        w: Some(px_prop(content_w)),
+        h: Some(px_prop(content_h)),
         align,
         v_align: None,
         direction: None,
@@ -380,7 +386,7 @@ fn emit_shape_label(
         // "middle", any unrecognized value, and absent center vertically.
         _ => ((content_h - wrapped_h) / 2.0).max(0.0),
     };
-    synth.y = Some(px(content_y + v_offset));
+    synth.y = Some(px_prop(content_y + v_offset));
 
     // Emit the label via the production text path. The synth's x/y are ALREADY
     // absolute (the caller resolved `x_raw + ctx.dx`), so the translation must

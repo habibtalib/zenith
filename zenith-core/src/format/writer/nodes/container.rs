@@ -29,10 +29,10 @@ pub(super) fn write_frame(f: &FrameNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor-edge", &f.anchor_edge);
     write_opt_dimension(out, "anchor-gap", &f.anchor_gap);
     write_opt_bool(out, "anchor-parent", &f.anchor_parent);
-    write_opt_dimension(out, "x", &f.x);
-    write_opt_dimension(out, "y", &f.y);
-    write_opt_dimension(out, "w", &f.w);
-    write_opt_dimension(out, "h", &f.h);
+    write_opt_property_value(out, "x", &f.x);
+    write_opt_property_value(out, "y", &f.y);
+    write_opt_property_value(out, "w", &f.w);
+    write_opt_property_value(out, "h", &f.h);
     write_opt_str(out, "layout", &f.layout);
     if let Some(n) = f.columns {
         let _ = write!(out, " columns={n}");
@@ -80,10 +80,10 @@ pub(super) fn write_group(g: &GroupNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor-edge", &g.anchor_edge);
     write_opt_dimension(out, "anchor-gap", &g.anchor_gap);
     write_opt_bool(out, "anchor-parent", &g.anchor_parent);
-    write_opt_dimension(out, "x", &g.x);
-    write_opt_dimension(out, "y", &g.y);
-    write_opt_dimension(out, "w", &g.w);
-    write_opt_dimension(out, "h", &g.h);
+    write_opt_property_value(out, "x", &g.x);
+    write_opt_property_value(out, "y", &g.y);
+    write_opt_property_value(out, "w", &g.w);
+    write_opt_property_value(out, "h", &g.h);
     write_opt_f64(out, "opacity", &g.opacity);
     write_opt_bool(out, "visible", &g.visible);
     write_opt_bool(out, "locked", &g.locked);
@@ -163,10 +163,10 @@ pub(super) fn write_table(t: &TableNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor-edge", &t.anchor_edge);
     write_opt_dimension(out, "anchor-gap", &t.anchor_gap);
     write_opt_bool(out, "anchor-parent", &t.anchor_parent);
-    write_opt_dimension(out, "x", &t.x);
-    write_opt_dimension(out, "y", &t.y);
-    write_opt_dimension(out, "w", &t.w);
-    write_opt_dimension(out, "h", &t.h);
+    write_opt_property_value(out, "x", &t.x);
+    write_opt_property_value(out, "y", &t.y);
+    write_opt_property_value(out, "w", &t.w);
+    write_opt_property_value(out, "h", &t.h);
     if let Some(n) = t.header_rows {
         let _ = write!(out, " header-rows={n}");
     }

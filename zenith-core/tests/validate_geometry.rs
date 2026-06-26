@@ -25,10 +25,10 @@ fn stroke_width_with_dimension_token_is_clean() {
                 id: "rect.one".to_owned(),
                 name: None,
                 role: None,
-                x: Some(px(0.0)),
-                y: Some(px(0.0)),
-                w: Some(px(50.0)),
-                h: Some(px(50.0)),
+                x: Some(pxv(0.0)),
+                y: Some(pxv(0.0)),
+                w: Some(pxv(50.0)),
+                h: Some(pxv(50.0)),
                 radius: None,
                 radius_tl: None,
                 radius_tr: None,
@@ -89,10 +89,10 @@ fn text_font_family_with_font_family_token_is_clean() {
                 id: "text.one".to_owned(),
                 name: None,
                 role: None,
-                x: Some(px(0.0)),
-                y: Some(px(0.0)),
-                w: Some(px(200.0)),
-                h: Some(px(40.0)),
+                x: Some(pxv(0.0)),
+                y: Some(pxv(0.0)),
+                w: Some(pxv(200.0)),
+                h: Some(pxv(40.0)),
                 align: None,
                 v_align: None,
                 direction: None,
@@ -184,10 +184,10 @@ fn ellipse_missing_w_produces_node_missing_geometry() {
                 id: "ellipse.no-w".to_owned(),
                 name: None,
                 role: None,
-                x: Some(px(0.0)),
-                y: Some(px(0.0)),
+                x: Some(pxv(0.0)),
+                y: Some(pxv(0.0)),
                 w: None, // missing
-                h: Some(px(100.0)),
+                h: Some(pxv(100.0)),
                 rx: None,
                 ry: None,
                 style: None,
@@ -261,10 +261,10 @@ fn ellipse_stroke_raw_literal_produces_raw_visual_literal() {
                 id: "ellipse.stroke-lit".to_owned(),
                 name: None,
                 role: None,
-                x: Some(px(0.0)),
-                y: Some(px(0.0)),
-                w: Some(px(100.0)),
-                h: Some(px(100.0)),
+                x: Some(pxv(0.0)),
+                y: Some(pxv(0.0)),
+                w: Some(pxv(100.0)),
+                h: Some(pxv(100.0)),
                 rx: None,
                 ry: None,
                 style: None,
@@ -415,10 +415,10 @@ fn minimal_ellipse(id: &str, fill: Option<PropertyValue>) -> Node {
         id: id.to_owned(),
         name: None,
         role: None,
-        x: Some(px(0.0)),
-        y: Some(px(0.0)),
-        w: Some(px(100.0)),
-        h: Some(px(100.0)),
+        x: Some(pxv(0.0)),
+        y: Some(pxv(0.0)),
+        w: Some(pxv(100.0)),
+        h: Some(pxv(100.0)),
         rx: None,
         ry: None,
         style: None,
@@ -558,10 +558,10 @@ fn rect_at_rotated(id: &str, x: f64, y: f64, w: f64, h: f64, rotate_deg: Option<
         id: id.to_owned(),
         name: None,
         role: None,
-        x: Some(px(x)),
-        y: Some(px(y)),
-        w: Some(px(w)),
-        h: Some(px(h)),
+        x: Some(pxv(x)),
+        y: Some(pxv(y)),
+        w: Some(pxv(w)),
+        h: Some(pxv(h)),
         radius: None,
         radius_tl: None,
         radius_tr: None,
@@ -675,4 +675,97 @@ fn unrotated_inside_page_no_off_canvas() {
         "unrotated rect inside page should NOT fire off_canvas; codes: {:?}",
         codes(&report)
     );
+}
+
+// ── Geometry token refs: parse + validate + format round-trip ──────────
+
+/// A box-geometry axis (`x`/`y`/`w`/`h`) accepts a `(token)"id"` dimension token
+/// ref IN ADDITION to a raw `(px)N` literal (mirroring `font-size`). This must:
+/// parse to `PropertyValue::TokenRef`, NOT trip `node.missing_geometry`, count
+/// the token as referenced (so `token.unused` stays silent), NOT trip
+/// `token.raw_visual_literal` (geometry is not a visual prop), and survive a
+/// format -> re-parse round-trip.
+#[test]
+fn geometry_token_ref_parses_validates_and_round_trips() {
+    let src = r##"zenith version=1 {
+  project id="proj.geomtok" name="GeomTok"
+  tokens format="zenith-token-v1" {
+    token id="dim.h" type="dimension" value=(px)120
+    token id="color.bg" type="color" value="#102030"
+  }
+  styles {
+  }
+  document id="doc.geomtok" title="GeomTok" {
+    page id="page.one" w=(px)640 h=(px)480 {
+      rect id="r.one" x=(px)0 y=(px)0 w=(px)100 h=(token)"dim.h" fill=(token)"color.bg"
+    }
+  }
+}
+"##;
+
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let rect = match &doc.body.pages[0].children[0] {
+        Node::Rect(r) => r,
+        other => panic!("expected Rect node, got {other:?}"),
+    };
+    assert_eq!(
+        rect.h,
+        Some(PropertyValue::TokenRef("dim.h".to_owned())),
+        "h=(token)\"dim.h\" must parse to a geometry token ref"
+    );
+    assert_eq!(
+        rect.w,
+        Some(PropertyValue::Dimension(px(100.0))),
+        "raw px geometry must still parse to a dimension literal"
+    );
+
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "node.missing_geometry"),
+        "token-ref geometry must count as PRESENT; codes: {:?}",
+        codes(&report)
+    );
+    assert!(
+        !has_code(&report, "token.unused"),
+        "a token used only as geometry must be registered as referenced; codes: {:?}",
+        codes(&report)
+    );
+    assert!(
+        !has_code(&report, "token.raw_visual_literal"),
+        "geometry is not a visual prop; raw px must not trip raw_visual_literal; codes: {:?}",
+        codes(&report)
+    );
+    assert!(
+        !report.has_errors(),
+        "the geometry-token-ref document must validate cleanly; codes: {:?}",
+        codes(&report)
+    );
+
+    // Format round-trip: the token ref re-emits and re-parses identically, and the
+    // raw px sibling axis is byte-preserved.
+    let formatted = zenith_core::format::format_document(&doc).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted).expect("formatted must be utf8");
+    assert!(
+        formatted_str.contains("h=(token)\"dim.h\""),
+        "formatter must emit h as a token ref; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("w=(px)100"),
+        "formatter must emit raw px geometry byte-identically; got:\n{formatted_str}"
+    );
+
+    let doc2 = adapter
+        .parse(formatted_str.as_bytes())
+        .expect("re-parse after format");
+    let rect2 = match &doc2.body.pages[0].children[0] {
+        Node::Rect(r) => r,
+        other => panic!("expected Rect on re-parse, got {other:?}"),
+    };
+    assert_eq!(
+        rect2.h,
+        Some(PropertyValue::TokenRef("dim.h".to_owned())),
+        "geometry token ref must survive a format -> re-parse round-trip"
+    );
+    assert_eq!(rect2.w, Some(PropertyValue::Dimension(px(100.0))));
 }
