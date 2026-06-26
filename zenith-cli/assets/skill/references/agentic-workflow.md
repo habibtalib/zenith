@@ -47,6 +47,9 @@ zenith render doc.zen --all-pages preview/  # one PNG per page
 - Treat every Error as blocking.
 - Look at the PNGs: headline legible over the motif? product safe area clear? texture too noisy?
   Revise nodes by id, re-snapshot.
+- For a structured, style-neutral critique (composition, balance, consistency, noise, semantic
+  accuracy) and how to turn `zenith inspect --json` geometry+role into alignment/spacing/consistency
+  verdicts, see `design-critique.md`.
 
 ## 4. Review and set lifecycle
 
