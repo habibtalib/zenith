@@ -85,7 +85,7 @@ jobs:
           # Exact-pin internal dependency requirements so every version scheme
           # (including prereleases like 0.1.0-beta.1) resolves to this release.
           sed -i -E \
-            "s/(zenith-(core|layout|scene|render|tx|session) = \{ version = )\"[^\"]*\"/\1\"=$VERSION\"/" \
+            "s/(^zenith-[a-z0-9-]+ = \{ version = )\"[^\"]*\"/\1\"=$VERSION\"/" \
             Cargo.toml
           echo "Stamped workspace + internal deps to $VERSION"
       # Publish in dependency order. Each tier waits until crates.io indexes the
@@ -217,6 +217,9 @@ jobs:
           VERSION="${{ needs.validate-version.outputs.version }}"
           # perl for a cross-platform in-place edit of the first version line.
           perl -i -pe "if (!\$done && /^version = \"/) { s/^version = \".*\"/version = \"$VERSION\"/; \$done=1 }" Cargo.toml
+          # Exact-pin internal dependency requirements so prerelease versions
+          # such as 0.1.0-beta.1 satisfy Cargo's path dependency version check.
+          perl -i -pe "s/(^zenith-[a-z0-9-]+ = \\{ version = )\"[^\"]*\"/\$1\"=$VERSION\"/" Cargo.toml
       - name: Build zenith binary
         run: cargo build -p zenith-tool --release --target ${{ matrix.target }}
         env:
