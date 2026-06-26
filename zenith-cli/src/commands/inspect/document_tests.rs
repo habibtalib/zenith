@@ -1,4 +1,5 @@
 use super::*;
+use zenith_core::resolve_tokens;
 
 // A small doc with page → group → [rect, ellipse], plus a top-level text.
 const SMALL_DOC: &str = r##"zenith version=1 {
@@ -36,14 +37,14 @@ const FLAGS_DOC: &str = r##"zenith version=1 {
 #[test]
 fn doc_tree_page_count() {
     let doc = KdlAdapter.parse(SMALL_DOC.as_bytes()).unwrap();
-    let pages = build_doc_tree(&doc.body.pages);
+    let pages = build_doc_tree(&doc.body.pages, &resolve_tokens(&doc.tokens).resolved);
     assert_eq!(pages.len(), 1, "expected exactly 1 page");
 }
 
 #[test]
 fn doc_tree_page_dimensions() {
     let doc = KdlAdapter.parse(SMALL_DOC.as_bytes()).unwrap();
-    let pages = build_doc_tree(&doc.body.pages);
+    let pages = build_doc_tree(&doc.body.pages, &resolve_tokens(&doc.tokens).resolved);
     let page = &pages[0];
     assert_eq!(page.width, 800.0);
     assert_eq!(page.height, 600.0);
@@ -52,7 +53,7 @@ fn doc_tree_page_dimensions() {
 #[test]
 fn doc_tree_page_children_order() {
     let doc = KdlAdapter.parse(SMALL_DOC.as_bytes()).unwrap();
-    let pages = build_doc_tree(&doc.body.pages);
+    let pages = build_doc_tree(&doc.body.pages, &resolve_tokens(&doc.tokens).resolved);
     let children = &pages[0].children;
     // Top-level: group.1 then text.1 (source order).
     assert_eq!(children.len(), 2);
@@ -65,7 +66,7 @@ fn doc_tree_page_children_order() {
 #[test]
 fn doc_tree_group_children() {
     let doc = KdlAdapter.parse(SMALL_DOC.as_bytes()).unwrap();
-    let pages = build_doc_tree(&doc.body.pages);
+    let pages = build_doc_tree(&doc.body.pages, &resolve_tokens(&doc.tokens).resolved);
     let group = &pages[0].children[0];
     assert_eq!(group.children.len(), 2, "group must have 2 children");
     assert_eq!(group.children[0].id, "rect.1");
@@ -77,7 +78,7 @@ fn doc_tree_group_children() {
 #[test]
 fn doc_tree_geometry_values() {
     let doc = KdlAdapter.parse(SMALL_DOC.as_bytes()).unwrap();
-    let pages = build_doc_tree(&doc.body.pages);
+    let pages = build_doc_tree(&doc.body.pages, &resolve_tokens(&doc.tokens).resolved);
     let rect = &pages[0].children[0].children[0]; // group.1 → rect.1
     let geom = rect.geometry.as_ref().unwrap();
     assert_eq!(geom.x, Some(10.0));
@@ -86,12 +87,95 @@ fn doc_tree_geometry_values() {
     assert_eq!(geom.h, Some(50.0));
 }
 
+// ── token-resolved geometry + role ────────────────────────────────────────
+
+// A doc whose geometry mixes px literals with `(token)` dimension refs (one a
+// direct dimension, one an alias chain), plus an authored `role`, so we can
+// assert that inspect resolves refs to px and surfaces the role.
+const TOKEN_GEOM_DOC: &str = r##"zenith version=1 {
+  project id="proj.tk" name="Token Geom"
+  tokens format="zenith-token-v1" {
+    token id="size.rule" type="dimension" value=(px)8
+    token id="size.rule.alias" type="dimension" value=(token)"size.rule"
+  }
+  styles {}
+  document id="doc.tk" title="Token Geom" {
+    page id="page.tk" w=(px)800 h=(px)600 {
+      rect id="bar" role="accent-rule" x=(px)96 y=(px)100 w=(px)200 h=(token)"size.rule"
+      rect id="bar.alias" x=(px)96 y=(px)200 w=(px)200 h=(token)"size.rule.alias"
+      rect id="bar.missing" x=(px)96 y=(px)300 w=(px)200 h=(token)"size.absent"
+    }
+  }
+}
+"##;
+
+#[test]
+fn token_ref_dimension_resolves_to_px() {
+    let doc = KdlAdapter.parse(TOKEN_GEOM_DOC.as_bytes()).unwrap();
+    let pages = build_doc_tree(&doc.body.pages, &resolve_tokens(&doc.tokens).resolved);
+    let bar = &pages[0].children[0];
+    let geom = bar.geometry.as_ref().unwrap();
+    // Direct dimension token `size.rule` → 8px.
+    assert_eq!(geom.h, Some(8.0), "direct token ref must resolve to px");
+    assert_eq!(geom.w, Some(200.0), "px literal unchanged");
+}
+
+#[test]
+fn token_ref_alias_chain_resolves() {
+    let doc = KdlAdapter.parse(TOKEN_GEOM_DOC.as_bytes()).unwrap();
+    let pages = build_doc_tree(&doc.body.pages, &resolve_tokens(&doc.tokens).resolved);
+    let alias = &pages[0].children[1];
+    assert_eq!(
+        alias.geometry.as_ref().unwrap().h,
+        Some(8.0),
+        "alias chain to a dimension token must resolve"
+    );
+}
+
+#[test]
+fn token_ref_missing_token_is_none() {
+    let doc = KdlAdapter.parse(TOKEN_GEOM_DOC.as_bytes()).unwrap();
+    let pages = build_doc_tree(&doc.body.pages, &resolve_tokens(&doc.tokens).resolved);
+    let missing = &pages[0].children[2];
+    assert_eq!(
+        missing.geometry.as_ref().unwrap().h,
+        None,
+        "an unresolvable token ref must stay None (field omitted)"
+    );
+}
+
+#[test]
+fn role_is_surfaced_when_authored() {
+    let doc = KdlAdapter.parse(TOKEN_GEOM_DOC.as_bytes()).unwrap();
+    let pages = build_doc_tree(&doc.body.pages, &resolve_tokens(&doc.tokens).resolved);
+    assert_eq!(pages[0].children[0].role.as_deref(), Some("accent-rule"));
+    assert_eq!(pages[0].children[1].role, None, "no role → None");
+}
+
+#[test]
+fn role_emitted_in_json_and_omitted_when_absent() {
+    let out = run(TOKEN_GEOM_DOC, None, true).expect("run must succeed");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let children = v["pages"][0]["children"].as_array().unwrap();
+    assert_eq!(children[0]["role"], "accent-rule");
+    assert_eq!(children[0]["geometry"]["h"], 8.0);
+    // A node without a role must omit the field entirely.
+    assert!(
+        children[1].get("role").is_none(),
+        "role must be absent in JSON when not authored"
+    );
+}
+
 // ── find_node_tree ────────────────────────────────────────────────────────
 
 #[test]
 fn find_top_level_node() {
     let doc = KdlAdapter.parse(SMALL_DOC.as_bytes()).unwrap();
-    let found = find_node_tree(&doc.body.pages, "text.1");
+    let found = find_node_tree(
+        &doc.body.pages,
+        "text.1",
+        &resolve_tokens(&doc.tokens).resolved,
+    );
     assert!(found.is_some(), "text.1 must be found");
     let e = found.unwrap();
     assert_eq!(e.id, "text.1");
@@ -101,7 +185,11 @@ fn find_top_level_node() {
 #[test]
 fn find_nested_node() {
     let doc = KdlAdapter.parse(SMALL_DOC.as_bytes()).unwrap();
-    let found = find_node_tree(&doc.body.pages, "ellipse.1");
+    let found = find_node_tree(
+        &doc.body.pages,
+        "ellipse.1",
+        &resolve_tokens(&doc.tokens).resolved,
+    );
     assert!(found.is_some(), "ellipse.1 must be found inside group");
     let e = found.unwrap();
     assert_eq!(e.id, "ellipse.1");
@@ -111,7 +199,11 @@ fn find_nested_node() {
 #[test]
 fn find_container_node_includes_children() {
     let doc = KdlAdapter.parse(SMALL_DOC.as_bytes()).unwrap();
-    let found = find_node_tree(&doc.body.pages, "group.1");
+    let found = find_node_tree(
+        &doc.body.pages,
+        "group.1",
+        &resolve_tokens(&doc.tokens).resolved,
+    );
     assert!(found.is_some(), "group.1 must be found");
     let group = found.unwrap();
     assert_eq!(
@@ -127,7 +219,11 @@ fn find_container_node_includes_children() {
 #[test]
 fn find_missing_node_returns_none() {
     let doc = KdlAdapter.parse(SMALL_DOC.as_bytes()).unwrap();
-    let found = find_node_tree(&doc.body.pages, "nonexistent.node");
+    let found = find_node_tree(
+        &doc.body.pages,
+        "nonexistent.node",
+        &resolve_tokens(&doc.tokens).resolved,
+    );
     assert!(found.is_none());
 }
 
@@ -274,7 +370,11 @@ const TABLE_INSPECT_DOC: &str = r##"zenith version=1 {
 #[test]
 fn find_node_inside_table_cell_returns_entry() {
     let doc = KdlAdapter.parse(TABLE_INSPECT_DOC.as_bytes()).unwrap();
-    let found = find_node_tree(&doc.body.pages, "cell.rect.1");
+    let found = find_node_tree(
+        &doc.body.pages,
+        "cell.rect.1",
+        &resolve_tokens(&doc.tokens).resolved,
+    );
     assert!(
         found.is_some(),
         "cell.rect.1 inside a table cell must be findable"
@@ -287,7 +387,11 @@ fn find_node_inside_table_cell_returns_entry() {
 #[test]
 fn find_text_inside_table_cell_returns_entry() {
     let doc = KdlAdapter.parse(TABLE_INSPECT_DOC.as_bytes()).unwrap();
-    let found = find_node_tree(&doc.body.pages, "cell.text.1");
+    let found = find_node_tree(
+        &doc.body.pages,
+        "cell.text.1",
+        &resolve_tokens(&doc.tokens).resolved,
+    );
     assert!(
         found.is_some(),
         "cell.text.1 inside a table cell must be findable"
@@ -344,7 +448,7 @@ const UNKNOWN_INSPECT_DOC: &str = r##"zenith version=1 {
 #[test]
 fn doc_tree_unknown_node_shows_id_and_children() {
     let doc = KdlAdapter.parse(UNKNOWN_INSPECT_DOC.as_bytes()).unwrap();
-    let pages = build_doc_tree(&doc.body.pages);
+    let pages = build_doc_tree(&doc.body.pages, &resolve_tokens(&doc.tokens).resolved);
     let unknown = &pages[0].children[0];
     assert_eq!(unknown.id, "lib.1", "unknown node must expose its id");
     assert_eq!(unknown.kind, "mystery", "unknown node keeps its kind");
@@ -360,7 +464,11 @@ fn doc_tree_unknown_node_shows_id_and_children() {
 #[test]
 fn find_unknown_node_by_id() {
     let doc = KdlAdapter.parse(UNKNOWN_INSPECT_DOC.as_bytes()).unwrap();
-    let found = find_node_tree(&doc.body.pages, "lib.1");
+    let found = find_node_tree(
+        &doc.body.pages,
+        "lib.1",
+        &resolve_tokens(&doc.tokens).resolved,
+    );
     assert!(found.is_some(), "unknown node must be findable by id");
     let e = found.unwrap();
     assert_eq!(e.id, "lib.1");
@@ -372,7 +480,11 @@ fn find_unknown_node_by_id() {
 #[test]
 fn find_known_node_inside_unknown() {
     let doc = KdlAdapter.parse(UNKNOWN_INSPECT_DOC.as_bytes()).unwrap();
-    let found = find_node_tree(&doc.body.pages, "inner");
+    let found = find_node_tree(
+        &doc.body.pages,
+        "inner",
+        &resolve_tokens(&doc.tokens).resolved,
+    );
     assert!(
         found.is_some(),
         "known rect nested in an unknown node must be findable"

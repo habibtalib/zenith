@@ -8,8 +8,11 @@
 //! [`NodeEntry`] values that serialise to JSON and render to human-readable
 //! format.
 
+use std::collections::BTreeMap;
+
 use zenith_core::{
-    Dimension, FrameNode, GroupNode, KdlAdapter, KdlSource, Node, Page, PropertyValue, Unit,
+    Dimension, FrameNode, GroupNode, KdlAdapter, KdlSource, Node, Page, PropertyValue,
+    ResolvedToken, ResolvedValue, Unit, resolve_tokens,
 };
 
 use crate::commands::serialize_pretty;
@@ -77,11 +80,20 @@ pub struct NodeGeometry {
 pub struct NodeEntry {
     pub id: String,
     pub kind: String,
+    /// The node's `role` attribute, when authored. Surfacing it lets consumers
+    /// group same-role nodes (e.g. every `role="heading"`) and reason about
+    /// cross-page consistency without re-parsing the source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
     pub geometry: Option<NodeGeometry>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,
     pub children: Vec<NodeEntry>,
 }
+
+/// The resolved token table used to turn `(token)"id"` dimension refs into px
+/// values. Built once per `inspect` run from the document's `tokens` block.
+type Resolved = BTreeMap<String, ResolvedToken>;
 
 /// A page in the inspect tree.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -125,9 +137,11 @@ pub fn run(src: &str, node_id: Option<&str>, json: bool) -> Result<String, Inspe
         .parse(src.as_bytes())
         .map_err(|e| InspectCmdErr::new(format!("error[parse.error]: {}", e.message), 2))?;
 
+    let resolved = resolve_tokens(&doc.tokens).resolved;
+
     if let Some(id) = node_id {
         // --node <ID>: find the subtree rooted at that node.
-        let entry = find_node_tree(&doc.body.pages, id)
+        let entry = find_node_tree(&doc.body.pages, id, &resolved)
             .ok_or_else(|| InspectCmdErr::new(format!("error: node '{}' not found", id), 2))?;
 
         let out = if json {
@@ -142,7 +156,7 @@ pub fn run(src: &str, node_id: Option<&str>, json: bool) -> Result<String, Inspe
         Ok(out)
     } else {
         // Whole document.
-        let pages = build_doc_tree(&doc.body.pages);
+        let pages = build_doc_tree(&doc.body.pages, &resolved);
 
         let out = if json {
             let recipe_entries = recipes::build_recipe_entries(&doc.recipes);
@@ -190,15 +204,17 @@ pub fn summary(
         .parse(src.as_bytes())
         .map_err(|e| InspectCmdErr::new(format!("error[parse.error]: {}", e.message), 2))?;
 
+    let resolved = resolve_tokens(&doc.tokens).resolved;
+
     if let Some(id) = node {
-        let entry = find_node_tree(&doc.body.pages, id)
+        let entry = find_node_tree(&doc.body.pages, id, &resolved)
             .ok_or_else(|| InspectCmdErr::new(format!("error: node '{id}' not found"), 2))?;
         Ok(serde_json::json!({
             "schema": "zenith-inspect-summary-v1",
             "node": trim_node(&entry, depth, detail),
         }))
     } else {
-        let pages = build_doc_tree(&doc.body.pages);
+        let pages = build_doc_tree(&doc.body.pages, &resolved);
         let page_values: Vec<serde_json::Value> =
             pages.iter().map(|p| trim_page(p, depth, detail)).collect();
         Ok(serde_json::json!({
@@ -228,6 +244,9 @@ fn trim_node(n: &NodeEntry, depth: usize, detail: bool) -> serde_json::Value {
     obj.insert("id".into(), n.id.clone().into());
     obj.insert("kind".into(), n.kind.clone().into());
     if detail {
+        if let Some(role) = &n.role {
+            obj.insert("role".into(), role.clone().into());
+        }
         if let Some(g) = &n.geometry {
             obj.insert(
                 "geometry".into(),
@@ -270,26 +289,43 @@ fn insert_children(
 // ── Tree builders ─────────────────────────────────────────────────────────────
 
 /// Build the full page tree for all pages in the document (in order).
-pub fn build_doc_tree(pages: &[Page]) -> Vec<PageEntry> {
-    pages.iter().map(build_page_entry).collect()
+///
+/// `resolved` is the document's resolved token table; it turns `(token)"id"`
+/// dimension refs into px values in each node's geometry.
+pub fn build_doc_tree(pages: &[Page], resolved: &Resolved) -> Vec<PageEntry> {
+    pages
+        .iter()
+        .map(|p| build_page_entry(p, resolved))
+        .collect()
 }
 
-fn build_page_entry(page: &Page) -> PageEntry {
+fn build_page_entry(page: &Page, resolved: &Resolved) -> PageEntry {
     PageEntry {
         id: page.id.clone(),
         name: page.name.clone(),
         width: dim_to_f64(&page.width),
         height: dim_to_f64(&page.height),
-        children: page.children.iter().map(build_node_entry).collect(),
+        children: page
+            .children
+            .iter()
+            .map(|n| build_node_entry(n, resolved))
+            .collect(),
     }
 }
 
-fn build_node_entry(node: &Node) -> NodeEntry {
+fn build_node_entry(node: &Node, resolved: &Resolved) -> NodeEntry {
     match node {
         Node::Rect(n) => NodeEntry {
             id: n.id.clone(),
             kind: "rect".into(),
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            role: n.role.clone(),
+            geometry: bbox_geom(
+                n.x.as_ref(),
+                n.y.as_ref(),
+                n.w.as_ref(),
+                n.h.as_ref(),
+                resolved,
+            ),
             visible: n.visible,
             locked: n.locked,
             children: vec![],
@@ -297,7 +333,14 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Ellipse(n) => NodeEntry {
             id: n.id.clone(),
             kind: "ellipse".into(),
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            role: n.role.clone(),
+            geometry: bbox_geom(
+                n.x.as_ref(),
+                n.y.as_ref(),
+                n.w.as_ref(),
+                n.h.as_ref(),
+                resolved,
+            ),
             visible: n.visible,
             locked: n.locked,
             children: vec![],
@@ -305,6 +348,7 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Line(n) => NodeEntry {
             id: n.id.clone(),
             kind: "line".into(),
+            role: n.role.clone(),
             geometry: Some(NodeGeometry {
                 x: None,
                 y: None,
@@ -323,7 +367,14 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Text(n) => NodeEntry {
             id: n.id.clone(),
             kind: "text".into(),
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            role: n.role.clone(),
+            geometry: bbox_geom(
+                n.x.as_ref(),
+                n.y.as_ref(),
+                n.w.as_ref(),
+                n.h.as_ref(),
+                resolved,
+            ),
             visible: n.visible,
             locked: n.locked,
             children: vec![],
@@ -331,7 +382,14 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Code(n) => NodeEntry {
             id: n.id.clone(),
             kind: "code".into(),
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            role: n.role.clone(),
+            geometry: bbox_geom(
+                n.x.as_ref(),
+                n.y.as_ref(),
+                n.w.as_ref(),
+                n.h.as_ref(),
+                resolved,
+            ),
             visible: n.visible,
             locked: n.locked,
             children: vec![],
@@ -339,7 +397,14 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Image(n) => NodeEntry {
             id: n.id.clone(),
             kind: "image".into(),
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            role: n.role.clone(),
+            geometry: bbox_geom(
+                n.x.as_ref(),
+                n.y.as_ref(),
+                n.w.as_ref(),
+                n.h.as_ref(),
+                resolved,
+            ),
             visible: n.visible,
             locked: n.locked,
             children: vec![],
@@ -347,22 +412,45 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Frame(n) => NodeEntry {
             id: n.id.clone(),
             kind: "frame".into(),
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            role: n.role.clone(),
+            geometry: bbox_geom(
+                n.x.as_ref(),
+                n.y.as_ref(),
+                n.w.as_ref(),
+                n.h.as_ref(),
+                resolved,
+            ),
             visible: n.visible,
             locked: n.locked,
-            children: n.children.iter().map(build_node_entry).collect(),
+            children: n
+                .children
+                .iter()
+                .map(|c| build_node_entry(c, resolved))
+                .collect(),
         },
         Node::Group(n) => NodeEntry {
             id: n.id.clone(),
             kind: "group".into(),
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            role: n.role.clone(),
+            geometry: bbox_geom(
+                n.x.as_ref(),
+                n.y.as_ref(),
+                n.w.as_ref(),
+                n.h.as_ref(),
+                resolved,
+            ),
             visible: n.visible,
             locked: n.locked,
-            children: n.children.iter().map(build_node_entry).collect(),
+            children: n
+                .children
+                .iter()
+                .map(|c| build_node_entry(c, resolved))
+                .collect(),
         },
         Node::Polygon(n) => NodeEntry {
             id: n.id.clone(),
             kind: "polygon".into(),
+            role: n.role.clone(),
             geometry: Some(NodeGeometry {
                 x: None,
                 y: None,
@@ -381,6 +469,7 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Polyline(n) => NodeEntry {
             id: n.id.clone(),
             kind: "polyline".into(),
+            role: n.role.clone(),
             geometry: Some(NodeGeometry {
                 x: None,
                 y: None,
@@ -399,6 +488,7 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Instance(n) => NodeEntry {
             id: n.id.clone(),
             kind: "instance".into(),
+            role: n.role.clone(),
             // An instance carries only an x/y origin (no w/h box); its x/y stay
             // raw `Dimension` (not token-ref geometry), so report them directly.
             geometry: Some(NodeGeometry {
@@ -419,9 +509,16 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Field(n) => NodeEntry {
             id: n.id.clone(),
             kind: "field".into(),
+            role: n.role.clone(),
             // A field carries an x/y/w/h box (any of which may be omitted, in
             // which case it defaults to the page live area at compile time).
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            geometry: bbox_geom(
+                n.x.as_ref(),
+                n.y.as_ref(),
+                n.w.as_ref(),
+                n.h.as_ref(),
+                resolved,
+            ),
             visible: n.visible,
             locked: n.locked,
             children: vec![],
@@ -429,9 +526,16 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Toc(n) => NodeEntry {
             id: n.id.clone(),
             kind: "toc".into(),
+            role: n.role.clone(),
             // A toc carries a real x/y/w/h box (it must declare its own
             // geometry for correct positioning).
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            geometry: bbox_geom(
+                n.x.as_ref(),
+                n.y.as_ref(),
+                n.w.as_ref(),
+                n.h.as_ref(),
+                resolved,
+            ),
             visible: n.visible,
             locked: n.locked,
             children: vec![],
@@ -439,6 +543,7 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Footnote(n) => NodeEntry {
             id: n.id.clone(),
             kind: "footnote".into(),
+            role: n.role.clone(),
             // A footnote has NO geometry (the renderer positions it in the
             // bottom zone); report no geometry, visible, or locked.
             geometry: None,
@@ -449,7 +554,14 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Table(n) => NodeEntry {
             id: n.id.clone(),
             kind: "table".into(),
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            role: n.role.clone(),
+            geometry: bbox_geom(
+                n.x.as_ref(),
+                n.y.as_ref(),
+                n.w.as_ref(),
+                n.h.as_ref(),
+                resolved,
+            ),
             visible: n.visible,
             locked: n.locked,
             // Report each cell's child nodes (flattened in row→cell order) so a
@@ -459,13 +571,20 @@ fn build_node_entry(node: &Node) -> NodeEntry {
                 .iter()
                 .flat_map(|row| row.cells.iter())
                 .flat_map(|cell| cell.children.iter())
-                .map(build_node_entry)
+                .map(|c| build_node_entry(c, resolved))
                 .collect(),
         },
         Node::Shape(n) => NodeEntry {
             id: n.id.clone(),
             kind: "shape".into(),
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            role: n.role.clone(),
+            geometry: bbox_geom(
+                n.x.as_ref(),
+                n.y.as_ref(),
+                n.w.as_ref(),
+                n.h.as_ref(),
+                resolved,
+            ),
             visible: n.visible,
             locked: n.locked,
             // A shape owns label spans (TextSpans), not child Nodes, so it has
@@ -475,6 +594,7 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Connector(n) => NodeEntry {
             id: n.id.clone(),
             kind: "connector".into(),
+            role: n.role.clone(),
             // A connector has no authored bbox — its endpoints are derived from
             // its targets' boxes at compile time.
             geometry: None,
@@ -485,7 +605,14 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Pattern(n) => NodeEntry {
             id: n.id.clone(),
             kind: "pattern".into(),
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            role: n.role.clone(),
+            geometry: bbox_geom(
+                n.x.as_ref(),
+                n.y.as_ref(),
+                n.w.as_ref(),
+                n.h.as_ref(),
+                resolved,
+            ),
             visible: n.visible,
             locked: n.locked,
             children: vec![],
@@ -493,7 +620,14 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Chart(n) => NodeEntry {
             id: n.id.clone(),
             kind: "chart".into(),
-            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            role: n.role.clone(),
+            geometry: bbox_geom(
+                n.x.as_ref(),
+                n.y.as_ref(),
+                n.w.as_ref(),
+                n.h.as_ref(),
+                resolved,
+            ),
             visible: n.visible,
             locked: n.locked,
             children: vec![],
@@ -501,10 +635,16 @@ fn build_node_entry(node: &Node) -> NodeEntry {
         Node::Unknown(n) => NodeEntry {
             id: n.id.clone().unwrap_or_default(),
             kind: n.kind.clone(),
+            // An unknown (library) node kind carries no typed `role` field.
+            role: None,
             geometry: None,
             visible: None,
             locked: None,
-            children: n.children.iter().map(build_node_entry).collect(),
+            children: n
+                .children
+                .iter()
+                .map(|c| build_node_entry(c, resolved))
+                .collect(),
         },
     }
 }
@@ -513,25 +653,25 @@ fn build_node_entry(node: &Node) -> NodeEntry {
 
 /// Search all pages (depth-first, in source order) for a node with the given
 /// id.  Returns a fully-built [`NodeEntry`] subtree when found.
-pub fn find_node_tree(pages: &[Page], id: &str) -> Option<NodeEntry> {
+pub fn find_node_tree(pages: &[Page], id: &str, resolved: &Resolved) -> Option<NodeEntry> {
     for page in pages {
-        if let Some(entry) = search_nodes(&page.children, id) {
+        if let Some(entry) = search_nodes(&page.children, id, resolved) {
             return Some(entry);
         }
     }
     None
 }
 
-fn search_nodes(nodes: &[Node], id: &str) -> Option<NodeEntry> {
+fn search_nodes(nodes: &[Node], id: &str, resolved: &Resolved) -> Option<NodeEntry> {
     for node in nodes {
         // Check if this node matches.
         let node_id = node_id_str(node);
         if node_id == id {
-            return Some(build_node_entry(node));
+            return Some(build_node_entry(node, resolved));
         }
         // Recurse into Frame/Group/Unknown children via node_children.
         if let Some(children) = node_children(node)
-            && let Some(found) = search_nodes(children, id)
+            && let Some(found) = search_nodes(children, id, resolved)
         {
             return Some(found);
         }
@@ -539,7 +679,7 @@ fn search_nodes(nodes: &[Node], id: &str) -> Option<NodeEntry> {
         if let Node::Table(t) = node {
             for row in &t.rows {
                 for cell in &row.cells {
-                    if let Some(found) = search_nodes(&cell.children, id) {
+                    if let Some(found) = search_nodes(&cell.children, id, resolved) {
                         return Some(found);
                     }
                 }
@@ -616,13 +756,19 @@ fn opt_dim_to_f64(d: Option<&Dimension>) -> Option<f64> {
     d.map(dim_to_f64)
 }
 
-/// A geometry property is now `(px)N` literal OR `(token)"id"` dimension ref.
-/// Inspect reports the literal px value; a token ref (and any non-dimension form)
-/// has no resolvable value without the token table, so it shows as `None`.
-fn opt_pv_to_f64(pv: Option<&PropertyValue>) -> Option<f64> {
+/// A geometry property is `(px)N` literal OR `(token)"id"` dimension ref.
+/// Inspect reports the resolved px value: a literal yields its own value; a
+/// token ref is resolved against the document's token table. A ref that is
+/// missing, cyclic, or not a dimension token has no px value, so it shows as
+/// `None` (the field is omitted from the JSON).
+fn opt_pv_to_f64(pv: Option<&PropertyValue>, resolved: &Resolved) -> Option<f64> {
     match pv? {
         PropertyValue::Dimension(d) => Some(dim_to_f64(d)),
-        PropertyValue::TokenRef(_) | PropertyValue::Literal(_) | PropertyValue::DataRef(_) => None,
+        PropertyValue::TokenRef(id) => match resolved.get(id).map(|t| &t.value) {
+            Some(ResolvedValue::Dimension(d)) => Some(dim_to_f64(d)),
+            _ => None,
+        },
+        PropertyValue::Literal(_) | PropertyValue::DataRef(_) => None,
     }
 }
 
@@ -631,12 +777,13 @@ fn bbox_geom(
     y: Option<&PropertyValue>,
     w: Option<&PropertyValue>,
     h: Option<&PropertyValue>,
+    resolved: &Resolved,
 ) -> Option<NodeGeometry> {
     Some(NodeGeometry {
-        x: opt_pv_to_f64(x),
-        y: opt_pv_to_f64(y),
-        w: opt_pv_to_f64(w),
-        h: opt_pv_to_f64(h),
+        x: opt_pv_to_f64(x, resolved),
+        y: opt_pv_to_f64(y, resolved),
+        w: opt_pv_to_f64(w, resolved),
+        h: opt_pv_to_f64(h, resolved),
         x1: None,
         y1: None,
         x2: None,
