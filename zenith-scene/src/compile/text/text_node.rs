@@ -742,9 +742,16 @@ pub(in crate::compile) fn compile_text_sized(
     let has_hanging = text.bullet.as_deref().is_some_and(|s| !s.is_empty())
         || text.padding_left.is_some()
         || text.text_indent.is_some();
+    // A literal line break (U+000A) inside any span's text is a MANDATORY break.
+    // The fast path shapes each span's text whole and would feed the newline
+    // straight to the shaper — rendering it as a .notdef/tofu box. The wrap path
+    // splits span text on '\n' into paragraph boundaries that `pack` turns into
+    // forced line breaks, so any node carrying a mandatory break must take the
+    // wrapping path. Nodes without '\n' are unaffected (byte-identical).
+    let has_mandatory_break = effective_spans.iter().any(|s| s.text.contains('\n'));
     let needs_wrap = match box_w_opt {
-        Some(box_w) => total_advance > box_w || has_hanging,
-        None => false,
+        Some(box_w) => total_advance > box_w || has_hanging || has_mandatory_break,
+        None => has_mandatory_break,
     };
 
     // Rotation bracket: only when both w and h are present (safe pivot).
@@ -933,7 +940,13 @@ pub(in crate::compile) fn compile_text_sized(
             // Advance the cursor past this run for the next span.
             x_cursor += run_advance;
         }
-    } else if let Some(box_w) = box_w_opt {
+    } else {
+        // A node with a box width wraps to it. A width-less node only reaches the
+        // wrap path to honor a mandatory '\n' break; it falls back to its natural
+        // content width so soft-wrapping never triggers and only the explicit
+        // breaks apply. (Width-present nodes are unchanged: unwrap_or returns the
+        // box width, byte-identical to the prior `if let Some(box_w)`.)
+        let box_w = box_w_opt.unwrap_or(total_advance);
         // ── WRAP PATH (overflow): greedy cross-span word packing ──────
         // Reuses the SHARED shaping/packing/emit helpers (also used by the
         // threaded-text chain distributor) so a wrapped node and a chain
