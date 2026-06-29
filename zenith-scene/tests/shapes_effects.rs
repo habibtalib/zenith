@@ -210,6 +210,108 @@ page id="page.ns" w=(px)200 h=(px)200 {
     );
 }
 
+#[test]
+fn group_shadow_wraps_children_as_one_effect() {
+    let src = r##"zenith version=1 {
+  project id="proj.group.effect" name="Group Effect"
+  tokens format="zenith-token-v1" {
+token id="color.fill" type="color" value="#445566"
+token id="color.shadow" type="color" value="#102030"
+token id="shadow.card" type="shadow" {
+  layer dx=(px)2 dy=(px)3 blur=(px)4 color=(token)"color.shadow"
+}
+  }
+  styles {}
+  document id="doc.group.effect" title="Group Effect" {
+page id="page.group.effect" w=(px)200 h=(px)200 {
+  group id="card" x=(px)10 y=(px)20 w=(px)100 h=(px)80 shadow=(token)"shadow.card" {
+    rect id="card.a" x=(px)0 y=(px)0 w=(px)20 h=(px)20 fill=(token)"color.fill"
+    rect id="card.b" x=(px)30 y=(px)0 w=(px)20 h=(px)20 fill=(token)"color.fill"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+    let begin_idx = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::BeginShadow { .. }))
+        .expect("group shadow begin");
+    let end_idx = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::EndShadow))
+        .expect("group shadow end");
+    assert!(begin_idx < end_idx, "shadow bracket order: {cmds:?}");
+    let draw_count = cmds
+        .get(begin_idx + 1..end_idx)
+        .expect("shadow window")
+        .iter()
+        .filter(|c| matches!(c, SceneCommand::FillRect { .. }))
+        .count();
+    assert_eq!(
+        draw_count, 2,
+        "group shadow must capture both child draws once: {cmds:?}"
+    );
+    assert_eq!(
+        cmds.iter()
+            .filter(|c| matches!(c, SceneCommand::BeginShadow { .. }))
+            .count(),
+        1,
+        "one group-level shadow bracket: {cmds:?}"
+    );
+}
+
+#[test]
+fn frame_shadow_wraps_clip_and_children() {
+    let src = r##"zenith version=1 {
+  project id="proj.frame.effect" name="Frame Effect"
+  tokens format="zenith-token-v1" {
+token id="color.fill" type="color" value="#445566"
+token id="color.shadow" type="color" value="#102030"
+token id="shadow.panel" type="shadow" {
+  layer dx=(px)2 dy=(px)3 blur=(px)4 color=(token)"color.shadow"
+}
+  }
+  styles {}
+  document id="doc.frame.effect" title="Frame Effect" {
+page id="page.frame.effect" w=(px)200 h=(px)200 {
+  frame id="panel" x=(px)10 y=(px)20 w=(px)100 h=(px)80 shadow=(token)"shadow.panel" {
+    rect id="panel.bg" x=(px)10 y=(px)20 w=(px)100 h=(px)80 fill=(token)"color.fill"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+    let begin_idx = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::BeginShadow { .. }))
+        .expect("frame shadow begin");
+    let end_idx = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::EndShadow))
+        .expect("frame shadow end");
+    let window = cmds.get(begin_idx + 1..end_idx).expect("shadow window");
+    assert!(
+        matches!(window.first(), Some(SceneCommand::PushClip { .. })),
+        "frame shadow should capture the frame clip and children: {cmds:?}"
+    );
+    assert!(
+        window
+            .iter()
+            .any(|c| matches!(c, SceneCommand::FillRect { .. })),
+        "frame shadow should include child draw: {cmds:?}"
+    );
+    assert!(
+        matches!(window.last(), Some(SceneCommand::PopClip)),
+        "frame shadow should close the captured clip: {cmds:?}"
+    );
+}
+
 // ── Leaf-node rotation: PushTransform bracket ─────────────────────────
 
 /// A rect with `rotate=(deg)45` must emit

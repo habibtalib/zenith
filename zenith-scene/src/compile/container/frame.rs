@@ -5,12 +5,16 @@ use zenith_core::{Diagnostic, FrameNode, Node, dim_to_px};
 
 use crate::ir::SceneCommand;
 
+use super::super::paint::{
+    NodeEffect, resolve_property_filter, resolve_property_mask, resolve_property_shadow,
+};
 use super::super::util::{
     blend_mode_ir, resolve_geometry_px, resolve_property_dimension_px, rotation_degrees,
     unsupported_unit_diag,
 };
 use super::super::{NodeCtx, RenderCtx, compile_node, style_prop};
 use super::flow::{node_declared_h, node_declared_w, node_skipped_in_flow, with_flow_box};
+use super::wrap::emit_wrapped_container;
 
 /// The already-resolved frame box in page coordinates (pixels), passed to the
 /// `flow`/`grid` layout helpers.
@@ -125,28 +129,34 @@ pub(in crate::compile) fn compile_frame(
         None => ctx.opacity * frame_opacity,
     };
 
-    // BLUR bracket (inside blend, wrapping clip+children). Opened here so the
-    // entire frame ink (clip + composited children) is blurred as a unit.
+    // Attached visual effect (inside blend, wrapping clip+children). The entire
+    // frame ink (clipped composited children) is affected as one unit. Precedence
+    // matches leaf nodes: blur > shadow > filter.
     let blur_sigma = frame
         .blur
         .as_ref()
         .and_then(|d| dim_to_px(d.value, &d.unit))
         .filter(|&s| s > 0.0);
-    let has_blur = blur_sigma.is_some();
-    if let Some(sigma) = blur_sigma {
-        commands.push(SceneCommand::BeginBlur { radius: sigma });
-    }
+    let effect: Option<NodeEffect> = if let Some(sigma) = blur_sigma {
+        Some(NodeEffect::Blur(sigma))
+    } else if let Some(shadows) = frame
+        .shadow
+        .as_ref()
+        .and_then(|p| resolve_property_shadow(p, cx.resolved, &frame.id))
+    {
+        Some(NodeEffect::Shadow(shadows))
+    } else {
+        frame
+            .filter
+            .as_ref()
+            .and_then(|p| resolve_property_filter(p, cx.resolved, &frame.id))
+            .map(NodeEffect::Filter)
+    };
+    let mask = frame
+        .mask
+        .as_ref()
+        .and_then(|p| resolve_property_mask(p, cx.resolved, (frame_x, frame_y, frame_w, frame_h)));
 
-    // Clip rectangle is the frame's own bbox.
-    commands.push(SceneCommand::PushClip {
-        x: frame_x,
-        y: frame_y,
-        w: frame_w,
-        h: frame_h,
-    });
-
-    // Frame clips only — it does NOT translate children (dx/dy unchanged).
-    // Opacity cascades into all descendant alphas exactly as group does.
     let child_ctx = RenderCtx {
         opacity: child_opacity,
         dx: ctx.dx, // clip-only: no translation
@@ -155,16 +165,75 @@ pub(in crate::compile) fn compile_frame(
         baseline_grid: ctx.baseline_grid,
     };
 
+    let fbox = FrameBox {
+        x: frame_x,
+        y: frame_y,
+        w: frame_w,
+        h: frame_h,
+    };
+    if effect.is_none() && mask.is_none() {
+        compile_frame_clipped_children(
+            frame,
+            fbox,
+            cx,
+            commands,
+            diagnostics,
+            connector_strokes,
+            child_ctx,
+        );
+    } else {
+        let mut draws = Vec::new();
+        let mut local_connector_strokes = Vec::new();
+        compile_frame_clipped_children(
+            frame,
+            fbox,
+            cx,
+            &mut draws,
+            diagnostics,
+            &mut local_connector_strokes,
+            child_ctx,
+        );
+        emit_wrapped_container(
+            commands,
+            draws,
+            effect,
+            mask,
+            connector_strokes,
+            local_connector_strokes,
+        );
+    }
+
+    if blend.is_some() {
+        commands.push(SceneCommand::PopLayer);
+    }
+
+    if frame_rot.is_some() {
+        commands.push(SceneCommand::PopTransform);
+    }
+    // Frame emits no fill of its own in v0.
+}
+
+fn compile_frame_clipped_children(
+    frame: &FrameNode,
+    fbox: FrameBox,
+    cx: NodeCtx,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    connector_strokes: &mut Vec<usize>,
+    child_ctx: RenderCtx,
+) {
+    commands.push(SceneCommand::PushClip {
+        x: fbox.x,
+        y: fbox.y,
+        w: fbox.w,
+        h: fbox.h,
+    });
+
     match frame.layout.as_deref() {
         Some("flow") => {
             compile_frame_flow(
                 frame,
-                FrameBox {
-                    x: frame_x,
-                    y: frame_y,
-                    w: frame_w,
-                    h: frame_h,
-                },
+                fbox,
                 cx,
                 commands,
                 diagnostics,
@@ -175,12 +244,7 @@ pub(in crate::compile) fn compile_frame(
         Some("grid") => {
             compile_frame_grid(
                 frame,
-                FrameBox {
-                    x: frame_x,
-                    y: frame_y,
-                    w: frame_w,
-                    h: frame_h,
-                },
+                fbox,
                 cx,
                 commands,
                 diagnostics,
@@ -189,7 +253,6 @@ pub(in crate::compile) fn compile_frame(
             );
         }
         _ => {
-            // Absolute (clip-only) model: children render at their own page coords.
             for child in &frame.children {
                 compile_node(
                     child,
@@ -204,19 +267,6 @@ pub(in crate::compile) fn compile_frame(
     }
 
     commands.push(SceneCommand::PopClip);
-
-    if has_blur {
-        commands.push(SceneCommand::EndBlur);
-    }
-
-    if blend.is_some() {
-        commands.push(SceneCommand::PopLayer);
-    }
-
-    if frame_rot.is_some() {
-        commands.push(SceneCommand::PopTransform);
-    }
-    // Frame emits no fill of its own in v0.
 }
 
 /// Resolve `padding` and `gap` from a frame's style; both default to `0.0`.

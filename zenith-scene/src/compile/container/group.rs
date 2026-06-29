@@ -8,8 +8,12 @@ use zenith_core::{Diagnostic, GroupNode, Node, Point, ResolvedToken, dim_to_px};
 
 use crate::ir::SceneCommand;
 
+use super::super::paint::{
+    NodeEffect, resolve_property_filter, resolve_property_mask, resolve_property_shadow,
+};
 use super::super::util::{blend_mode_ir, resolve_geometry_px, rotation_degrees};
 use super::super::{NodeCtx, RenderCtx, compile_node};
+use super::wrap::emit_wrapped_container;
 
 // NOTE: compile_group → compile_node → compile_group recursion has no depth
 // guard.  Pathologically deep group trees can overflow the stack.  This is a
@@ -87,17 +91,33 @@ pub(in crate::compile) fn compile_group(
         });
     }
 
-    // BLUR bracket (inside blend, around all children). The entire group ink
-    // (all children composited) is blurred as a unit.
+    // Attached visual effect (inside blend, around all children). The entire
+    // group ink (all children composited) is affected as one unit. Precedence
+    // matches leaf nodes: blur > shadow > filter.
     let blur_sigma = group
         .blur
         .as_ref()
         .and_then(|d| dim_to_px(d.value, &d.unit))
         .filter(|&s| s > 0.0);
-    let has_blur = blur_sigma.is_some();
-    if let Some(sigma) = blur_sigma {
-        commands.push(SceneCommand::BeginBlur { radius: sigma });
-    }
+    let effect: Option<NodeEffect> = if let Some(sigma) = blur_sigma {
+        Some(NodeEffect::Blur(sigma))
+    } else if let Some(shadows) = group
+        .shadow
+        .as_ref()
+        .and_then(|p| resolve_property_shadow(p, cx.resolved, &group.id))
+    {
+        Some(NodeEffect::Shadow(shadows))
+    } else {
+        group
+            .filter
+            .as_ref()
+            .and_then(|p| resolve_property_filter(p, cx.resolved, &group.id))
+            .map(NodeEffect::Filter)
+    };
+    let mask = group
+        .mask
+        .as_ref()
+        .and_then(|p| resolve_group_mask(group, p, child_dx, child_dy, cx));
 
     // Emit children in source order; the group itself produces no command.
     let child_ctx = RenderCtx {
@@ -107,19 +127,38 @@ pub(in crate::compile) fn compile_group(
         // Page baseline grid cascades unchanged so all text shares one grid.
         baseline_grid: ctx.baseline_grid,
     };
-    for child in &group.children {
-        compile_node(
-            child,
-            cx,
+    if effect.is_none() && mask.is_none() {
+        for child in &group.children {
+            compile_node(
+                child,
+                cx,
+                commands,
+                diagnostics,
+                connector_strokes,
+                child_ctx,
+            );
+        }
+    } else {
+        let mut draws = Vec::new();
+        let mut local_connector_strokes = Vec::new();
+        for child in &group.children {
+            compile_node(
+                child,
+                cx,
+                &mut draws,
+                diagnostics,
+                &mut local_connector_strokes,
+                child_ctx,
+            );
+        }
+        emit_wrapped_container(
             commands,
-            diagnostics,
+            draws,
+            effect,
+            mask,
             connector_strokes,
-            child_ctx,
+            local_connector_strokes,
         );
-    }
-
-    if has_blur {
-        commands.push(SceneCommand::EndBlur);
     }
 
     if blend.is_some() {
@@ -129,6 +168,18 @@ pub(in crate::compile) fn compile_group(
     if group_rot.is_some() && rot_center.is_some() {
         commands.push(SceneCommand::PopTransform);
     }
+}
+
+fn resolve_group_mask(
+    group: &GroupNode,
+    prop: &zenith_core::PropertyValue,
+    group_x: f64,
+    group_y: f64,
+    cx: NodeCtx,
+) -> Option<crate::ir::MaskSpec> {
+    let w = resolve_geometry_px(group.w.as_ref(), cx.resolved)?;
+    let h = resolve_geometry_px(group.h.as_ref(), cx.resolved)?;
+    resolve_property_mask(prop, cx.resolved, (group_x, group_y, w, h))
 }
 
 /// Compute the axis-aligned bounding box of a `Point` list in authored coords.

@@ -1384,6 +1384,22 @@ mod tests {
         assert_eq!(attribute_type("mask"), "token ref: mask");
     }
 
+    #[test]
+    fn container_effect_attributes_are_discoverable() {
+        for kind in &["group", "frame"] {
+            let attrs = node_attributes(kind);
+            for attr in &["shadow", "filter", "mask", "blur", "blend-mode"] {
+                assert!(
+                    attrs.contains(attr),
+                    "{kind} schema must include {attr}; attrs: {attrs:?}"
+                );
+            }
+            assert_eq!(attribute_type_for_kind(kind, "shadow"), "token ref: shadow");
+            assert_eq!(attribute_type_for_kind(kind, "filter"), "token ref: filter");
+            assert_eq!(attribute_type_for_kind(kind, "mask"), "token ref: mask");
+        }
+    }
+
     /// `background` (page surface) reports color/gradient — driver.rs:639 uses
     /// VisualExpect::ColorOrGradient.
     #[test]

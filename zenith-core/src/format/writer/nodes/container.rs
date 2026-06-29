@@ -17,7 +17,8 @@ pub(super) fn write_frame(f: &FrameNode, out: &mut String, depth: usize) {
     out.push_str("frame");
 
     // Canonical property order: id, name, role, anchor, anchor-zone, x, y, w, h, layout, columns,
-    // rows, opacity, visible, locked, rotate, style, then unknown props (sorted).
+    // rows, opacity, visible, locked, rotate, blend-mode, shadow, filter, mask,
+    // blur, style, then unknown props (sorted).
     out.push_str(" id=\"");
     out.push_str(&f.id);
     out.push('"');
@@ -45,6 +46,9 @@ pub(super) fn write_frame(f: &FrameNode, out: &mut String, depth: usize) {
     write_opt_bool(out, "locked", &f.locked);
     write_opt_dimension(out, "rotate", &f.rotate);
     write_opt_str(out, "blend-mode", &f.blend_mode);
+    write_opt_property_value(out, "shadow", &f.shadow);
+    write_opt_property_value(out, "filter", &f.filter);
+    write_opt_property_value(out, "mask", &f.mask);
     write_opt_dimension(out, "blur", &f.blur);
     write_opt_str(out, "style", &f.style);
 
@@ -67,8 +71,8 @@ pub(super) fn write_group(g: &GroupNode, out: &mut String, depth: usize) {
     out.push_str("group");
 
     // Canonical property order: id, name, role, anchor, anchor-zone, x, y, w, h, opacity,
-    // visible, locked, rotate, blend-mode, blur, style, semantic-role, intensity,
-    // layer-priority, then unknown props (sorted).
+    // visible, locked, rotate, blend-mode, shadow, filter, mask, blur, style,
+    // semantic-role, intensity, layer-priority, then unknown props (sorted).
     out.push_str(" id=\"");
     out.push_str(&g.id);
     out.push('"');
@@ -89,6 +93,9 @@ pub(super) fn write_group(g: &GroupNode, out: &mut String, depth: usize) {
     write_opt_bool(out, "locked", &g.locked);
     write_opt_dimension(out, "rotate", &g.rotate);
     write_opt_str(out, "blend-mode", &g.blend_mode);
+    write_opt_property_value(out, "shadow", &g.shadow);
+    write_opt_property_value(out, "filter", &g.filter);
+    write_opt_property_value(out, "mask", &g.mask);
     write_opt_dimension(out, "blur", &g.blur);
     write_opt_str(out, "style", &g.style);
     write_opt_str(out, "semantic-role", &g.semantic_role);

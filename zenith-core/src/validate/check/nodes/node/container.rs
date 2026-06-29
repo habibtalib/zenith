@@ -11,8 +11,8 @@ use crate::ast::node::{FrameNode, GroupNode, TableNode};
 use crate::diagnostics::Diagnostic;
 
 use super::shared::{
-    AnchorParentCtx, AnchorProps, TokenEnv, check_anchor, check_optional_dim, check_style_ref,
-    is_valid_blend_mode,
+    AnchorParentCtx, AnchorProps, TokenEnv, VisualProps, check_anchor, check_optional_dim,
+    check_style_ref, check_visual_props,
 };
 use super::suggest::check_unknown_props;
 use crate::validate::check::nodes::WalkCtx;
@@ -35,19 +35,6 @@ pub(in crate::validate::check) fn check_frame(
         ..
     } = ctx;
     register_id(&f.id, seen_ids, diagnostics);
-    if let Some(bm) = f.blend_mode.as_deref()
-        && !is_valid_blend_mode(bm)
-    {
-        diagnostics.push(Diagnostic::warning(
-            "node.unknown_property",
-            format!(
-                "frame '{}': blend-mode '{bm}' is not a recognized value",
-                f.id
-            ),
-            f.source_span,
-            Some(f.id.clone()),
-        ));
-    }
     check_style_ref(
         &f.id,
         f.style.as_deref(),
@@ -118,16 +105,39 @@ pub(in crate::validate::check) fn check_frame(
         );
     }
 
-    if let Some(d) = f.blur.as_ref()
-        && d.value < 0.0
-    {
-        diagnostics.push(Diagnostic::error(
-            "node.invalid_geometry",
-            format!("frame '{}': blur must be >= 0", f.id),
-            f.source_span,
-            Some(f.id.clone()),
-        ));
-    }
+    check_visual_props(
+        "frame",
+        &f.id,
+        f.source_span,
+        VisualProps {
+            fill: None,
+            stroke: None,
+            stroke_width: None,
+            stroke_dash: None,
+            stroke_gap: None,
+            stroke_linecap: None,
+            border_top: None,
+            border_bottom: None,
+            border_left: None,
+            border_right: None,
+            stroke_outer: None,
+            border_width: None,
+            stroke_outer_width: None,
+            blend_mode: f.blend_mode.as_deref(),
+            radius: None,
+            radius_tl: None,
+            radius_tr: None,
+            radius_br: None,
+            radius_bl: None,
+            shadow: f.shadow.as_ref(),
+            filter: f.filter.as_ref(),
+            mask: f.mask.as_ref(),
+            blur: f.blur.as_ref(),
+        },
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
 
     // Grid layout advisory: `layout="grid"` without a positive `columns`
     // defaults the scene to a single column. Non-fatal.
@@ -163,19 +173,6 @@ pub(in crate::validate::check) fn check_group(
         ..
     } = ctx;
     register_id(&g.id, seen_ids, diagnostics);
-    if let Some(bm) = g.blend_mode.as_deref()
-        && !is_valid_blend_mode(bm)
-    {
-        diagnostics.push(Diagnostic::warning(
-            "node.unknown_property",
-            format!(
-                "group '{}': blend-mode '{bm}' is not a recognized value",
-                g.id
-            ),
-            g.source_span,
-            Some(g.id.clone()),
-        ));
-    }
     check_style_ref(
         &g.id,
         g.style.as_deref(),
@@ -228,16 +225,39 @@ pub(in crate::validate::check) fn check_group(
         }
     }
 
-    if let Some(d) = g.blur.as_ref()
-        && d.value < 0.0
-    {
-        diagnostics.push(Diagnostic::error(
-            "node.invalid_geometry",
-            format!("group '{}': blur must be >= 0", g.id),
-            g.source_span,
-            Some(g.id.clone()),
-        ));
-    }
+    check_visual_props(
+        "group",
+        &g.id,
+        g.source_span,
+        VisualProps {
+            fill: None,
+            stroke: None,
+            stroke_width: None,
+            stroke_dash: None,
+            stroke_gap: None,
+            stroke_linecap: None,
+            border_top: None,
+            border_bottom: None,
+            border_left: None,
+            border_right: None,
+            stroke_outer: None,
+            border_width: None,
+            stroke_outer_width: None,
+            blend_mode: g.blend_mode.as_deref(),
+            radius: None,
+            radius_tl: None,
+            radius_tr: None,
+            radius_br: None,
+            radius_bl: None,
+            shadow: g.shadow.as_ref(),
+            filter: g.filter.as_ref(),
+            mask: g.mask.as_ref(),
+            blur: g.blur.as_ref(),
+        },
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
 
     if let Some(v) = g.intensity
         && !(0.0..=1.0).contains(&v)

@@ -58,6 +58,12 @@ pub struct FrameNode {
     /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
     /// blends. `None`/`"normal"` render source-over (byte-identical).
     pub blend_mode: Option<String>,
+    /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
+    pub shadow: Option<PropertyValue>,
+    /// Color/image filter stack, as a `(token)` ref to a `filter` token.
+    pub filter: Option<PropertyValue>,
+    /// Soft reveal mask, as a `(token)` ref to a `mask` token.
+    pub mask: Option<PropertyValue>,
     /// Gaussian blur radius applied to the node's own rendered ink (sigma in
     /// the declared unit, resolved to pixels at compile time). `None` / 0 →
     /// no blur (byte-identical to having no attribute).
@@ -139,6 +145,12 @@ pub struct GroupNode {
     /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
     /// blends. `None`/`"normal"` render source-over (byte-identical).
     pub blend_mode: Option<String>,
+    /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
+    pub shadow: Option<PropertyValue>,
+    /// Color/image filter stack, as a `(token)` ref to a `filter` token.
+    pub filter: Option<PropertyValue>,
+    /// Soft reveal mask, as a `(token)` ref to a `mask` token.
+    pub mask: Option<PropertyValue>,
     /// Gaussian blur radius applied to the node's own rendered ink (sigma in
     /// the declared unit, resolved to pixels at compile time). `None` / 0 →
     /// no blur (byte-identical to having no attribute).

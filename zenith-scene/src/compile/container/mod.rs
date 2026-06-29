@@ -11,6 +11,7 @@ mod flow;
 mod frame;
 mod group;
 mod instance;
+mod wrap;
 
 // Entry points consumed by the parent `compile` module (`compile::mod`). The
 // external `use container::{...}` paths resolve through these re-exports.

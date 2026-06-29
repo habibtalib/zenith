@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 mod common;
 
 use common::*;
+use zenith_core::format::format_document;
 
 // ── Group helpers ─────────────────────────────────────────────────────
 
@@ -26,6 +27,9 @@ fn minimal_group(id: &str, children: Vec<Node>) -> Node {
         locked: None,
         rotate: None,
         blend_mode: None,
+        shadow: None,
+        filter: None,
+        mask: None,
         blur: None,
         style: None,
         semantic_role: None,
@@ -66,6 +70,96 @@ fn group_with_children_no_errors() {
         codes(&report)
     );
     assert!(!report.has_errors());
+}
+
+#[test]
+fn group_shadow_parses_formats_and_validates() {
+    let src = r##"zenith version=1 {
+  project id="proj.group.shadow" name="Group Shadow"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#445566"
+    token id="color.shadow" type="color" value="#00000088"
+    token id="shadow.card" type="shadow" {
+      layer dx=(px)2 dy=(px)4 blur=(px)8 color=(token)"color.shadow"
+    }
+  }
+  styles {}
+  document id="doc.group.shadow" title="Group Shadow" {
+    page id="page.one" w=(px)200 h=(px)160 {
+      group id="card" x=(px)10 y=(px)20 w=(px)100 h=(px)80 shadow=(token)"shadow.card" {
+        rect id="card.bg" x=(px)0 y=(px)0 w=(px)100 h=(px)80 fill=(token)"color.fill"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+    let report = validate(&doc);
+    assert!(
+        report.diagnostics.is_empty(),
+        "expected clean group shadow doc, got: {:?}",
+        codes(&report)
+    );
+
+    let formatted = format_document(&doc).expect("format");
+    let formatted = String::from_utf8(formatted).expect("utf8");
+    assert!(
+        formatted.contains(
+            r#"group id="card" x=(px)10 y=(px)20 w=(px)100 h=(px)80 shadow=(token)"shadow.card""#
+        ),
+        "formatted group must keep attached shadow: {formatted}"
+    );
+}
+
+#[test]
+fn group_shadow_requires_shadow_token() {
+    let src = r##"zenith version=1 {
+  project id="proj.group.bad" name="Group Bad"
+  tokens format="zenith-token-v1" {
+    token id="color.shadow" type="color" value="#000000"
+  }
+  styles {}
+  document id="doc.group.bad" title="Group Bad" {
+    page id="page.one" w=(px)200 h=(px)160 {
+      group id="card" shadow=(token)"color.shadow" {}
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "token.incompatible_property"),
+        "codes: {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
+}
+
+#[test]
+fn frame_shadow_rejects_raw_literal() {
+    let src = r##"zenith version=1 {
+  project id="proj.frame.bad" name="Frame Bad"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.frame.bad" title="Frame Bad" {
+    page id="page.one" w=(px)200 h=(px)160 {
+      frame id="panel" x=(px)10 y=(px)20 w=(px)100 h=(px)80 shadow="bad" {}
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "token.raw_visual_literal"),
+        "codes: {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
 }
 
 // ── Group: nested id duplicate with page sibling → id.duplicate ──────
@@ -191,6 +285,9 @@ fn group_unknown_property_warns() {
                 locked: None,
                 rotate: None,
                 blend_mode: None,
+                shadow: None,
+                filter: None,
+                mask: None,
                 blur: None,
                 style: None,
                 semantic_role: None,
@@ -244,6 +341,9 @@ fn minimal_frame(id: &str, x: f64, y: f64, w: f64, h: f64, children: Vec<Node>) 
         locked: None,
         rotate: None,
         blend_mode: None,
+        shadow: None,
+        filter: None,
+        mask: None,
         blur: None,
         style: None,
         anchor: None,
@@ -357,6 +457,9 @@ fn frame_missing_x_produces_node_missing_geometry() {
                 locked: None,
                 rotate: None,
                 blend_mode: None,
+                shadow: None,
+                filter: None,
+                mask: None,
                 blur: None,
                 style: None,
                 anchor: None,
@@ -404,6 +507,9 @@ fn frame_missing_h_produces_node_missing_geometry() {
                 locked: None,
                 rotate: None,
                 blend_mode: None,
+                shadow: None,
+                filter: None,
+                mask: None,
                 blur: None,
                 style: None,
                 anchor: None,
@@ -628,6 +734,9 @@ fn flow_frame_child_without_geometry_is_skipped() {
         locked: None,
         rotate: None,
         blend_mode: None,
+        shadow: None,
+        filter: None,
+        mask: None,
         blur: None,
         style: None,
         anchor: None,
@@ -714,6 +823,9 @@ fn frame_unknown_property_warns() {
                 locked: None,
                 rotate: None,
                 blend_mode: None,
+                shadow: None,
+                filter: None,
+                mask: None,
                 blur: None,
                 style: None,
                 anchor: None,
